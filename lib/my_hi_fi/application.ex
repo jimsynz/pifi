@@ -9,7 +9,13 @@ defmodule MyHiFi.Application do
   def start(_type, _args) do
     children =
       [
+        MyHiFi.Repo,
         MyHiFiWeb.Telemetry,
+        {Oban,
+         AshOban.config(
+           Application.fetch_env!(:my_hi_fi, :ash_domains),
+           Application.fetch_env!(:my_hi_fi, Oban)
+         )},
         {Phoenix.PubSub, [name: MyHiFi.PubSub]},
         MyHiFiWeb.Endpoint
       ] ++ target_children()

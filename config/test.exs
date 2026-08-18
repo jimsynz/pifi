@@ -1,5 +1,13 @@
 import Config
 
+config :my_hi_fi, Oban, testing: :manual
+
+config :my_hi_fi, MyHiFi.Repo,
+  database: Path.join(__DIR__, "../path/to/your#{System.get_env("MIX_TEST_PARTITION")}.db"),
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: 10
+
+config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 config :phoenix, plug_init_mode: :runtime
 config :logger, level: :warning
 

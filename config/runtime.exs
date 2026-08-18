@@ -21,4 +21,6 @@ if config_env() == :prod do
     url: [host: host, port: 443, scheme: "https"],
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}],
     secret_key_base: secret_key_base
+
+  config :my_hi_fi, MyHiFi.Repo, pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
 end

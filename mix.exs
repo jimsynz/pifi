@@ -19,15 +19,18 @@ defmodule MyHiFi.MixProject do
 
   def project do
     [
+      aliases: aliases(),
       app: @app,
-      version: @version,
-      elixir: "~> 1.20",
       archives: [nerves_bootstrap: "~> 1.17"],
-      listeners: listeners(Mix.target(), Mix.env()),
-      start_permanent: Mix.env() == :prod,
+      consolidate_protocols: Mix.env() != :dev,
       deps: deps(),
+      elixir: "~> 1.20",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      listeners: listeners(Mix.target(), Mix.env()),
       releases: [{@app, release()}],
-      aliases: aliases()
+      start_permanent: Mix.env() == :prod,
+      version: @version,
+      usage_rules: usage_rules()
     ]
   end
 
@@ -46,10 +49,26 @@ defmodule MyHiFi.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:sourceror, "~> 1.8", only: [:dev, :test]},
+      {:oban, "~> 2.0"},
+      {:usage_rules, "~> 1.0", only: [:dev]},
+      {:ash_state_machine, "~> 0.2"},
+      {:oban_web, "~> 2.0"},
+      {:ash_oban, "~> 0.8"},
+      {:ash_sqlite, "~> 0.2"},
+      {:ash, "~> 3.0"},
       # Dependencies for all targets
       {:bandit, "~> 1.5"},
       {:gettext, "~> 0.26"},
-      {:heroicons, [github: "tailwindlabs/heroicons", tag: "v2.2.0", sparse: "optimized", app: false, compile: false, depth: 1]},
+      {:heroicons,
+       [
+         github: "tailwindlabs/heroicons",
+         tag: "v2.2.0",
+         sparse: "optimized",
+         app: false,
+         compile: false,
+         depth: 1
+       ]},
       {:nerves, "~> 1.13", runtime: false},
       {:phoenix, "~> 1.7"},
       {:phoenix_html, "~> 4.1"},
@@ -113,7 +132,34 @@ defmodule MyHiFi.MixProject do
       "assets.setup": ["esbuild.install --if-missing", "tailwind.install --if-missing"],
       "assets.build": ["compile", "esbuild my_hi_fi", "tailwind my_hi_fi"],
       "assets.deploy": ["esbuild my_hi_fi --minify", "tailwind my_hi_fi --minify", "phx.digest"],
-      setup: ["deps.get", "assets.setup", "assets.build"]
+      setup: ["deps.get", "assets.setup", "assets.build"],
+      test: ["ash.setup --quiet", "test"]
+    ]
+  end
+
+  defp elixirc_paths(:test),
+    do: elixirc_paths(:dev) ++ ["test/support"]
+
+  defp elixirc_paths(_),
+    do: ["lib"]
+
+  defp usage_rules do
+    [
+      file: "AGENTS.md",
+      usage_rules: ["usage_rules:all"],
+      skills: [
+        location: ".agents/skills",
+        builds: [
+          "ash-framework": [
+            description: "Use this skill for working with the Ash Framework or any of its extensions. Always consult this when making any domain changes, features or fixes.",
+            usage_rules: [:ash, ~r/^ash_/, :reactor, ~r/^reactor_/]
+          ],
+          "phoenix-framework": [
+            description: "Use this skill working with Phoenix Framework. Consult this when working with the web layer, controllers, views, liveviews etc.",
+            usage_rules: [:phoenix, ~r/^phoenix_/]
+          ]
+        ]
+      ]
     ]
   end
 end

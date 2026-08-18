@@ -1,5 +1,11 @@
 import Config
 
+config :my_hi_fi, MyHiFi.Repo,
+  database: "../path/to/your.db",
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10
+
+config :ash, policies: [show_policy_breakdowns?: true]
 config :phoenix, stacktrace_depth: 20, plug_init_mode: :runtime
 config :logger, default_formatter: [format: "[$level] $message
 "]

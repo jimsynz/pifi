@@ -5,5 +5,15 @@
     "{config,lib,test}/**/*.{ex,exs}",
     "rootfs_overlay/etc/iex.exs"
   ],
-  import_deps: [:gettext, :phoenix]
+  import_deps: [
+    :ash_state_machine,
+    :ash_oban,
+    :oban,
+    :ash_sqlite,
+    :ash,
+    :reactor,
+    :gettext,
+    :phoenix
+  ],
+  plugins: [Spark.Formatter]
 ]
