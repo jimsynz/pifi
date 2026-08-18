@@ -3,7 +3,19 @@ defmodule MyHiFi.MixProject do
 
   @app :my_hi_fi
   @version "0.1.0"
-  @all_targets [:bbb, :mangopi_mq_pro, :qemu_aarch64, :rpi, :rpi0, :rpi0_2, :rpi2, :rpi3, :rpi4, :rpi5, :x86_64]
+  @all_targets [
+    :bbb,
+    :mangopi_mq_pro,
+    :qemu_aarch64,
+    :rpi,
+    :rpi0,
+    :rpi0_2,
+    :rpi2,
+    :rpi3,
+    :rpi4,
+    :rpi5,
+    :x86_64
+  ]
 
   def project do
     [
@@ -14,7 +26,8 @@ defmodule MyHiFi.MixProject do
       listeners: listeners(Mix.target(), Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      releases: [{@app, release()}]
+      releases: [{@app, release()}],
+      aliases: aliases()
     ]
   end
 
@@ -34,10 +47,18 @@ defmodule MyHiFi.MixProject do
   defp deps do
     [
       # Dependencies for all targets
+      {:bandit, "~> 1.5"},
+      {:gettext, "~> 0.26"},
+      {:heroicons, [github: "tailwindlabs/heroicons", tag: "v2.2.0", sparse: "optimized", app: false, compile: false, depth: 1]},
       {:nerves, "~> 1.13", runtime: false},
-
-      {:shoehorn, "~> 0.9.1"},
+      {:phoenix, "~> 1.7"},
+      {:phoenix_html, "~> 4.1"},
+      {:phoenix_live_dashboard, "~> 0.8"},
+      {:phoenix_live_view, "~> 1.0"},
       {:ring_logger, "~> 0.11.0"},
+      {:shoehorn, "~> 0.9.1"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_poller, "~> 1.0"},
       {:toolshed, "~> 0.5.0"},
 
       # Allow Nerves.Runtime on host to support development, testing and CI.
@@ -62,7 +83,12 @@ defmodule MyHiFi.MixProject do
       {:nerves_system_rpi3, "~> 2.0", runtime: false, targets: :rpi3},
       {:nerves_system_rpi4, "~> 2.0", runtime: false, targets: :rpi4},
       {:nerves_system_rpi5, "~> 2.0", runtime: false, targets: :rpi5},
-      {:nerves_system_x86_64, "~> 1.24", runtime: false, targets: :x86_64}
+      {:nerves_system_x86_64, "~> 1.24", runtime: false, targets: :x86_64},
+
+      # Dev/test deps.
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev, target: :host},
+      {:phx_install, "~> 0.1", only: [:dev], target: :host},
+      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev, target: :host}
     ]
   end
 
@@ -81,4 +107,13 @@ defmodule MyHiFi.MixProject do
   # Uncomment the following line if using Phoenix > 1.8.
   # defp listeners(:host, :dev), do: [Phoenix.CodeReloader]
   defp listeners(_, _), do: []
+
+  defp aliases() do
+    [
+      "assets.setup": ["esbuild.install --if-missing", "tailwind.install --if-missing"],
+      "assets.build": ["compile", "esbuild my_hi_fi", "tailwind my_hi_fi"],
+      "assets.deploy": ["esbuild my_hi_fi --minify", "tailwind my_hi_fi --minify", "phx.digest"],
+      setup: ["deps.get", "assets.setup", "assets.build"]
+    ]
+  end
 end

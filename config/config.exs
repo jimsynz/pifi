@@ -5,6 +5,41 @@
 # this project.
 import Config
 
+config :tailwind,
+  version: "4.1.12",
+  my_hi_fi: [
+    args: ~w(
+    --input=assets/css/app.css
+    --output=priv/static/assets/css/app.css
+  ),
+    cd: Path.expand("..", __DIR__)
+  ]
+
+config :esbuild,
+  version: "0.25.4",
+  my_hi_fi: [
+    args:
+      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/*),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
+
+config :phoenix, json_library: Jason
+
+config :logger,
+  default_formatter: [format: "$time $metadata[$level] $message\n", metadata: [:request_id]]
+
+config :my_hi_fi,
+       MyHiFiWeb.Endpoint,
+       url: [host: "localhost"],
+       adapter: Bandit.PhoenixAdapter,
+       render_errors: [
+         formats: [json: MyHiFiWeb.ErrorJSON],
+         layout: false
+       ],
+       pubsub_server: MyHiFi.PubSub,
+       live_view: [signing_salt: "EhXdl2qH"]
+
 # Enable the Nerves integration with Mix
 Application.start(:nerves_bootstrap)
 
@@ -23,3 +58,5 @@ if Mix.target() == :host do
 else
   import_config "target.exs"
 end
+
+import_config "#{config_env()}.exs"

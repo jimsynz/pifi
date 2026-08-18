@@ -9,9 +9,9 @@ defmodule MyHiFi.Application do
   def start(_type, _args) do
     children =
       [
-        # Children for all targets
-        # Starts a worker by calling: MyHiFi.Worker.start_link(arg)
-        # {MyHiFi.Worker, arg},
+        MyHiFiWeb.Telemetry,
+        {Phoenix.PubSub, [name: MyHiFi.PubSub]},
+        MyHiFiWeb.Endpoint
       ] ++ target_children()
 
     # See https://elixir.hexdocs.pm/Supervisor.html
