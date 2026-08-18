@@ -14,6 +14,7 @@ defmodule MyHiFi.MixProject do
     :rpi3,
     :rpi4,
     :rpi5,
+    :trellis,
     :x86_64
   ]
 
@@ -79,19 +80,10 @@ defmodule MyHiFi.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:toolshed, "~> 0.5.0"},
       {:usage_rules, "~> 1.0", only: [:dev]},
-
-      # Allow Nerves.Runtime on host to support development, testing and CI.
-      # See config/host.exs for usage.
       {:nerves_runtime, "~> 0.13.12"},
-
-      # Dependencies for all targets except :host
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
 
-      # Dependencies for specific targets
-      # NOTE: It's generally low risk and recommended to follow minor version
-      # bumps to Nerves systems. Since these include Linux kernel and Erlang
-      # version updates, please review their release notes in case
-      # changes to your application are needed.
+      # Targets
       {:nerves_system_bbb, "~> 2.19", runtime: false, targets: :bbb},
       {:nerves_system_mangopi_mq_pro, "~> 0.6", runtime: false, targets: :mangopi_mq_pro},
       {:nerves_system_qemu_aarch64, "~> 0.1", runtime: false, targets: :qemu_aarch64},
@@ -102,6 +94,7 @@ defmodule MyHiFi.MixProject do
       {:nerves_system_rpi3, "~> 2.0", runtime: false, targets: :rpi3},
       {:nerves_system_rpi4, "~> 2.0", runtime: false, targets: :rpi4},
       {:nerves_system_rpi5, "~> 2.0", runtime: false, targets: :rpi5},
+      {:nerves_system_trellis, "~> 0.4", runtime: false, targets: :trellis},
       {:nerves_system_x86_64, "~> 1.24", runtime: false, targets: :x86_64},
 
       # Dev/test deps.
@@ -151,7 +144,7 @@ defmodule MyHiFi.MixProject do
   defp usage_rules do
     [
       file: "AGENTS.md",
-      usage_rules: ["usage_rules:all", :ex_check_ng],
+      usage_rules: [{:usage_rules, link: :markdown}],
       skills: [
         location: ".agents/skills",
         builds: [
@@ -164,6 +157,10 @@ defmodule MyHiFi.MixProject do
             description:
               "Use this skill working with Phoenix Framework. Consult this when working with the web layer, controllers, views, liveviews etc.",
             usage_rules: [:phoenix, ~r/^phoenix_/]
+          ],
+          "ex-check": [
+            description: "Use this skill for working with `mix check`",
+            usage_rules: [:ex_check_ng]
           ]
         ]
       ]
