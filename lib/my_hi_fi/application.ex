@@ -28,7 +28,7 @@ defmodule MyHiFi.Application do
 
   # List all child processes to be supervised
   if Mix.target() == :host do
-    defp target_children() do
+    defp target_children do
       [
         # Children that only run on the host during development or test.
         # In general, prefer using `config/host.exs` for differences.
@@ -38,7 +38,7 @@ defmodule MyHiFi.Application do
       ]
     end
   else
-    defp target_children() do
+    defp target_children do
       [
         # Children for all targets except host
         # Starts a worker by calling: Target.Worker.start_link(arg)

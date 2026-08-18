@@ -1,7 +1,7 @@
 import Config
 
 config :my_hi_fi, MyHiFi.Repo,
-  database: "../path/to/your.db",
+  database: Path.join(__DIR__, "../dev.db"),
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 

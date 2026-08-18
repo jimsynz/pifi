@@ -49,17 +49,13 @@ defmodule MyHiFi.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:sourceror, "~> 1.8", only: [:dev, :test]},
-      {:oban, "~> 2.0"},
-      {:usage_rules, "~> 1.0", only: [:dev]},
-      {:ash_state_machine, "~> 0.2"},
-      {:oban_web, "~> 2.0"},
+      # Dependencies for all targets
+      {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.8"},
       {:ash_sqlite, "~> 0.2"},
-      {:ash, "~> 3.0"},
-      # Dependencies for all targets
+      {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
-      {:gettext, "~> 0.26"},
+      {:gettext, "~> 1.0"},
       {:heroicons,
        [
          github: "tailwindlabs/heroicons",
@@ -70,15 +66,19 @@ defmodule MyHiFi.MixProject do
          depth: 1
        ]},
       {:nerves, "~> 1.13", runtime: false},
+      {:oban, "~> 2.0"},
+      {:oban_web, "~> 2.0"},
       {:phoenix, "~> 1.7"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_dashboard, "~> 0.8"},
       {:phoenix_live_view, "~> 1.0"},
       {:ring_logger, "~> 0.11.0"},
       {:shoehorn, "~> 0.9.1"},
+      {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:toolshed, "~> 0.5.0"},
+      {:usage_rules, "~> 1.0", only: [:dev]},
 
       # Allow Nerves.Runtime on host to support development, testing and CI.
       # See config/host.exs for usage.
@@ -105,8 +105,12 @@ defmodule MyHiFi.MixProject do
       {:nerves_system_x86_64, "~> 1.24", runtime: false, targets: :x86_64},
 
       # Dev/test deps.
+      {:credo, "~> 1.7", runtime: false, only: [:dev, :test], target: :host},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev, target: :host},
+      {:ex_check_ng, "~> 1.0.0-rc.2", only: [:dev, :test], target: :host},
+      {:ex_doc, "~> 0.40", only: [:dev, :test], target: :host},
       {:phx_install, "~> 0.1", only: [:dev], target: :host},
+      {:sobelow, "~> 0.15", only: [:dev, :test], target: :host},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev, target: :host}
     ]
   end
@@ -133,7 +137,8 @@ defmodule MyHiFi.MixProject do
       "assets.build": ["compile", "esbuild my_hi_fi", "tailwind my_hi_fi"],
       "assets.deploy": ["esbuild my_hi_fi --minify", "tailwind my_hi_fi --minify", "phx.digest"],
       setup: ["deps.get", "assets.setup", "assets.build"],
-      test: ["ash.setup --quiet", "test"]
+      test: ["ash.setup --quiet", "test"],
+      credo: ["credo --strict"]
     ]
   end
 
@@ -146,16 +151,18 @@ defmodule MyHiFi.MixProject do
   defp usage_rules do
     [
       file: "AGENTS.md",
-      usage_rules: ["usage_rules:all"],
+      usage_rules: ["usage_rules:all", :ex_check_ng],
       skills: [
         location: ".agents/skills",
         builds: [
           "ash-framework": [
-            description: "Use this skill for working with the Ash Framework or any of its extensions. Always consult this when making any domain changes, features or fixes.",
+            description:
+              "Use this skill for working with the Ash Framework or any of its extensions. Always consult this when making any domain changes, features or fixes.",
             usage_rules: [:ash, ~r/^ash_/, :reactor, ~r/^reactor_/]
           ],
           "phoenix-framework": [
-            description: "Use this skill working with Phoenix Framework. Consult this when working with the web layer, controllers, views, liveviews etc.",
+            description:
+              "Use this skill working with Phoenix Framework. Consult this when working with the web layer, controllers, views, liveviews etc.",
             usage_rules: [:phoenix, ~r/^phoenix_/]
           ]
         ]

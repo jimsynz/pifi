@@ -8,6 +8,9 @@ defmodule MyHiFiWeb.CoreComponents do
 
   use Phoenix.Component
 
+  alias Phoenix.HTML.Form
+  alias Phoenix.LiveView.JS
+
   @doc """
   Renders flash notices.
 
@@ -182,7 +185,7 @@ defmodule MyHiFiWeb.CoreComponents do
   def input(%{type: "checkbox"} = assigns) do
     assigns =
       assign_new(assigns, :checked, fn ->
-        Phoenix.HTML.Form.normalize_value("checkbox", assigns[:value])
+        Form.normalize_value("checkbox", assigns[:value])
       end)
 
     ~H"""
@@ -210,7 +213,7 @@ defmodule MyHiFiWeb.CoreComponents do
       <label :if={@label}>{@label}</label>
       <select id={@id} name={@name} multiple={@multiple} {@rest}>
         <option :if={@prompt} value="">{@prompt}</option>
-        {Phoenix.HTML.Form.options_for_select(@options, @value)}
+        {Form.options_for_select(@options, @value)}
       </select>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
@@ -221,7 +224,7 @@ defmodule MyHiFiWeb.CoreComponents do
     ~H"""
     <div>
       <label :if={@label}>{@label}</label>
-      <textarea id={@id} name={@name} {@rest}>{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
+      <textarea id={@id} name={@name} {@rest}>{Form.normalize_value("textarea", @value)}</textarea>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
     """
@@ -241,7 +244,7 @@ defmodule MyHiFiWeb.CoreComponents do
         type={@type}
         name={@name}
         id={@id}
-        value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+        value={Form.normalize_value(@type, @value)}
         {@rest}
       />
       <.error :for={msg <- @errors}>{msg}</.error>
@@ -270,8 +273,6 @@ defmodule MyHiFiWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
-
-  alias Phoenix.LiveView.JS
 
   def show(
         js \\ %JS{},
