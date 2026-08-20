@@ -51,7 +51,7 @@ Version 1 excludes these items. Later versions add them.
 
 | Part | Choice | Note |
 |---|---|---|
-| Board | Raspberry Pi Zero 2 W | 4 cores, 512 MB of RAM |
+| Board | Raspberry Pi Zero 2 W | 4 cores. 512 MB of RAM, and Linux sees 301 MB of it. |
 | Nerves target | `rpi0_2` | Already in `mix.exs` |
 | Audio output | USB DAC on the USB data port | The port must run in host mode |
 | Screen | Adafruit PiTFT clone, 2.8 inch, SPI, resistive touch | Later version |
@@ -333,7 +333,7 @@ and it removes the metadata blocks from the stream.
 Version 1 plays HLS. `membrane_hls_plugin` v3.0.11 gives `Membrane.HLS.Source`
 and `Membrane.HLS.SourceBin`. They read a master playlist or a media playlist,
 and they follow the updates of a live playlist. The plugin holds no native code.
-It costs 10 more Elixir dependencies, and two of them handle H.264 and WebVTT.
+It adds 10 more Elixir dependencies, and two of them handle H.264 and WebVTT.
 This firmware does not use those two.
 
 HLS matters here. Radio Browser holds 242 New Zealand stations, and 46 of them
@@ -350,7 +350,7 @@ set: `TARGET_ARCH`, `TARGET_VENDOR`, `TARGET_OS`, and `TARGET_ABI`. Nerves sets
 `CROSSCOMPILE` and `REBAR_TARGET_ARCH`. It does not set those four variables.
 
 Each variable then defaults to `"unknown"`. The provider finds no match, and it
-returns `nil`. Bundlex then falls back to `pkg-config` against the Nerves
+returns `nil`. Bundlex then uses `pkg-config` instead, against the Nerves
 sysroot, which holds no libmad. The build fails.
 
 The firmware must set these values for `rpi0_2`:
@@ -510,14 +510,14 @@ VintageNetWizard does this work.
 
 | Item | Risk | Action |
 |---|---|---|
-| RAM | The board has 512 MB. Elixir, Membrane, LiveView, and the cache must fit. | Measure the memory use early. |
+| RAM | Linux sees 301 MB, and not 512 MB. A measurement on 2026-08-21 gave 176 MB free with the skeleton in operation, and the BEAM used 72 MB of the rest. Membrane, the decoders, the ring buffer, and the pages must fit in what is left. | Measure at each step. See #16. A 128 MB CMA reservation holds 91 MB that nothing uses. A change to `config.txt` gives that memory back, and such a change needs a custom Nerves system. |
 | Bundlex target | Nerves does not set the four `TARGET_*` variables. The precompiled libraries then do not download. | Set them in `mix.exs`. See section 6.4. |
 | Precompiled builds | Membrane may change or remove an `aarch64` build. | Pin the versions, as `membrane_mp3_mad_plugin` already does. |
 | USB host mode | The OTG port must run in host mode for the DAC. | Confirm the `rpi0_2` system configuration. |
 | ICY metadata | No Membrane element reads ICY titles. | Write a small element. Test it with real stations. |
 | Latency | The `aplay` port adds a buffer. | Measure the delay from a command to the sound. |
 | HLS weight | `membrane_hls_plugin` pulls in 10 dependencies, and this firmware uses few of them. | Accept it for now. It holds no native code. |
-| Buffer size | A large ring buffer costs RAM, and the board has 512 MB. | Buffer the compressed bytes, not the samples. Measure the memory use. |
+| Buffer size | A large ring buffer needs much RAM, and only about 176 MB is free. | Buffer the compressed bytes, and not the samples. Measure the memory use. |
 | Knob protocol | The I2C protocol and the detent commands need a design. | Design it with the RP2040 firmware, in a later version. Map it to the hint events. |
 | Event rate | A `Player.Progress` event each second, and a slow SPI display, may not agree. | Let a display drop events. Measure the PiTFT refresh time. |
 | PiTFT pins | The HAT uses SPI0 and some GPIO pins. | Confirm that the I2C pins stay free. |
@@ -558,3 +558,18 @@ I found these results on 2026-08-20. They support the decisions above.
 | Does Vivid draw a colour image? | No. `Vivid.Bitmap` holds one bit for each cell, and it serves the BDF fonts. |
 | How many New Zealand stations use HLS? | 46 of 242 (19%). All of the commercial networks use it. |
 | How large is the New Zealand station list? | 280 KB of JSON. |
+
+A dev firmware ran on the board on 2026-08-21. These measurements come from that
+device, with the skeleton in operation and no audio in play.
+
+| Measurement | Value |
+|---|---|
+| RAM that Linux sees | 301 MB of the 512 MB on the board |
+| CMA reservation | 128 MB, and 91 MB of it holds nothing |
+| Free memory | 176 MB |
+| BEAM memory | 72 MB |
+| Processes | 717 |
+| Schedulers | 4 |
+| Restart time to an SSH answer | about 12 seconds |
+| Firmware size | 54 MB |
+| Time to send new firmware with `mix upload` | 8.7 seconds |

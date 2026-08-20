@@ -9,7 +9,9 @@ Licence: Apache-2.0.
 ## What you must know
 
 - **Target board.** Raspberry Pi Zero 2 W, Nerves target `rpi0_2`. It has 4
-  cores, 512 MB of RAM, and one USB data port. Keep the memory use small.
+  cores and one USB data port. It holds 512 MB of RAM, and Linux sees 301 MB of
+  it, because CMA and the GPU reserve the rest. A measurement on 2026-08-21 gave
+  176 MB free with the skeleton in operation. Keep the memory use small.
 - **The USB port holds the DAC.** For this reason the knob uses I2C, not USB.
 - **The Nerves system holds no audio decoder.** It holds `alsa-lib`, `aplay`, and
   `amixer` only. `membrane_alsa_plugin` does not exist. The output sink sends raw
@@ -23,8 +25,8 @@ Licence: Apache-2.0.
 - **Nerves does not set the Bundlex target variables.** Bundlex needs
   `TARGET_ARCH`, `TARGET_VENDOR`, `TARGET_OS`, and `TARGET_ABI`. Nerves sets only
   `CROSSCOMPILE` and `REBAR_TARGET_ARCH`. Without the four variables the
-  precompiled download fails, and the build falls back to `pkg-config` and then
-  breaks. See section 6.4 of the specification.
+  precompiled download fails. The build then uses `pkg-config` instead, and it
+  stops with an error. See section 6.4 of the specification.
 - **HLS is in scope for version 1.** `membrane_hls_plugin` gives
   `Membrane.HLS.Source` and `Membrane.HLS.SourceBin`, and it holds no native
   code. 19% of New Zealand stations need HLS, and that includes every commercial
@@ -100,8 +102,8 @@ background work.
   of the behaviour is that the rest of the firmware never changes. A person must
   be able to add an SSD1306 screen, or a different DAC, or a new music service,
   without a change to the player or to the user interface.
-- Do not assume that a Hex package works on `rpi0_2`. Check the Nerves system
-  and check for native code first.
+- A Hex package does not always work on `rpi0_2`. Check the Nerves system, and
+  look for native code, before you add the package.
 - Keep the specification current. If a decision changes, change `docs/spec.md`
   in the same commit.
 
