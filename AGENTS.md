@@ -46,10 +46,12 @@ Licence: Apache-2.0.
   bit for each cell and serves the fonts. It is not an image.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
-  its IP address and on more than one mDNS name. `config/runtime.exs` generates a
-  `secret_key_base` and keeps it under `/root`. Do not restore `force_ssl`, and do
-  not make a boot depend on an environment variable: a device has nothing to set
-  one.
+  its IP address and on more than one mDNS name. `MyHiFi.Application` calls
+  `MyHiFi.SecretKeyBase.put/1` before it starts the endpoint, which reads a
+  secret from `/root` and writes one on the first boot. That runs for a target
+  build in any `MIX_ENV`, and never on the host. Do not restore `force_ssl`, and
+  do not make a boot depend on an environment variable: a device has nothing to
+  set one.
 - **The stream buffer stays in memory.** It is a ring buffer of compressed bytes,
   placed before the decoder. Never buffer the stream on the SD card, and never
   buffer raw samples.

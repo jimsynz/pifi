@@ -7,6 +7,8 @@ defmodule MyHiFi.Application do
 
   @impl true
   def start(_type, _args) do
+    put_secret_key_base()
+
     children =
       [
         MyHiFi.Repo,
@@ -28,6 +30,8 @@ defmodule MyHiFi.Application do
 
   # List all child processes to be supervised
   if Mix.target() == :host do
+    defp put_secret_key_base, do: :ok
+
     defp target_children do
       [
         # Children that only run on the host during development or test.
@@ -38,6 +42,8 @@ defmodule MyHiFi.Application do
       ]
     end
   else
+    defp put_secret_key_base, do: MyHiFi.SecretKeyBase.put()
+
     defp target_children do
       [
         # Children for all targets except host
