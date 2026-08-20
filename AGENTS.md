@@ -44,6 +44,12 @@ Licence: Apache-2.0.
   v1.0.0 it reads OpenType, TrueType, WOFF, and BDF fonts. It draws no colour
   raster yet, so cover art waits on upstream Vivid work. `Vivid.Bitmap` holds one
   bit for each cell and serves the fonts. It is not an image.
+- **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
+  port 80, `server: true`, and `check_origin: false`, because a device answers on
+  its IP address and on more than one mDNS name. `config/runtime.exs` generates a
+  `secret_key_base` and keeps it under `/root`. Do not restore `force_ssl`, and do
+  not make a boot depend on an environment variable: a device has nothing to set
+  one.
 - **The stream buffer stays in memory.** It is a ring buffer of compressed bytes,
   placed before the decoder. Never buffer the stream on the SD card, and never
   buffer raw samples.
@@ -70,7 +76,9 @@ Every message is a struct from `MyHiFi.Event`, on one of four topics: `:player`,
 calls another part directly. A peripheral declares its topics with
 `subscriptions/0`, so a knob does not wake once a second for a progress event.
 
-Ash with SQLite holds the data, on the `/data` partition. Oban does the
+Ash with SQLite holds the data, on the application data partition. That
+partition mounts at `/root` on a Nerves target, and it is the only writable
+storage. There is no `/data`. Oban does the
 background work.
 
 ## Rules for this project

@@ -26,7 +26,7 @@ the Nerves, Phoenix, and Ash skeleton, and the specification.
 | Audio pipeline | Membrane, with precompiled libmad and fdk-aac decoders |
 | Stream types | Shoutcast and HLS |
 | Extra binaries, if needed later | [NBPR](https://github.com/jimsynz/nbpr) |
-| Data | Ash with SQLite, on the `/data` partition |
+| Data | Ash with SQLite, on the application data partition at `/root` |
 | Background work | Oban |
 | Web interface | Phoenix LiveView |
 | Device screen | [Vivid](https://harton.dev/james/vivid) behind a `MyHiFi.Peripheral` behaviour, in a later version |

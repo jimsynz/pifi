@@ -95,6 +95,18 @@ config :mdns_lite,
     }
   ]
 
+# The application data partition mounts at /root on a Nerves target, and it is
+# the only writable storage. See the erlinit.config of the Nerves system.
+config :my_hi_fi, MyHiFi.Repo, database: "/root/my_hi_fi.db"
+
+config :my_hi_fi, MyHiFiWeb.Endpoint,
+  http: [ip: {0, 0, 0, 0}, port: 80],
+  server: true,
+  # A device answers on its IP address, on nerves.local, and on
+  # nerves-<serial>.local. An origin check against one configured host would
+  # therefore reject the LiveView socket.
+  check_origin: false
+
 # Import target specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 # Uncomment to use target specific configurations

@@ -57,7 +57,7 @@ Version 1 excludes these items. Later versions add them.
 | Screen | Adafruit PiTFT clone, 2.8 inch, SPI, resistive touch | Later version |
 | Knob | SimpleFOC motor, RP2040-Zero controller | Later version |
 | Knob link | I2C on the GPIO header | The PiTFT leaves the I2C pins free |
-| Storage | SD card, with a data partition at `/data` | Nerves gives this partition |
+| Storage | SD card, with an application data partition at `/root` | Nerves mounts it. There is no `/data` on this system. |
 
 The board has one USB data port. The USB DAC takes that port. For this reason the
 knob does not use USB. The knob uses I2C. This decision changes the RP2040
@@ -367,7 +367,8 @@ mix task, so `mix.exs` can set them. If Bundlex compiled before the fix, then ru
 
 ## 7. Data model
 
-Ash with SQLite holds the data. The database file lives on `/data`.
+Ash with SQLite holds the data. The database file lives on the application data
+partition, at `/root/my_hi_fi.db`.
 
 Domain `MyHiFi.Radio`:
 
@@ -483,7 +484,8 @@ gives the reason.
 
 ## 13. Cache and buffer
 
-The cache lives on the `/data` partition. It holds two types of data:
+The cache lives on the application data partition, under `/root`. It holds two
+types of data:
 
 1. **Artwork.** The device stores station logos and cover art. It stores them by
    a hash of the source URL.
