@@ -1,0 +1,558 @@
+# MyHiFi Specification
+
+- Date: 2026-08-20
+- Status: draft
+- Licence: Apache-2.0
+- Language: this document uses ASD-STE100 Simplified Technical English.
+
+## 1. Purpose
+
+MyHiFi is Nerves firmware for a home audio player. The device connects to a home
+stereo. It behaves like a normal stereo component. A person can operate it
+without a computer and without a phone.
+
+The device gets audio from a network source. It sends the audio to a digital to
+analogue converter (DAC). It shows the state of the music on a small screen. It
+also gives a web interface for setup and for control.
+
+## 2. Design goals
+
+- The device starts and plays without help from a computer.
+- A person can operate the device with the knob and the screen only.
+- The web interface gives the same control as the device screen.
+- New audio sources need no change to the player or to the user interface.
+- New audio outputs need no change to the player.
+- The firmware uses the standard Nerves system. It adds no custom system fork.
+
+## 3. Scope of version 1
+
+Version 1 includes these items:
+
+- Nerves firmware for the Raspberry Pi Zero 2 W.
+- One audio source: internet radio, with Shoutcast and HLS streams.
+- One audio output: a USB DAC.
+- A Membrane pipeline that plays the stream.
+- A Phoenix LiveView web interface for setup and for control.
+- A Wi-Fi setup mode with an access point.
+- A local cache for artwork.
+- An in-memory ring buffer for the stream.
+- Ash resources for the station list and for the settings.
+- Standby mode, with resume of the last station.
+
+Version 1 excludes these items. Later versions add them.
+
+- The PiTFT screen and the on-device user interface.
+- The RP2040 knob.
+- Spotify, Plex, Squeezecast, and podcasts.
+- Volume control.
+- More than one device.
+
+## 4. Hardware
+
+| Part | Choice | Note |
+|---|---|---|
+| Board | Raspberry Pi Zero 2 W | 4 cores, 512 MB of RAM |
+| Nerves target | `rpi0_2` | Already in `mix.exs` |
+| Audio output | USB DAC on the USB data port | The port must run in host mode |
+| Screen | Adafruit PiTFT clone, 2.8 inch, SPI, resistive touch | Later version |
+| Knob | SimpleFOC motor, RP2040-Zero controller | Later version |
+| Knob link | I2C on the GPIO header | The PiTFT leaves the I2C pins free |
+| Storage | SD card, with a data partition at `/data` | Nerves gives this partition |
+
+The board has one USB data port. The USB DAC takes that port. For this reason the
+knob does not use USB. The knob uses I2C. This decision changes the RP2040
+firmware plan.
+
+## 5. Software structure
+
+The software has five parts.
+
+1. **Sources.** A source finds audio and gives a playable stream.
+2. **Player.** The player builds and runs a Membrane pipeline. It holds the
+   playback state.
+3. **Outputs.** An output sends samples to hardware.
+4. **Peripherals.** A peripheral owns a piece of hardware. It draws itself, and
+   it publishes what the person does.
+5. **User interfaces.** The web interface and the device state machine turn
+   events into commands.
+
+The parts talk through Phoenix PubSub with typed event structs. A part never
+calls another part directly. This keeps each behaviour separate, so a new source,
+output, or peripheral needs no change anywhere else.
+
+### 5.1 Source behaviour
+
+A source is a module. The module implements `MyHiFi.Source`. A source shows a
+tree of items. A container holds more items. A track plays.
+
+```elixir
+defmodule MyHiFi.Source do
+  @type ref :: term()
+  @type container :: %{ref: ref(), title: String.t(), artwork: String.t() | nil}
+  @type track :: %{ref: ref(), title: String.t(), subtitle: String.t() | nil,
+                   artwork: String.t() | nil, duration_ms: pos_integer() | nil}
+  @type entry :: {:container, container()} | {:track, track()}
+  @type page :: %{entries: [entry()], cursor: term() | nil}
+  @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
+                      format: :mp3 | :aac | :flac | :ogg | :hls | :unknown,
+                      live?: boolean()}
+
+  @callback title() :: String.t()
+  @callback root() :: ref()
+  @callback browse(ref(), keyword()) :: {:ok, page()} | {:error, term()}
+  @callback search(String.t(), keyword()) :: {:ok, page()} | {:error, term()}
+  @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
+end
+```
+
+Notes on the behaviour:
+
+- `duration_ms` is `nil` for a live stream.
+- `cursor` gives the next page. A `nil` cursor means the last page.
+- `search/2` returns `{:error, :not_supported}` if the source has no search.
+- A source keeps its own configuration in an Ash resource.
+
+### 5.2 Output behaviour
+
+An output is a module. The module implements `MyHiFi.Output`.
+
+```elixir
+defmodule MyHiFi.Output do
+  @type device :: %{id: String.t(), title: String.t()}
+
+  @callback devices() :: [device()]
+  @callback sink_spec(device_id :: String.t()) :: Membrane.ChildrenSpec.child_definition()
+end
+```
+
+Version 1 has one module: `MyHiFi.Output.UsbDac`. It reads the ALSA card list and
+gives a sink. A later version adds `MyHiFi.Output.I2s` for a HAT such as the
+PirateAudio.
+
+The Nerves system already holds `alsa-lib`, `aplay`, and `amixer`. The sink sends
+raw samples to `aplay` through an Erlang port. This needs no new binary and no
+NIF. `amixer` gives hardware volume control, if a later version needs it.
+
+### 5.3 Peripheral behaviour
+
+A peripheral is a process. It owns one piece of hardware. A screen, a knob, and a
+touch panel are all peripherals.
+
+```elixir
+defmodule MyHiFi.Peripheral do
+  @callback init(keyword()) :: {:ok, state :: term()} | {:error, term()}
+  @callback subscriptions() :: [MyHiFi.Event.topic()]
+  @callback handle_event(MyHiFi.Event.t(), state :: term()) ::
+              {:ok, state :: term()} | {:error, term()}
+  @callback terminate(reason :: term(), state :: term()) :: :ok
+end
+```
+
+`MyHiFi.Peripheral.Server` is a GenServer. It wraps a peripheral module. It
+subscribes to the topics from `subscriptions/0`, and it calls `handle_event/2`
+for each event. A peripheral module therefore holds no PubSub code and no process
+code.
+
+A peripheral publishes with `MyHiFi.Event.publish/1`. It calls the function from
+its own process. This needs no callback.
+
+A peripheral owns these things:
+
+- The hardware link, such as SPI or I2C.
+- The size, the colour model, and the refresh rate of a screen.
+- The layout, the fonts, and the scroll window. A peripheral knows how many lines
+  fit on its own screen.
+- The rate of the events that it publishes.
+
+Version 1 has no peripheral. These come later:
+
+| Module | Hardware | Draws | Publishes |
+|---|---|---|---|
+| `MyHiFi.Peripheral.PiTft` | ILI9341 screen and STMPE610 touch controller, both on SPI0 | Yes, with Vivid | `Input.Touched` |
+| `MyHiFi.Peripheral.Knob` | RP2040-Zero on I2C | No | `Input.Rotated`, `Input.Pressed`, `Input.LongPressed` |
+| `MyHiFi.Peripheral.Ssd1306` | 128 by 64 monochrome OLED screen on I2C | Yes, text only | Nothing |
+
+One behaviour, and not two, has a hardware reason. On the PiTFT the screen and the
+touch controller share the SPI bus. They use separate chip select lines. One
+process therefore owns the bus, and no arbitration is necessary. Two processes on
+one bus would need it.
+
+`subscriptions/0` also earns its place. The knob subscribes to the hint topic
+only. It must not wake one time each second for a `Player.Progress` event that it
+cannot use.
+
+Note: the specification gives the parts of the Adafruit board. Confirm the parts
+on your clone before you write the driver.
+
+### 5.4 Device state machine
+
+`MyHiFi.DeviceUi` is a GenServer. It holds the state of the device interface. It
+receives the input events, and it publishes the view events and the hints.
+
+It owns these things:
+
+- The current source and the current container.
+- The list of entries in that container.
+- The index of the selected entry.
+- The current screen: browse, or now playing.
+
+It does not own the layout, the fonts, or the scroll window. A peripheral owns
+those.
+
+This split has a clear reason. The knob needs a detent count, and the detent
+count comes from the length of the list. A peripheral does not know the length,
+because a screen shows only the part that fits. `MyHiFi.DeviceUi` knows the
+length, so it publishes the `Hint.Detents` event. If a screen owned the
+navigation instead, then two screens would give two different detent counts.
+
+The web interface does not use `MyHiFi.DeviceUi`. Each LiveView holds its own
+navigation state, because a browser tab is its own session.
+
+### 5.5 Events
+
+`MyHiFi.Event` holds the event structs. Every event is a struct with named
+fields. No part sends a bare tuple or a map.
+
+There are four topics: `:player`, `:view`, `:input`, and `:hint`.
+
+Topic `:player`, from `MyHiFi.Player`:
+
+| Event | Fields |
+|---|---|
+| `Player.Started` | `source`, `track`, `artwork_path` |
+| `Player.Stopped` | `reason` |
+| `Player.Buffering` | `percent` |
+| `Player.Progress` | `position_ms`, `duration_ms` |
+| `Player.MetadataChanged` | `title`, `artist`, `artwork_path` |
+| `Player.Failed` | `reason` |
+| `Player.Standby` | `entered?` |
+
+Topic `:view`, from `MyHiFi.DeviceUi`:
+
+| Event | Fields |
+|---|---|
+| `View.ListShown` | `title`, `entries`, `selected_index`, `loading?` |
+| `View.SelectionMoved` | `selected_index` |
+| `View.NowPlayingShown` | none |
+| `View.Failed` | `message` |
+
+Topic `:input`, from a peripheral:
+
+| Event | Fields |
+|---|---|
+| `Input.Rotated` | `delta` |
+| `Input.Pressed` | none |
+| `Input.LongPressed` | `duration_ms` |
+| `Input.Touched` | `x`, `y`, `action` |
+
+Topic `:hint`, from `MyHiFi.DeviceUi`:
+
+| Event | Fields | Effect |
+|---|---|---|
+| `Hint.Detents` | `count` | The knob sets that many detents. |
+| `Hint.Continuous` | none | The knob turns freely, with no detents. |
+| `Hint.Endstops` | `at_start?`, `at_end?` | The knob resists at the end of a list. |
+
+A peripheral ignores an event that it cannot use. A screen ignores the hints. A
+knob ignores the view events. Nothing reports an error for this, because an
+ignored event is normal.
+
+`Player.Progress` arrives one time each second. A slow screen may drop the events
+that it cannot draw in time.
+
+### 5.6 Player
+
+`MyHiFi.Player` is a GenServer. It holds one pipeline at a time. It accepts these
+commands:
+
+- `play(source, ref)`
+- `stop()`
+- `standby()`
+- `state()`
+
+The player state holds the source, the track, the position, and the connexion
+state. The player publishes an event on each change, and a `Player.Progress`
+event one time each second during playback.
+
+## 6. Audio pipeline
+
+### 6.1 Where the codecs come from
+
+The `rpi0_2` Nerves system holds no audio decoder. `membrane_alsa_plugin` does
+not exist. Compressed audio therefore needs native code on the device.
+
+Membrane solves this. `Membrane.PrecompiledDependencyProvider` gives a URL for a
+precompiled library, and it chooses the URL from the build target. The
+`membraneframework-precompiled` organisation holds a build for `aarch64` Linux.
+`rpi0_2` is `aarch64` with glibc, so the builds match.
+
+`membrane_mp3_mad_plugin` and `membrane_aac_fdk_plugin` both use the provider.
+Each precompiled archive holds the header files and the shared library. Bundlex
+uses the headers to cross-compile the NIF. The device uses the shared library at
+run time.
+
+The libraries are small, and they need only glibc 2.17:
+
+| Library | Size (aarch64) | Needs |
+|---|---|---|
+| libmad | 70 KB | `libc.so.6`, `GLIBC_2.17` |
+| libfdk-aac | 770 KB | `libc.so.6`, `GLIBC_2.17` |
+
+For comparison, the precompiled ffmpeg is 32 MB compressed, and the precompiled
+portaudio is 17 MB. The design does not use either one.
+
+### 6.2 The elements
+
+| Job | Element | Native code |
+|---|---|---|
+| Read an HTTP stream | `Membrane.Hackney.Source` | No |
+| Read an HLS playlist | `Membrane.HLS.SourceBin` | No |
+| Read the MPEG-TS container | `membrane_mpeg_ts_plugin` | No |
+| Parse AAC | `Membrane.AAC.Parser` | No |
+| Decode AAC and HE-AAC | `Membrane.AAC.FDK.Decoder` | libfdk-aac |
+| Decode MP3 | `Membrane.MP3.MAD.Decoder` | libmad |
+| Send to the DAC | `MyHiFi.Output.UsbDac` | No |
+
+The player holds a ring buffer between the source and the decoder. The buffer
+holds the compressed bytes, not the samples. Compressed audio is small: a 128
+kbps stream is 16 KB each second, so 10 seconds cost about 160 KB. The same 10
+seconds of 44.1 kHz 16-bit stereo samples cost 1.7 MB. The buffer therefore sits
+before the decoder. It stays in memory, and it never touches the SD card.
+
+The player does no resampling. It tells `aplay` the sample rate that the decoder
+gives. The DAC accepts 44.1 kHz and 48 kHz. If the rate changes, the player
+starts `aplay` again. This removes the need for a resampler, and it therefore
+removes the need for ffmpeg.
+
+ICY metadata: `Membrane.Hackney.Source` does not read ICY titles. The player
+needs a small element for this. It sends the `Icy-MetaData: 1` request header,
+and it removes the metadata blocks from the stream.
+
+### 6.3 HLS
+
+Version 1 plays HLS. `membrane_hls_plugin` v3.0.11 gives `Membrane.HLS.Source`
+and `Membrane.HLS.SourceBin`. They read a master playlist or a media playlist,
+and they follow the updates of a live playlist. The plugin holds no native code.
+It costs 10 more Elixir dependencies, and two of them handle H.264 and WebVTT.
+This firmware does not use those two.
+
+HLS matters here. Radio Browser holds 242 New Zealand stations, and 46 of them
+(19%) use HLS. Every commercial network uses HLS: Newstalk ZB, ZM, The Edge, The
+Rock, The Sound, The Hits, Coast, and George FM. RNZ sends direct MP3 and AAC.
+The New Zealand HLS streams use AAC and HE-AAC, and fdk-aac decodes both.
+
+### 6.4 The Bundlex target problem
+
+This is a known blocker. Solve it before step 2 of section 16.
+
+Bundlex reads the target from four environment variables when `CROSSCOMPILE` is
+set: `TARGET_ARCH`, `TARGET_VENDOR`, `TARGET_OS`, and `TARGET_ABI`. Nerves sets
+`CROSSCOMPILE` and `REBAR_TARGET_ARCH`. It does not set those four variables.
+
+Each variable then defaults to `"unknown"`. The provider finds no match, and it
+returns `nil`. Bundlex then falls back to `pkg-config` against the Nerves
+sysroot, which holds no libmad. The build fails.
+
+The firmware must set these values for `rpi0_2`:
+
+    TARGET_ARCH=aarch64
+    TARGET_VENDOR=nerves
+    TARGET_OS=linux
+    TARGET_ABI=gnu
+
+Bundlex reads the variables when Bundlex itself compiles. The variables must
+therefore exist before the dependencies compile. `mix.exs` runs first in every
+mix task, so `mix.exs` can set them. If Bundlex compiled before the fix, then run
+`mix deps.compile bundlex --force`.
+
+## 7. Data model
+
+Ash with SQLite holds the data. The database file lives on `/data`.
+
+Domain `MyHiFi.Radio`:
+
+- `Station` holds one internet radio station. Attributes: `id`, `remote_id`,
+  `title`, `stream_url`, `codec`, `bitrate`, `hls?`, `country_code`, `language`,
+  `tags`, `artwork_url`, `favourite?`, `last_played_at`, `click_count`.
+- Actions: `read`, `search` (by title and by tag), `favourites`,
+  `upsert_from_remote`, `set_favourite`, `clear_favourite`.
+
+Domain `MyHiFi.Settings`:
+
+- `Setting` holds one configuration value. It uses a key and a value.
+- The settings include the output device, the station countries, and the standby
+  state.
+
+Oban does the background work:
+
+- A job copies the Radio Browser station list into `Station`. It reads the
+  country list from the settings, and it does one country at a time.
+- The job runs after the first boot, and then one time each week.
+- A job fetches artwork and writes it to the cache.
+
+## 8. Station data
+
+The station list comes from the public Radio Browser service. The device copies
+the list into SQLite. Search then works on the local copy, and it works without
+the internet.
+
+The person selects the countries in the web interface. The default is New
+Zealand. The sync job then copies only those countries.
+
+The New Zealand list is small. The Radio Browser answer is 280 KB of JSON for 242
+stations. A country filter therefore keeps the database small.
+
+## 9. Standby and resume
+
+The device has two states: **active** and **standby**.
+
+In standby the device stops the audio and turns off the screen. It keeps the
+network and the web interface active. It also keeps the last position.
+
+When the device leaves standby, it starts the last track again. For a live stream
+it opens the station again, because a live stream has no position. For a track
+with a length, it starts at the last position.
+
+On the first boot the device starts with nothing selected. It does not play.
+
+## 10. Web interface
+
+The web interface uses Phoenix LiveView. Any person on the local network can open
+it. There is no sign-in. The home network is the boundary.
+
+The web interface has these pages:
+
+- **Now playing.** It shows the artwork, the title, the station, and the state.
+  It gives a stop control and a standby control.
+- **Browse.** It shows the source list. It then shows the tree of the source. It
+  gives a search field.
+- **Favourites.** It lists the stations that the person keeps.
+- **Settings.** It shows the output device, the station countries, the network
+  state, and the storage state.
+
+## 11. Device interface (later version)
+
+The device interface draws on a screen. It does not use a browser.
+
+Vivid does the rendering. Vivid is a pure Elixir 2D renderer with no
+dependencies. See <https://harton.dev/james/vivid>. Scenic is heavy for this
+board, and Vivid is small. Vivid 1.0.0 reads OpenType, TrueType, WOFF, and BDF
+fonts. It antialiases, it draws Bezier curves, and it fills shapes with holes.
+
+A peripheral draws itself. See section 5.3. `MyHiFi.DeviceUi` holds the
+navigation state, and it publishes the view events. `MyHiFi.Peripheral.PiTft`
+receives those events and renders them with Vivid. It also publishes the touch
+events, because it owns the same SPI bus as the touch controller. Another person
+can add an SSD1306 OLED screen without a change to `MyHiFi.DeviceUi`.
+
+`MyHiFi.Peripheral.PiTft` shows two screens:
+
+1. **Browse.** A list of entries, from a `View.ListShown` event. The knob moves
+   the selection. A press opens a container or plays a track.
+2. **Now playing.** The cover art, the track name, the source name, and a
+   progress marker with the times.
+
+Open items for the device interface:
+
+- Cover art needs a colour raster. Vivid 1.0.0 draws shapes and font glyphs
+  only, because `Vivid.Bitmap` holds one bit for each cell and serves the BDF
+  fonts. Vivid gets colour raster support upstream. Decide then whether Vivid
+  reads JPEG and PNG, or whether this firmware decodes the bytes first.
+- The link from a Vivid frame to the SPI framebuffer needs a driver.
+
+If a later version needs a binary or a shared library that the Nerves system
+does not hold, then NBPR gives it. NBPR is a Hex repository of Buildroot-built
+binaries for Nerves. See <https://github.com/jimsynz/nbpr>. The audio path does
+not need NBPR, because Membrane gives the precompiled decoders.
+
+## 12. Knob (later version)
+
+The knob uses a SimpleFOC motor. An RP2040-Zero controls it. The link is I2C.
+
+The Pi is the I2C controller. It reads the knob position and the button state. It
+writes the detent pattern to the RP2040. A GPIO interrupt line tells the Pi about
+a new event, so the Pi does not poll fast.
+
+`MyHiFi.Peripheral.Knob` implements `MyHiFi.Peripheral`. It publishes
+`Input.Rotated`, `Input.Pressed`, and `Input.LongPressed`. It subscribes to the
+hint topic only, and it writes each hint to the RP2040.
+
+The detent count comes from `MyHiFi.DeviceUi`, not from a display. A list of 10
+items gives 10 detents. The now playing screen gives no detents. Section 5.5
+gives the reason.
+
+## 13. Cache and buffer
+
+The cache lives on the `/data` partition. It holds two types of data:
+
+1. **Artwork.** The device stores station logos and cover art. It stores them by
+   a hash of the source URL.
+2. **Downloads.** A later version stores podcast files and Plex files.
+
+The cache has a size limit. The device removes the oldest artwork first. The
+device sets the limit from the free space on the partition.
+
+The stream buffer is not part of the cache. It is a ring buffer in memory. See
+section 6.2. A buffer on the SD card would write all the time, and that shortens
+the life of the card.
+
+## 14. Network
+
+The device uses Wi-Fi. It has no Ethernet port.
+
+On the first boot the device makes its own access point. The person connects to
+it and opens a web page. The person then gives the Wi-Fi name and the password.
+VintageNetWizard does this work.
+
+## 15. Risks and open items
+
+| Item | Risk | Action |
+|---|---|---|
+| RAM | The board has 512 MB. Elixir, Membrane, LiveView, and the cache must fit. | Measure the memory use early. |
+| Bundlex target | Nerves does not set the four `TARGET_*` variables. The precompiled libraries then do not download. | Set them in `mix.exs`. See section 6.4. |
+| Precompiled builds | Membrane may change or remove an `aarch64` build. | Pin the versions, as `membrane_mp3_mad_plugin` already does. |
+| USB host mode | The OTG port must run in host mode for the DAC. | Confirm the `rpi0_2` system configuration. |
+| ICY metadata | No Membrane element reads ICY titles. | Write a small element. Test it with real stations. |
+| Latency | The `aplay` port adds a buffer. | Measure the delay from a command to the sound. |
+| HLS weight | `membrane_hls_plugin` pulls in 10 dependencies, and this firmware uses few of them. | Accept it for now. It holds no native code. |
+| Buffer size | A large ring buffer costs RAM, and the board has 512 MB. | Buffer the compressed bytes, not the samples. Measure the memory use. |
+| Knob protocol | The I2C protocol and the detent commands need a design. | Design it with the RP2040 firmware, in a later version. Map it to the hint events. |
+| Event rate | A `Player.Progress` event each second, and a slow SPI display, may not agree. | Let a display drop events. Measure the PiTFT refresh time. |
+| PiTFT pins | The HAT uses SPI0 and some GPIO pins. | Confirm that the I2C pins stay free. |
+| PiTFT parts | The clone may not use an ILI9341 screen and an STMPE610 touch controller. | Confirm the parts before you write the driver. |
+
+## 16. Order of work
+
+1. Bring up the `rpi0_2` firmware. Confirm Wi-Fi and the access point wizard.
+2. Fix the Bundlex target variables. Confirm that libmad and fdk-aac cross-compile.
+3. Detect the USB DAC. Play a test tone through `aplay` from Membrane.
+4. Build the Ash resources for `Station` and `Setting`.
+5. Copy a country-filtered Radio Browser list with an Oban job.
+6. Build the `MyHiFi.Source` behaviour and the internet radio source.
+7. Build the player and the pipelines. Play a Shoutcast station and an HLS station.
+8. Build the LiveView pages.
+9. Add the artwork cache and standby mode.
+10. Measure the memory and the CPU. Adjust the plan.
+
+Later versions add the screen, the knob, and more sources.
+
+## 17. Research results
+
+I found these results on 2026-08-20. They support the decisions above.
+
+| Question | Result |
+|---|---|
+| Does `membrane_alsa_plugin` exist? | No. |
+| Does `membrane_portaudio_plugin` exist? | Yes, v0.19.6. PortAudio is not in the Nerves system. |
+| What audio software does `nerves_system_rpi0_2` hold? | `alsa-lib`, `aplay`, and `amixer`. Nothing else. |
+| Does a Membrane HLS plugin exist? | Yes. `membrane_hls_plugin` v3.0.11, from kim-company. It pulls in 10 dependencies, and two of them are H.264 and WebVTT. |
+| Does Membrane precompile the decoders for `aarch64` Linux? | Yes. `precompiled_mad`, `precompiled_fdk-aac`, `precompiled_portaudio`, and `precompiled_ffmpeg` all hold an arm64 build. |
+| Do the archives hold headers? | Yes. Each archive holds `include/` and `lib/`. |
+| What glibc do they need? | `GLIBC_2.17` only. Nerves glibc is newer, so they load. |
+| What architecture is `rpi0_2`? | `aarch64`, glibc, `aarch64-nerves-linux-gnu`. |
+| Does the HLS plugin hold native code? | No. It has no `bundlex.exs` and no `c_src`. |
+| Does Nerves set the Bundlex target variables? | No. This breaks the precompiled download. See section 6.4. |
+| Does Vivid render text? | Yes, from v1.0.0 of 2026-08-14. It reads OpenType, TrueType, WOFF, and BDF fonts. |
+| Does Vivid draw a colour image? | No. `Vivid.Bitmap` holds one bit for each cell, and it serves the BDF fonts. |
+| How many New Zealand stations use HLS? | 46 of 242 (19%). All of the commercial networks use it. |
+| How large is the New Zealand station list? | 280 KB of JSON. |
