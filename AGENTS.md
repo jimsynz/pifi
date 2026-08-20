@@ -90,8 +90,10 @@ background work.
 
 ## Rules for this project
 
-- Write all documentation in ASD-STE100 Simplified Technical English. Use short
-  sentences, the active voice, and the present tense.
+- Write every text artefact in ASD-STE100 Simplified Technical English. That
+  covers `docs/`, `README.md`, this file, module and function documentation, code
+  comments, commit messages, issue titles and bodies, pull request descriptions,
+  and messages to the user. See the STE section below.
 - Use New Zealand English spelling. Write "licence" for the noun and "colour",
   not the American forms.
 - Do not add a source, an output, or a peripheral without the behaviour. The point
@@ -102,6 +104,40 @@ background work.
   and check for native code first.
 - Keep the specification current. If a decision changes, change `docs/spec.md`
   in the same commit.
+
+## Simplified Technical English
+
+STE is easy to read wrong, because ordinary technical English feels correct. Each
+line below is a mistake that this project has already made and corrected.
+
+- **One word has one meaning.** Do not write "keep a station" for a favourite,
+  and do not write "drop it" for the opposite. Write "make a station a
+  favourite", and write "remove that mark".
+- **No metaphors.** A task is not a "gate". Memory does not "cost" anything, it
+  "needs" it. A caller does not "walk" a tree, it "moves through" it. A stream has
+  no "edge", it has a "current point".
+- **No phrasal verbs.** Write "uses X instead", and not "falls back to X". Write
+  "get access", and not "log in".
+- **Use each word in its approved part of speech.** A variable "becomes"
+  `unknown`. It does not "default to" it.
+- **Avoid these words**, which are not approved: assume, elapsed, nobody,
+  recover, stall, throwaway. Write: the plan is correct only if; the time from the
+  start; no person; continue; interruption; temporary.
+- **Keep sentences short.** 20 words for an instruction, and 25 for a
+  description. Split a long sentence, and do not join clauses with a comma.
+- **Use the active voice, the present tense, and the imperative** for each
+  instruction. Give one instruction in each sentence.
+- **Use articles.** Write "the device", and not "device".
+
+A code identifier, a product name, and a protocol name are technical names. Use
+them as they are, even when the word is not on the approved list. `aplay`,
+`Membrane.HLS.Source`, Shoutcast, and HE-AAC are all correct.
+
+The rule covers the text that this project writes. It does not cover text from
+another source. Leave the generator comments in `config/target.exs` and in
+`config/host.exs` as they are, and leave the Nerves text in `README.md` as it is.
+A rewrite of that text gives no benefit, and it hides the difference from the
+template.
 
 <!-- usage-rules-start -->
 <!-- usage_rules-start -->

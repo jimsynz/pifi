@@ -103,8 +103,8 @@ config :my_hi_fi, MyHiFiWeb.Endpoint,
   http: [ip: {0, 0, 0, 0}, port: 80],
   server: true,
   # A device answers on its IP address, on nerves.local, and on
-  # nerves-<serial>.local. An origin check against one configured host would
-  # therefore reject the LiveView socket.
+  # nerves-<serial>.local. An origin check uses one configured host only. Such a
+  # check therefore rejects the LiveView socket.
   check_origin: false
 
 # Import target specific config. This must remain at the bottom

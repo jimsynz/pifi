@@ -2,9 +2,9 @@ defmodule MyHiFi.Migrator do
   @moduledoc """
   Brings the database up to date.
 
-  A device has nobody to run `mix ash.setup`, so the firmware migrates itself.
+  No person runs `mix ash.setup` on a device, so the firmware migrates itself.
   `MyHiFi.Application` calls `migrate/0` before it starts the supervision tree,
-  because Oban queries its own tables as soon as it starts.
+  because Oban reads its own tables when it starts.
   """
 
   @doc """
