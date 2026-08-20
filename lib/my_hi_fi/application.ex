@@ -8,6 +8,7 @@ defmodule MyHiFi.Application do
   @impl true
   def start(_type, _args) do
     put_secret_key_base()
+    migrate()
 
     children =
       [
@@ -31,6 +32,7 @@ defmodule MyHiFi.Application do
   # List all child processes to be supervised
   if Mix.target() == :host do
     defp put_secret_key_base, do: :ok
+    defp migrate, do: :ok
 
     defp target_children do
       [
@@ -43,6 +45,7 @@ defmodule MyHiFi.Application do
     end
   else
     defp put_secret_key_base, do: MyHiFi.SecretKeyBase.put()
+    defp migrate, do: MyHiFi.Migrator.migrate()
 
     defp target_children do
       [

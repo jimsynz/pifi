@@ -52,6 +52,11 @@ Licence: Apache-2.0.
   build in any `MIX_ENV`, and never on the host. Do not restore `force_ssl`, and
   do not make a boot depend on an environment variable: a device has nothing to
   set one.
+- **The firmware migrates itself.** `MyHiFi.Application` calls
+  `MyHiFi.Migrator.migrate/0` before it starts the supervision tree, and not as a
+  child of it, because Oban queries its own tables as soon as it starts. Like the
+  secret, this runs for a target build in any `MIX_ENV` and never on the host, so
+  development and test keep using `mix ash.setup`.
 - **The stream buffer stays in memory.** It is a ring buffer of compressed bytes,
   placed before the decoder. Never buffer the stream on the SD card, and never
   buffer raw samples.
