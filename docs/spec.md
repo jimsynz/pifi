@@ -334,7 +334,7 @@ portaudio is 17 MB. The design does not use either one.
 
 | Job | Element | Native code |
 |---|---|---|
-| Read an HTTP stream | `Membrane.Hackney.Source` | No |
+| Read an HTTP stream | `MyHiFi.Player.HttpSource` | No |
 | Read an HLS playlist | `Membrane.HLS.SourceBin` | No |
 | Read the MPEG-TS container | `membrane_mpeg_ts_plugin` | No |
 | Parse AAC | `Membrane.AAC.Parser` | No |
@@ -348,14 +348,22 @@ kbps stream is 16 KB each second, so 10 seconds cost about 160 KB. The same 10
 seconds of 44.1 kHz 16-bit stereo samples cost 1.7 MB. The buffer therefore sits
 before the decoder. It stays in memory, and it never touches the SD card.
 
+The pipeline holds few samples in front of the sink. The sink writes to `aplay`,
+and that write blocks while the port is full, so the sink cannot read its own
+mailbox while it waits. Membrane allows 400 buffers on an automatic pad, which is
+about 20 seconds of samples, and a request to stop then waits behind all of them.
+The link to the sink allows eight buffers, which is under half a second. ALSA
+holds another half second, and the decoder runs much faster than the sound.
+
 The player does no resampling. It tells `aplay` the sample rate that the decoder
 gives. The DAC accepts 44.1 kHz and 48 kHz. If the rate changes, the player
 starts `aplay` again. This removes the need for a resampler, and it therefore
 removes the need for ffmpeg.
 
-ICY metadata: `Membrane.Hackney.Source` does not read ICY titles. The player
-needs a small element for this. It sends the `Icy-MetaData: 1` request header,
-and it removes the metadata blocks from the stream.
+ICY metadata: `MyHiFi.Player.HttpSource` reads the stream with `Req`, so the same
+element can read the ICY titles. It sends the `Icy-MetaData: 1` request header,
+and it removes the metadata blocks from the stream. `Membrane.Hackney.Source`
+cannot do this, and it would bring a second HTTP client.
 
 ### 6.3 HLS
 
