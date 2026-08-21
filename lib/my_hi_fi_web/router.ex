@@ -9,7 +9,13 @@ defmodule MyHiFiWeb.Router do
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {MyHiFiWeb.Layouts, :root})
     plug(:protect_from_forgery)
-    plug(:put_secure_browser_headers, %{"content-security-policy" => "default-src 'self'"})
+    # A station logo comes from the internet, so images need more than 'self'.
+    # The artwork cache will serve them from this device, and this line can then
+    # go back to 'self' alone.
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'"
+    })
   end
 
   pipeline :api do
@@ -18,6 +24,12 @@ defmodule MyHiFiWeb.Router do
 
   scope "/api", MyHiFiWeb do
     pipe_through(:api)
+  end
+
+  scope "/", MyHiFiWeb do
+    pipe_through(:browser)
+
+    live("/", NowPlayingLive)
   end
 
   if Application.compile_env(:my_hi_fi, :dev_routes) do

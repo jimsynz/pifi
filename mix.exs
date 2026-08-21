@@ -157,6 +157,8 @@ defmodule MyHiFi.MixProject do
 
       # Dev/test deps.
       {:credo, "~> 1.7", runtime: false, only: [:dev, :test], target: :host},
+      # Phoenix LiveView needs this to read the HTML that a test renders.
+      {:lazy_html, ">= 0.1.0", only: :test, target: :host},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev, target: :host},
       {:ex_check_ng, "~> 1.0.0-rc.2", only: [:dev, :test], target: :host},
       {:ex_doc, "~> 0.40", only: [:dev, :test], target: :host},

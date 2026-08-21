@@ -46,7 +46,7 @@ defmodule MyHiFiWeb do
 
   def live_view do
     quote do
-      use Phoenix.LiveView
+      use Phoenix.LiveView, layout: {MyHiFiWeb.Layouts, :app}
 
       unquote(html_helpers())
     end

@@ -18,3 +18,14 @@ erl_crash.dump
 
 dev.db*
 test*.db*
+
+# `mix phx.digest` writes these during a build, and CI runs it. The plain
+# app.css and app.js stay in the repository, as they were.
+/priv/static/assets/*-*.css
+/priv/static/assets/*-*.js
+/priv/static/assets/**/*-*.css
+/priv/static/assets/**/*-*.js
+/priv/static/**/*.gz
+/priv/static/cache_manifest.json
+/priv/static/favicon-*.ico
+/priv/static/robots-*.txt

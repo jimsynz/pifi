@@ -10,6 +10,8 @@ defmodule MyHiFiWeb.ConnCase do
 
   use ExUnit.CaseTemplate
 
+  alias Ecto.Adapters.SQL.Sandbox
+
   using do
     quote do
       @endpoint MyHiFiWeb.Endpoint
@@ -18,11 +20,15 @@ defmodule MyHiFiWeb.ConnCase do
 
       import Plug.Conn
       import Phoenix.ConnTest
+      import Phoenix.LiveViewTest
       import MyHiFiWeb.ConnCase
     end
   end
 
-  setup _tags do
+  setup tags do
+    pid = Sandbox.start_owner!(MyHiFi.Repo, shared: not tags[:async])
+    on_exit(fn -> Sandbox.stop_owner(pid) end)
+
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end
