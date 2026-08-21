@@ -343,7 +343,7 @@ The New Zealand HLS streams use AAC and HE-AAC, and fdk-aac decodes both.
 
 ### 6.4 The Bundlex target problem
 
-This is a known blocker. Solve it before step 2 of section 16.
+A build on 2026-08-21 proved this problem and the correction.
 
 Bundlex reads the target from four environment variables when `CROSSCOMPILE` is
 set: `TARGET_ARCH`, `TARGET_VENDOR`, `TARGET_OS`, and `TARGET_ABI`. Nerves sets
@@ -362,8 +362,25 @@ The firmware must set these values for `rpi0_2`:
 
 Bundlex reads the variables when Bundlex itself compiles. The variables must
 therefore exist before the dependencies compile. `mix.exs` runs first in every
-mix task, so `mix.exs` can set them. If Bundlex compiled before the fix, then run
-`mix deps.compile bundlex --force`.
+mix task, so `mix.exs` sets them, from the `@bundlex_targets` map.
+
+Two more problems came with this one.
+
+**`decimal` does not agree.** `membrane_core` needs `ratio`, and `ratio` names
+`decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`. No `ratio`
+release accepts version 3, and a lower `ecto_sqlite3` needs a lower `ecto` than
+Ash accepts. `mix.exs` therefore overrides `decimal` to `~> 3.0`. That is safe:
+`decimal` is optional in `ratio`, and `Ratio.DecimalConversion` reads the `coef`,
+`exp` and `sign` fields of the struct and calls no function of the library.
+Version 3 keeps those three fields, and each of its breaking changes is in the
+context defaults, in `parse`, in `cast`, or in `to_string`.
+
+**Bundlex shares one cache between targets.** It keeps each precompiled library
+under `deps/bundlex/priv`, and `_build/<target>/lib/bundlex/priv` is a symbolic
+link to that directory. A build for the host leaves an x86 library there, the
+release for a target copies it, and the Nerves scrub step then stops with
+"Unexpected executable format". The release step `prune_foreign_precompiled/1` in
+`mix.exs` removes each library that does not match the architecture of the build.
 
 ## 7. Data model
 
@@ -538,7 +555,7 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 | Item | Risk | Action |
 |---|---|---|
 | RAM | Linux sees 301 MB, and not 512 MB. A measurement on 2026-08-21 gave 176 MB free with the skeleton in operation, and the BEAM used 72 MB of the rest. Membrane, the decoders, the ring buffer, and the pages must fit in what is left. | Measure at each step. See #16. A 128 MB CMA reservation holds 91 MB that nothing uses. A change to `config.txt` gives that memory back, and such a change needs a custom Nerves system. |
-| Bundlex target | Nerves does not set the four `TARGET_*` variables. The precompiled libraries then do not download. | Set them in `mix.exs`. See section 6.4. |
+| ~~Bundlex target~~ | Solved on 2026-08-21. `mix.exs` sets the four variables, and the arm libraries download. | |
 | Precompiled builds | Membrane may change or remove an `aarch64` build. | Pin the versions, as `membrane_mp3_mad_plugin` already does. |
 | USB host mode | The OTG port must run in host mode for the DAC. | Confirm the `rpi0_2` system configuration. |
 | ICY metadata | No Membrane element reads ICY titles. | Write a small element. Test it with real stations. |
@@ -600,3 +617,16 @@ device, with the skeleton in operation and no audio in play.
 | Restart time to an SSH answer | about 12 seconds |
 | Firmware size | 54 MB |
 | Time to send new firmware with `mix upload` | 8.7 seconds |
+
+The decoders ran on the board on 2026-08-21. The input was 256 KB from the RNZ
+National MP3 stream.
+
+| Measurement | Value |
+|---|---|
+| MP3 frames decoded | 1364 |
+| Audio from those frames | 32.74 seconds |
+| Time to decode | 0.398 seconds |
+| Speed | 82 times faster than real time |
+| One core | 1.2% for one stream |
+| Format from the decoder | 24 kHz, 2 channels, s24le |
+| Bytes skipped to find the first frame | 384 |

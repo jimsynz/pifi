@@ -1,6 +1,30 @@
 defmodule MyHiFi.MixProject do
   use Mix.Project
 
+  # Bundlex reads the build target from these four variables when `CROSSCOMPILE`
+  # has a value. Nerves gives a value to `CROSSCOMPILE` and to
+  # `REBAR_TARGET_ARCH`, and it gives no value to these four. Each one then
+  # becomes "unknown", and `Membrane.PrecompiledDependencyProvider` gives `nil`
+  # for each precompiled library. Bundlex then uses `pkg-config` against a
+  # sysroot that holds no such library, and the build stops with an error.
+  #
+  # Bundlex reads the variables when Bundlex itself compiles, so they must have a
+  # value before the dependencies compile. `mix.exs` runs first in each mix task.
+  # Add an entry for each new target.
+  @bundlex_targets %{
+    rpi0_2: %{
+      "TARGET_ARCH" => "aarch64",
+      "TARGET_VENDOR" => "nerves",
+      "TARGET_OS" => "linux",
+      "TARGET_ABI" => "gnu"
+    }
+  }
+
+  case Map.fetch(@bundlex_targets, Mix.target()) do
+    {:ok, env} -> System.put_env(env)
+    :error -> :ok
+  end
+
   @app :my_hi_fi
   @version "0.1.0"
   @all_targets [
@@ -56,6 +80,22 @@ defmodule MyHiFi.MixProject do
       {:ash_sqlite, "~> 0.2"},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
+      # `membrane_core` needs `ratio`, and `ratio` names
+      # `decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`, so the
+      # two do not agree.
+      #
+      # The requirement of `ratio` is out of date. `decimal` is optional there,
+      # and `Ratio.DecimalConversion` reads the `coef`, `exp` and `sign` fields of
+      # the struct and calls no function of the library. Version 3 keeps those
+      # three fields, and each of its breaking changes is in the context defaults,
+      # in `parse`, in `cast`, or in `to_string`. This override is therefore safe.
+      #
+      # Remove it when a `ratio` release accepts version 3.
+      {:decimal, "~> 3.0", override: true},
+      {:membrane_aac_fdk_plugin, "~> 0.18"},
+      {:membrane_aac_plugin, "~> 0.19"},
+      {:membrane_core, "~> 1.0"},
+      {:membrane_mp3_mad_plugin, "~> 0.18"},
       {:gettext, "~> 1.0"},
       {:heroicons,
        [
@@ -121,7 +161,7 @@ defmodule MyHiFi.MixProject do
       # See https://nerves-pack.hexdocs.pm/readme.html#erlang-distribution
       cookie: "#{@app}_cookie",
       include_erts: &Nerves.Release.erts/0,
-      steps: [&Nerves.Release.init/1, :assemble],
+      steps: [&Nerves.Release.init/1, &prune_foreign_precompiled/1, :assemble],
       strip_beams: Mix.env() == :prod or [keep: ["Docs"]]
     ]
   end
@@ -140,6 +180,31 @@ defmodule MyHiFi.MixProject do
       credo: ["credo --strict"]
     ]
   end
+
+  # Bundlex keeps each precompiled library under `deps/bundlex/priv`, and
+  # `_build/<target>/lib/bundlex/priv` is a symbolic link to that directory. Each
+  # target therefore shares one cache. A build for the host puts an x86 library
+  # there, the release for a target copies it, and the Nerves scrub step then
+  # stops with "Unexpected executable format".
+  #
+  # This step removes each library that does not match the architecture of this
+  # build. A later build for another architecture gets its own library again,
+  # because Bundlex downloads what it does not find.
+  defp prune_foreign_precompiled(release) do
+    with {:ok, %{"TARGET_ARCH" => arch}} <- Map.fetch(@bundlex_targets, Mix.target()),
+         {:ok, keep} <- precompiled_name(arch) do
+      "deps/bundlex/priv/shared/precompiled/*"
+      |> Path.wildcard()
+      |> Enum.reject(&String.contains?(Path.basename(&1), keep))
+      |> Enum.each(&File.rm_rf!/1)
+    end
+
+    release
+  end
+
+  defp precompiled_name("aarch64"), do: {:ok, "linux_arm"}
+  defp precompiled_name("x86_64"), do: {:ok, "linux_x86"}
+  defp precompiled_name(_other), do: :error
 
   defp elixirc_paths(:test),
     do: elixirc_paths(:dev) ++ ["test/support"]

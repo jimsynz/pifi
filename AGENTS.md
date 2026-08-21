@@ -24,9 +24,17 @@ Licence: Apache-2.0.
   neither.
 - **Nerves does not set the Bundlex target variables.** Bundlex needs
   `TARGET_ARCH`, `TARGET_VENDOR`, `TARGET_OS`, and `TARGET_ABI`. Nerves sets only
-  `CROSSCOMPILE` and `REBAR_TARGET_ARCH`. Without the four variables the
-  precompiled download fails. The build then uses `pkg-config` instead, and it
-  stops with an error. See section 6.4 of the specification.
+  `CROSSCOMPILE` and `REBAR_TARGET_ARCH`. `mix.exs` sets the four from the
+  `@bundlex_targets` map, and a new target needs an entry there.
+- **Bundlex shares one precompiled cache between targets.** It keeps each library
+  under `deps/bundlex/priv`, and `_build/<target>/lib/bundlex/priv` is a symbolic
+  link to it. A host build therefore leaves an x86 library where a target release
+  copies it, and the Nerves scrub step stops. The release step
+  `prune_foreign_precompiled/1` in `mix.exs` removes what does not match.
+- **`decimal` is overridden to `~> 3.0`, and the override must stay.**
+  `membrane_core` needs `ratio`, and `ratio` names an old `decimal`.
+  `ecto_sqlite3` needs version 3. See section 6.4 of the specification for why
+  the override is safe.
 - **HLS is in scope for version 1.** `membrane_hls_plugin` gives
   `Membrane.HLS.Source` and `Membrane.HLS.SourceBin`, and it holds no native
   code. 19% of New Zealand stations need HLS, and that includes every commercial
