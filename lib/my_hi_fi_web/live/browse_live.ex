@@ -110,7 +110,10 @@ defmodule MyHiFiWeb.BrowseLive do
     <div id="browse" class="mx-auto max-w-xl p-6">
       <div class="flex items-baseline justify-between mb-6">
         <h1 class="text-2xl font-semibold">Browse</h1>
-        <.link navigate={~p"/"} class="text-sm underline">Now playing</.link>
+        <nav class="flex gap-4 text-sm">
+          <.link navigate={~p"/"} class="underline">Now playing</.link>
+          <.link navigate={~p"/settings"} class="underline">Settings</.link>
+        </nav>
       </div>
 
       <%= if @source do %>

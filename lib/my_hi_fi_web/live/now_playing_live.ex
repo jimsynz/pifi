@@ -97,7 +97,10 @@ defmodule MyHiFiWeb.NowPlayingLive do
     <div id="now-playing" class="mx-auto max-w-xl p-6">
       <div class="flex items-baseline justify-between mb-6">
         <h1 class="text-2xl font-semibold">Now playing</h1>
-        <.link navigate={~p"/browse"} class="text-sm underline">Browse</.link>
+        <nav class="flex gap-4 text-sm">
+          <.link navigate={~p"/browse"} class="underline">Browse</.link>
+          <.link navigate={~p"/settings"} class="underline">Settings</.link>
+        </nav>
       </div>
 
       <div class="flex gap-6 items-start">

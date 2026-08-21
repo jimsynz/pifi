@@ -470,6 +470,19 @@ Domain `MyHiFi.Settings`:
 - The settings include the output device, the station countries, and the standby
   state.
 
+Domain `MyHiFi.Device`:
+
+- `Network` and `Storage` hold no data. Each one gives one generic action that
+  reports what the machine is doing: the interfaces, and the free space of the
+  writable partition.
+- A generic action carries no benefit over a plain function until something needs
+  it. Two things do. An API extension such as `ash_json_api` serves an action and
+  not a function, and a policy guards an action and not a function. The internal
+  API and the external API then have the same shape.
+- `Network` reads VintageNet, which is a target dependency, so the host reports an
+  empty list. The implementation module holds that branch, and the resource stays
+  a declaration.
+
 Oban does the background work:
 
 - A job copies the Radio Browser station list into `Station`. It reads the

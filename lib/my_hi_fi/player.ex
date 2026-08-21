@@ -22,10 +22,12 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Player.Pipeline
+  alias MyHiFi.Settings
 
   @progress_interval :timer.seconds(1)
   @restart_delay :timer.seconds(2)
   @max_restarts 5
+  @output_device_key "output_device"
 
   defmodule State do
     @moduledoc false
@@ -86,6 +88,31 @@ defmodule MyHiFi.Player do
   @spec state() :: map()
   def state, do: GenServer.call(__MODULE__, :state)
 
+  @doc """
+  The output devices, and the one that the player uses.
+
+  The settings page shows this, so that page needs no knowledge of which output
+  module the player holds.
+  """
+  @spec output() :: %{devices: [map()], selected: String.t() | nil}
+  def output, do: GenServer.call(__MODULE__, :output)
+
+  @doc """
+  Choose an output device.
+
+  The choice stays after a restart. The player starts the stream again, so a
+  person hears the change at once.
+  """
+  @spec select_output(String.t()) :: :ok | {:error, term()}
+  def select_output(id),
+    do: GenServer.call(__MODULE__, {:select_output, id}, :timer.seconds(30))
+
+  @doc """
+  The settings key that holds the chosen output device.
+  """
+  @spec output_device_key() :: String.t()
+  def output_device_key, do: @output_device_key
+
   @impl GenServer
   def init(options) do
     {:ok, %State{output: Keyword.get(options, :output, MyHiFi.Output.UsbDac)}}
@@ -144,6 +171,19 @@ defmodule MyHiFi.Player do
        standby?: state.standby?,
        position_ms: position_ms(state)
      }, state}
+  end
+
+  @impl GenServer
+  def handle_call(:output, _from, %State{output: output} = state) do
+    {:reply, %{devices: output.devices(), selected: chosen_device()}, state}
+  end
+
+  @impl GenServer
+  def handle_call({:select_output, id}, _from, %State{} = state) do
+    case Settings.put(@output_device_key, id) do
+      {:ok, _setting} -> {:reply, :ok, restart_for_output(state)}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   @impl GenServer
@@ -270,10 +310,36 @@ defmodule MyHiFi.Player do
     end
   end
 
+  # A person chooses a device, and that choice stays in the settings. A DAC can
+  # leave the device, so a choice that names an absent card gives way to the first
+  # card that is present. Silence is worse than the wrong socket.
   defp sink(%State{output: output}) do
-    case output.devices() do
-      [%{id: id} | _rest] -> {:ok, output.sink_spec(id)}
-      [] -> {:error, :no_output_device}
+    devices = output.devices()
+    chosen = chosen_device()
+
+    case Enum.find(devices, List.first(devices), &(&1.id == chosen)) do
+      %{id: id} -> {:ok, output.sink_spec(id)}
+      nil -> {:error, :no_output_device}
+    end
+  end
+
+  defp chosen_device do
+    case Settings.fetch(@output_device_key) do
+      {:ok, %{value: value}} -> value
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp restart_for_output(%State{source: nil} = state), do: state
+
+  defp restart_for_output(%State{pipeline: nil} = state), do: state
+
+  defp restart_for_output(%State{} = state) do
+    state = stop_pipeline(state)
+
+    case start(state.source, state.ref, state) do
+      {:ok, state} -> state
+      {:error, _reason, state} -> state
     end
   end
 
