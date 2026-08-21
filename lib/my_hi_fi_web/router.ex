@@ -30,6 +30,7 @@ defmodule MyHiFiWeb.Router do
     pipe_through(:browser)
 
     live("/", NowPlayingLive)
+    live("/browse", BrowseLive)
   end
 
   if Application.compile_env(:my_hi_fi, :dev_routes) do

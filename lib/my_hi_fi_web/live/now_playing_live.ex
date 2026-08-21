@@ -95,7 +95,10 @@ defmodule MyHiFiWeb.NowPlayingLive do
   def render(assigns) do
     ~H"""
     <div id="now-playing" class="mx-auto max-w-xl p-6">
-      <h1 class="text-2xl font-semibold mb-6">Now playing</h1>
+      <div class="flex items-baseline justify-between mb-6">
+        <h1 class="text-2xl font-semibold">Now playing</h1>
+        <.link navigate={~p"/browse"} class="text-sm underline">Browse</.link>
+      </div>
 
       <div class="flex gap-6 items-start">
         <div class="w-32 h-32 shrink-0 rounded bg-zinc-200 overflow-hidden flex items-center justify-center">
