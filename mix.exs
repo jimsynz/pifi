@@ -181,20 +181,32 @@ defmodule MyHiFi.MixProject do
     ]
   end
 
-  # Bundlex keeps each precompiled library under `deps/bundlex/priv`, and
-  # `_build/<target>/lib/bundlex/priv` is a symbolic link to that directory. Each
-  # target therefore shares one cache. A build for the host puts an x86 library
-  # there, the release for a target copies it, and the Nerves scrub step then
-  # stops with "Unexpected executable format".
+  # Bundlex keeps each precompiled library in two places, and each place holds a
+  # directory named after the URL of the archive.
   #
-  # This step removes each library that does not match the architecture of this
-  # build. A later build for another architecture gets its own library again,
-  # because Bundlex downloads what it does not find.
+  # `deps/bundlex/priv/shared/precompiled` is the cache, and every target shares
+  # it, because `_build/<target>/lib/bundlex/priv` is a symbolic link to it. Each
+  # plugin then gets a copy under
+  # `_build/<target>/lib/<plugin>/priv/bundlex/nif`, and the copy happens when the
+  # plugin compiles.
+  #
+  # A build for the host therefore leaves an x86 library in the cache, a later
+  # build for a target copies it beside the NIF, and the Nerves scrub step stops
+  # with "Unexpected executable format".
+  #
+  # This step runs before the release assembles, and after each plugin compiles.
+  # It removes from both places each library that does not match the architecture
+  # of this build. A later build for another architecture gets its own library
+  # again, because Bundlex downloads what it does not find.
   defp prune_foreign_precompiled(release) do
     with {:ok, %{"TARGET_ARCH" => arch}} <- Map.fetch(@bundlex_targets, Mix.target()),
          {:ok, keep} <- precompiled_name(arch) do
-      "deps/bundlex/priv/shared/precompiled/*"
-      |> Path.wildcard()
+      [
+        Path.join(["deps", "bundlex", "priv", "shared", "precompiled", "*"]),
+        Path.join([Mix.Project.build_path(), "lib", "*", "priv", "bundlex", "nif", "*"])
+      ]
+      |> Enum.flat_map(&Path.wildcard/1)
+      |> Enum.filter(&(File.dir?(&1) and String.ends_with?(&1, ".tar.gz")))
       |> Enum.reject(&String.contains?(Path.basename(&1), keep))
       |> Enum.each(&File.rm_rf!/1)
     end
