@@ -18,6 +18,7 @@ defmodule MyHiFi.Source.InternetRadio do
 
   @behaviour MyHiFi.Source
 
+  alias MyHiFi.Player.Hls
   alias MyHiFi.Radio
 
   @default_limit 100
@@ -95,13 +96,24 @@ defmodule MyHiFi.Source.InternetRadio do
 
   @impl MyHiFi.Source
   def resolve({:station, id}) do
-    case Radio.get_station(id) do
-      {:ok, station} ->
+    with {:ok, station} <- Radio.get_station(id), do: playable(station)
+  end
+
+  def resolve(ref), do: {:error, {:not_a_track, ref}}
+
+  # An HLS address gives a playlist, and the playlist holds the container and the
+  # codec. `MyHiFi.Player.Hls` reads it. This is the one function of this module
+  # that needs the network.
+  defp playable(%{hls?: true} = station) do
+    case Hls.resolve(station.stream_url, hls_codec(station)) do
+      {:ok, hls} ->
         {:ok,
          %{
-           uri: station.stream_url,
+           uri: URI.to_string(hls.media_playlist_uri),
            headers: [],
-           format: format(station),
+           transport: :hls,
+           container: hls.container,
+           format: hls.format,
            live?: true
          }}
 
@@ -110,7 +122,26 @@ defmodule MyHiFi.Source.InternetRadio do
     end
   end
 
-  def resolve(ref), do: {:error, {:not_a_track, ref}}
+  defp playable(station) do
+    {:ok,
+     %{
+       uri: station.stream_url,
+       headers: [],
+       transport: :http,
+       container: :none,
+       format: format(station),
+       live?: true
+     }}
+  end
+
+  # The playlist names the codec in almost every case, and this answer applies
+  # only when it does not. HLS radio carries AAC far more often than MP3.
+  defp hls_codec(%{codec: codec}) do
+    case codec_format(codec) do
+      :mp3 -> :mp3
+      _other -> :aac
+    end
+  end
 
   # A station holds a UUID, and a UUID holds no colon, so this name needs no
   # escape rule. A tag holds any character, so a container ref would need one, and
@@ -143,13 +174,12 @@ defmodule MyHiFi.Source.InternetRadio do
   def favourite(ref, _true?), do: {:error, {:not_a_track, ref}}
 
   @doc """
-  The pipeline that a station needs.
+  The codec that a station names.
 
-  HLS comes first, because a station that sends HLS names a codec as well, and
-  the container decides the pipeline.
+  This is what the service reports, and it is a guess for an HLS station: the
+  playlist of such a station holds the codec, and `MyHiFi.Player.Hls` reads it.
   """
-  @spec format(MyHiFi.Radio.Station.t()) :: :mp3 | :aac | :flac | :ogg | :hls | :unknown
-  def format(%{hls?: true}), do: :hls
+  @spec format(MyHiFi.Radio.Station.t()) :: :mp3 | :aac | :flac | :ogg | :unknown
   def format(%{codec: codec}), do: codec_format(codec)
 
   defp codec_format(nil), do: :unknown

@@ -40,10 +40,11 @@ defmodule MyHiFi.Output.APlaySink do
     @type t :: %__MODULE__{
             device: String.t(),
             port: port() | nil,
-            format: RawAudio.t() | nil
+            format: RawAudio.t() | nil,
+            sounded?: boolean()
           }
 
-    defstruct device: "default", port: nil, format: nil
+    defstruct device: "default", port: nil, format: nil, sounded?: false
   end
 
   @impl true
@@ -64,6 +65,17 @@ defmodule MyHiFi.Output.APlaySink do
     )
 
     {[], %State{state | port: start_aplay(state, format), format: format}}
+  end
+
+  # The first buffer that reaches this sink is the moment that sound starts, and
+  # this element is the only one that knows it. A source cannot say it: a stream
+  # that never arrives, a playlist with no segment, and a decoder that gives
+  # nothing all look the same from further up the pipeline.
+  @impl true
+  def handle_buffer(:input, buffer, _ctx, %State{port: port, sounded?: false} = state)
+      when is_port(port) do
+    Port.command(port, buffer.payload)
+    {[notify_parent: :playing], %State{state | sounded?: true}}
   end
 
   @impl true

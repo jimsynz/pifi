@@ -170,11 +170,9 @@ defmodule MyHiFi.Player.HttpSource do
   defp serve(%State{filling?: true, done?: false} = state) do
     if byte_size(state.queue) >= state.buffer_bytes do
       Membrane.Logger.info("Buffer holds #{byte_size(state.queue)} bytes. Playing.")
-      {actions, state} = serve(%State{state | filling?: false})
-
-      # The player waits for this before it says that a track started. A stream
-      # that never arrives therefore never claims to play.
-      {[notify_parent: :playing] ++ actions, state}
+      # The sink says when sound starts. This element only says that the buffer
+      # holds enough to begin.
+      serve(%State{state | filling?: false})
     else
       {[], state}
     end

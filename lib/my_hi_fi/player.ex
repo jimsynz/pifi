@@ -321,9 +321,10 @@ defmodule MyHiFi.Player do
   # this process needs, and it survives the pipeline.
   defp start_pipeline(playable, sink, _state) do
     case Membrane.Pipeline.start(Pipeline, %{
-           uri: playable.uri,
-           headers: playable.headers,
-           format: playable.format,
+           # The whole playable goes through. A copy of each field here would need
+           # a change in two places for each new field, and the first one that
+           # nobody changed reached the board.
+           playable: playable,
            buffer_bytes: 64 * 1024,
            sink: sink,
            parent: self()

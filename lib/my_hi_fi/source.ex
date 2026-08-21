@@ -52,12 +52,26 @@ defmodule MyHiFi.Source do
   @typedoc """
   Everything that the player needs to play a track.
 
+  Three facts decide the pipeline, and they are separate because they vary
+  separately.
+
+  - `transport` is how the bytes arrive. `:http` is one continuous answer, and
+    `:hls` is a playlist of segments that the player reads again and again.
+  - `container` is what holds the audio. `:mpeg_ts` needs a demultiplexer, and
+    `:none` gives the audio as it is.
+  - `format` is the codec.
+
+  An HLS station shows why. Of the 44 New Zealand HLS stations, 14 give AAC with
+  no container and 8 give MP3 inside MPEG-TS. One field cannot say that.
+
   `live?` is true for a stream with no end, such as a radio station.
   """
   @type playable :: %{
           uri: String.t(),
           headers: [{String.t(), String.t()}],
-          format: :mp3 | :aac | :flac | :ogg | :hls | :unknown,
+          transport: :http | :hls,
+          container: :none | :mpeg_ts,
+          format: :mp3 | :aac | :flac | :ogg | :unknown,
           live?: boolean()
         }
 

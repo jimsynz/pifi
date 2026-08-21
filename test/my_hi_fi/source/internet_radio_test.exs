@@ -199,6 +199,8 @@ defmodule MyHiFi.Source.InternetRadioTest do
       assert %{
                uri: "http://example.test/live.mp3",
                headers: [],
+               transport: :http,
+               container: :none,
                format: :mp3,
                live?: true
              } = playable
@@ -214,8 +216,8 @@ defmodule MyHiFi.Source.InternetRadioTest do
   end
 
   describe "format/1" do
-    test "HLS wins over the codec, because the container decides the pipeline" do
-      assert :hls = InternetRadio.format(%{hls?: true, codec: "AAC"})
+    test "gives the codec of an HLS station, because the playlist decides the rest" do
+      assert :aac = InternetRadio.format(%{hls?: true, codec: "AAC"})
     end
 
     test "reads each codec that the service reports" do

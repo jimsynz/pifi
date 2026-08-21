@@ -41,10 +41,30 @@ Licence: Apache-2.0.
   `membrane_core` needs `ratio`, and `ratio` names an old `decimal`.
   `ecto_sqlite3` needs version 3. See section 6.4 of the specification for why
   the override is safe.
-- **HLS is in scope for version 1.** `membrane_hls_plugin` gives
-  `Membrane.HLS.Source` and `Membrane.HLS.SourceBin`, and it holds no native
-  code. 19% of New Zealand stations need HLS, and that includes every commercial
-  network.
+- **HLS is in scope for version 1**, and the playlist decides the pipeline, not
+  the station record. `MyHiFi.Player.Hls` reads the playlist and gives three
+  facts: the transport, the container, and the codec. Four traps, and each one
+  cost a build to find.
+  - **Do not use `Membrane.HLS.SourceBin`.** It reads a variant stream as MPEG-TS
+    always, and 14 of the 44 New Zealand stations hold no container.
+    `Membrane.HLS.Source` takes the format as an option, so read the playlist and
+    give it.
+  - **A station address is a master playlist or a media playlist.** 4 stations
+    give a media playlist, so do not expect a master.
+  - **A packed audio segment starts with ID3v2 tags, and a segment can hold more
+    than one.** The stations of one network send two: a timestamp and the title of
+    the track. `Membrane.AAC.Parser` stops with `:invalid_adts_header` on any tag
+    that reaches it. `MyHiFi.Player.PackedAudio` removes them all.
+  - **8 stations send MP3 inside MPEG-TS**, with the codec `mp4a.40.34`, so HLS is
+    not only AAC. `membrane_mp3_mad_plugin` then stops at the first frame, because
+    it asks for the time of a frame before it holds a format. A timestamp on the
+    buffer is what starts that, so `MyHiFi.Player.MpegAudio` removes the
+    timestamp. `MyHiFi.Player.HttpSource` sets none, which is why a Shoutcast MP3
+    stream never showed this.
+- **`kim_hls` names `req` as a test dependency of its own**, so
+  `HLS.Storage.Req` exists in a build or does not, and the answer depends on the
+  order that the dependencies compile in. `MyHiFi.Player.Hls.Storage` is ours, and
+  it holds the timeouts of this firmware. Do not use the one from `kim_hls`.
 - **If a later version needs another binary, use NBPR**, not a Nerves system
   fork. See <https://github.com/jimsynz/nbpr>. NBPR ships binaries and shared
   libraries, and no header files.

@@ -361,8 +361,10 @@ portaudio is 17 MB. The design does not use either one.
 | Job | Element | Native code |
 |---|---|---|
 | Read an HTTP stream | `MyHiFi.Player.HttpSource` | No |
-| Read an HLS playlist | `Membrane.HLS.SourceBin` | No |
-| Read the MPEG-TS container | `membrane_mpeg_ts_plugin` | No |
+| Read an HLS playlist | `MyHiFi.Player.Hls`, then `Membrane.HLS.Source` | No |
+| Read the MPEG-TS container | `Membrane.MPEG.TS.Demuxer` | No |
+| Remove the ID3 tags of a packed segment | `MyHiFi.Player.PackedAudio` | No |
+| Remove the timestamp for MP3 in MPEG-TS | `MyHiFi.Player.MpegAudio` | No |
 | Parse AAC | `Membrane.AAC.Parser` | No |
 | Decode AAC and HE-AAC | `Membrane.AAC.FDK.Decoder` | libfdk-aac |
 | Decode MP3 | `Membrane.MP3.MAD.Decoder` | libmad |
@@ -406,16 +408,47 @@ only, so the page shows the station and no track. Some stations send no
 
 ### 6.3 HLS
 
-Version 1 plays HLS. `membrane_hls_plugin` v3.0.11 gives `Membrane.HLS.Source`
-and `Membrane.HLS.SourceBin`. They read a master playlist or a media playlist,
-and they follow the updates of a live playlist. The plugin holds no native code.
-It adds 10 more Elixir dependencies, and two of them handle H.264 and WebVTT.
-This firmware does not use those two.
+Version 1 plays HLS. `membrane_hls_plugin` v3.0.11 gives `Membrane.HLS.Source`,
+which reads a media playlist and gives one buffer for each segment. It adds 13
+more Elixir dependencies, and none of them holds native code. Two handle H.264 and
+WebVTT, and this firmware uses neither.
 
 HLS matters here. Radio Browser holds 242 New Zealand stations, and 46 of them
 (19%) use HLS. Every commercial network uses HLS: Newstalk ZB, ZM, The Edge, The
 Rock, The Sound, The Hits, Coast, and George FM. RNZ sends direct MP3 and AAC.
-The New Zealand HLS streams use AAC and HE-AAC, and fdk-aac decodes both.
+
+An HLS address gives a playlist and not audio, and the playlist decides the
+pipeline. `MyHiFi.Player.Hls` reads it. A count of the 44 addresses on 2026-08-22:
+
+| Shape | Stations | Pipeline |
+|---|---|---|
+| Master playlist, `.aac` segments | 14 | ID3 removal, AAC parser, fdk-aac |
+| Master playlist, `.ts` segments | 17 | MPEG-TS demultiplexer, then AAC or MP3 |
+| Media playlist, `.ts` segments | 4 | The same, with no master to read |
+| No answer, or another shape | 9 | |
+
+Three facts come out of that count, and each one changes the design.
+
+- **A station address is a master playlist or a media playlist.** 4 stations give
+  a media playlist, so the player cannot expect a master.
+- **`Membrane.HLS.SourceBin` cannot serve this.** It reads a variant stream as
+  MPEG-TS always, and 14 stations hold no container. `Membrane.HLS.Source` takes
+  the format as an option, so this firmware reads the playlist itself and gives
+  that option.
+- **8 stations send MP3 inside MPEG-TS**, with the codec `mp4a.40.34`. HLS is not
+  only AAC, so the transport, the container, and the codec are three separate
+  facts. See `MyHiFi.Source.playable/0`.
+
+Two elements of this firmware sit between a source and a decoder, and each one
+answers a fault that a real station showed.
+
+- `MyHiFi.Player.PackedAudio` removes the ID3v2 tag that section 3.4 of RFC 8216
+  puts at the start of each packed audio segment. `Membrane.AAC.Parser` stops with
+  `:invalid_adts_header` on that tag.
+- `MyHiFi.Player.MpegAudio` removes the timestamp of each buffer for MP3 inside
+  MPEG-TS. `membrane_mp3_mad_plugin` holds a fault, and that fault stops the
+  decoder at the first frame of every such stream. The module documentation holds
+  the detail.
 
 ### 6.4 The Bundlex target problem
 
@@ -664,7 +697,7 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 | ~~USB host mode~~ | Solved on 2026-08-21. The custom system holds `dr_mode=host`, the USB host stack, and the USB audio driver. | |
 | ~~ICY metadata~~ | Solved on 2026-08-21. `MyHiFi.Player.IcyStream` takes the blocks out, and `MyHiFi.Player.HttpSource` asks for them. Read against real stations. | |
 | Latency | The `aplay` port adds a buffer, and the samples in front of the sink add more. | A stop gave silence in 35 to 245 ms on 2026-08-21, after the link to the sink got a limit of eight buffers. See section 6.2. |
-| HLS weight | `membrane_hls_plugin` pulls in 10 dependencies, and this firmware uses few of them. | Accept it for now. It holds no native code. |
+| ~~HLS weight~~ | Small. `membrane_hls_plugin` pulls in 13 dependencies, and this firmware uses few of them. They hold 1.2 MB of source and no native code. | |
 | Buffer size | A large ring buffer needs much RAM. 202.4 MB is available with HE-AAC in play. | Buffer the compressed bytes, and not the samples. A stream in play adds 3 MB to the BEAM for MP3, and 7 MB for HE-AAC. |
 | Knob protocol | The I2C protocol and the detent commands need a design. | Design it with the RP2040 firmware, in a later version. Map it to the hint events. |
 | Event rate | A `Player.Progress` event each second, and a slow SPI display, may not agree. | Let a display drop events. Measure the PiTFT refresh time. |
@@ -695,7 +728,7 @@ I found these results on 2026-08-20. They support the decisions above.
 | Does `membrane_alsa_plugin` exist? | No. |
 | Does `membrane_portaudio_plugin` exist? | Yes, v0.19.6. PortAudio is not in the Nerves system. |
 | What audio software does `nerves_system_rpi0_2` hold? | `alsa-lib`, `aplay`, and `amixer`. Nothing else. |
-| Does a Membrane HLS plugin exist? | Yes. `membrane_hls_plugin` v3.0.11, from kim-company. It pulls in 10 dependencies, and two of them are H.264 and WebVTT. |
+| Does a Membrane HLS plugin exist? | Yes. `membrane_hls_plugin` v3.0.11, from kim-company. With `membrane_mpeg_ts_plugin` it pulls in 13 dependencies, and two of them are H.264 and WebVTT. They hold 1.2 MB of source and no native code. |
 | Does Membrane precompile the decoders for `aarch64` Linux? | Yes. `precompiled_mad`, `precompiled_fdk-aac`, `precompiled_portaudio`, and `precompiled_ffmpeg` all hold an arm64 build. |
 | Do the archives hold headers? | Yes. Each archive holds `include/` and `lib/`. |
 | What glibc do they need? | `GLIBC_2.17` only. Nerves glibc is newer, so they load. |

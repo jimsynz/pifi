@@ -95,7 +95,9 @@ defmodule MyHiFi.MixProject do
       {:membrane_aac_fdk_plugin, "~> 0.18"},
       {:membrane_aac_plugin, "~> 0.19"},
       {:membrane_core, "~> 1.0"},
+      {:membrane_hls_plugin, "~> 3.0"},
       {:membrane_mp3_mad_plugin, "~> 0.18"},
+      {:membrane_mpeg_ts_plugin, "~> 2.4"},
       {:gettext, "~> 1.0"},
       {:heroicons,
        [
