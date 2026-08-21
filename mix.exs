@@ -238,7 +238,7 @@ defmodule MyHiFi.MixProject do
       usage_rules: [{:usage_rules, link: :markdown}],
       skills: [
         location: ".agents/skills",
-        builds: [
+        build: [
           "ash-framework": [
             description:
               "Use this skill for working with the Ash Framework or any of its extensions. Always consult this when making any domain changes, features or fixes.",
