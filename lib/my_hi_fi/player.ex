@@ -36,6 +36,7 @@ defmodule MyHiFi.Player do
             track: map() | nil,
             playable: map() | nil,
             pipeline: pid() | nil,
+            stream_title: String.t() | nil,
             started_at: integer() | nil,
             restarts: non_neg_integer(),
             standby?: boolean(),
@@ -47,6 +48,7 @@ defmodule MyHiFi.Player do
               track: nil,
               playable: nil,
               pipeline: nil,
+              stream_title: nil,
               started_at: nil,
               restarts: 0,
               standby?: false,
@@ -103,14 +105,16 @@ defmodule MyHiFi.Player do
   def handle_call(:stop, _from, %State{} = state) do
     state = stop_pipeline(state)
     Event.publish(:player, %Events.Stopped{reason: :requested})
-    {:reply, :ok, %State{state | source: nil, ref: nil, track: nil, playable: nil}}
+
+    {:reply, :ok,
+     %State{state | source: nil, ref: nil, track: nil, playable: nil, stream_title: nil}}
   end
 
   @impl GenServer
   def handle_call({:standby, true}, _from, %State{} = state) do
     state = stop_pipeline(state)
     Event.publish(:player, %Events.Standby{entered?: true})
-    {:reply, :ok, %State{state | standby?: true}}
+    {:reply, :ok, %State{state | standby?: true, stream_title: nil}}
   end
 
   @impl GenServer
@@ -135,6 +139,7 @@ defmodule MyHiFi.Player do
      %{
        source: state.source,
        track: state.track,
+       stream_title: state.stream_title,
        playing?: state.started_at != nil,
        standby?: state.standby?,
        position_ms: position_ms(state)
@@ -172,6 +177,15 @@ defmodule MyHiFi.Player do
     # pipeline proves nothing: a stream that never arrives builds one each time,
     # and the player would then try for ever. Sound is the proof.
     {:noreply, %State{state | started_at: System.monotonic_time(:millisecond), restarts: 0}}
+  end
+
+  @impl GenServer
+  def handle_info({:pipeline_metadata, pipeline, title}, %State{pipeline: pipeline} = state) do
+    # The title stays here as well, because a page that opens in the middle of a
+    # track needs it. The next block comes about one second later, and a person
+    # should not wait for it.
+    Event.publish(:player, %Events.MetadataChanged{title: title})
+    {:noreply, %State{state | stream_title: title}}
   end
 
   @impl GenServer
@@ -226,6 +240,7 @@ defmodule MyHiFi.Player do
                track: track,
                playable: playable,
                pipeline: pipeline,
+               stream_title: nil,
                started_at: nil
            }}
 

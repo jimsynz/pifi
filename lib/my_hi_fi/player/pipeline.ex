@@ -46,6 +46,12 @@ defmodule MyHiFi.Player.Pipeline do
   end
 
   @impl true
+  def handle_child_notification({:metadata, title}, :source, _ctx, state) do
+    send(state.parent, {:pipeline_metadata, self(), title})
+    {[], state}
+  end
+
+  @impl true
   def handle_child_notification(_notification, _child, _ctx, state), do: {[], state}
 
   @impl true

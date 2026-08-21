@@ -20,6 +20,8 @@ defmodule MyHiFi.Player.HttpSource do
 
   require Membrane.Logger
 
+  alias MyHiFi.Player.IcyStream
+
   def_options(
     uri: [
       spec: String.t(),
@@ -58,6 +60,7 @@ defmodule MyHiFi.Player.HttpSource do
             headers: [{String.t(), String.t()}],
             buffer_bytes: pos_integer(),
             response: term() | nil,
+            icy: MyHiFi.Player.IcyStream.t() | nil,
             queue: binary(),
             demand: non_neg_integer(),
             filling?: boolean(),
@@ -67,6 +70,7 @@ defmodule MyHiFi.Player.HttpSource do
     defstruct [
       :uri,
       :response,
+      :icy,
       headers: [],
       buffer_bytes: 64 * 1024,
       queue: <<>>,
@@ -90,9 +94,11 @@ defmodule MyHiFi.Player.HttpSource do
   def handle_playing(_ctx, %State{} = state) do
     case start_request(state) do
       {:ok, response} ->
-        Membrane.Logger.info("Reading #{state.uri}")
+        icy = IcyStream.new(metaint(response))
+        Membrane.Logger.info("Reading #{state.uri}, ICY interval #{inspect(icy.metaint)}")
 
-        {[stream_format: {:output, %Membrane.RemoteStream{}}], %State{state | response: response}}
+        {[stream_format: {:output, %Membrane.RemoteStream{}}],
+         %State{state | response: response, icy: icy}}
 
       {:error, reason} ->
         raise "Could not read #{state.uri}: #{inspect(reason)}"
@@ -119,14 +125,22 @@ defmodule MyHiFi.Player.HttpSource do
   end
 
   defp handle_parts(parts, state) do
-    state =
-      Enum.reduce(parts, state, fn
-        {:data, data}, %State{} = acc -> %State{acc | queue: acc.queue <> data}
-        :done, %State{} = acc -> %State{acc | done?: true}
-        _other, %State{} = acc -> acc
+    {state, titles} =
+      Enum.reduce(parts, {state, []}, fn
+        {:data, data}, {%State{} = acc, titles} ->
+          {audio, new_titles, icy} = IcyStream.split(acc.icy, data)
+          {%State{acc | queue: acc.queue <> audio, icy: icy}, titles ++ new_titles}
+
+        :done, {%State{} = acc, titles} ->
+          {%State{acc | done?: true}, titles}
+
+        _other, {%State{} = acc, titles} ->
+          {acc, titles}
       end)
 
-    state |> trim() |> serve()
+    {actions, state} = state |> trim() |> serve()
+
+    {Enum.map(titles, &{:notify_parent, {:metadata, &1}}) ++ actions, state}
   end
 
   # A live stream arrives at about the bitrate of the audio, so the queue stays
@@ -191,12 +205,28 @@ defmodule MyHiFi.Player.HttpSource do
   defp start_request(%State{} = state) do
     [
       url: state.uri,
-      headers: state.headers,
+      # A Shoutcast server sends the titles only when the request asks for them.
+      # See `MyHiFi.Player.IcyStream`.
+      headers: [{"icy-metadata", "1"} | state.headers],
       into: :self,
       receive_timeout: :timer.seconds(15),
       retry: false
     ]
     |> Req.new()
     |> Req.get()
+  end
+
+  defp metaint(response) do
+    case Req.Response.get_header(response, "icy-metaint") do
+      [value | _rest] -> whole_number(value)
+      [] -> nil
+    end
+  end
+
+  defp whole_number(value) do
+    case Integer.parse(value) do
+      {metaint, _rest} when metaint > 0 -> metaint
+      _other -> nil
+    end
   end
 end

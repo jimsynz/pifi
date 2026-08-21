@@ -380,9 +380,22 @@ starts `aplay` again. This removes the need for a resampler, and it therefore
 removes the need for ffmpeg.
 
 ICY metadata: `MyHiFi.Player.HttpSource` reads the stream with `Req`, so the same
-element can read the ICY titles. It sends the `Icy-MetaData: 1` request header,
-and it removes the metadata blocks from the stream. `Membrane.Hackney.Source`
-cannot do this, and it would bring a second HTTP client.
+element reads the ICY titles. It sends the `Icy-MetaData: 1` request header, and
+`MyHiFi.Player.IcyStream` then takes the blocks out of the bytes.
+`Membrane.Hackney.Source` cannot do this, and it would bring a second HTTP client.
+
+A server puts one block into the audio after each `icy-metaint` bytes. The block
+starts with one byte that holds the length in units of 16 bytes, and a length of
+zero means that the server has nothing new to say. A decoder cannot read those
+bytes, so `MyHiFi.Player.IcyStream` removes them. It holds the point that it
+reached, because a block can start in one chunk of the network and end in the next
+one. It gives each title once, because a server repeats the same title in each
+block.
+
+Three answers from real stations on 2026-08-21. A Shoutcast station sends
+`icy-metaint` and the titles. RNZ National sends `icy-metaint` and empty blocks
+only, so the page shows the station and no track. Some stations send no
+`icy-metaint` header, and every byte is then audio.
 
 ### 6.3 HLS
 
@@ -615,8 +628,8 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 | ~~Bundlex target~~ | Solved on 2026-08-21. `mix.exs` sets the four variables, and the arm libraries download. | |
 | Precompiled builds | Membrane may change or remove an `aarch64` build. | Pin the versions, as `membrane_mp3_mad_plugin` already does. |
 | ~~USB host mode~~ | Solved on 2026-08-21. The custom system holds `dr_mode=host`, the USB host stack, and the USB audio driver. | |
-| ICY metadata | No Membrane element reads ICY titles. | Write a small element. Test it with real stations. |
-| Latency | The `aplay` port adds a buffer. | Measure the delay from a command to the sound. |
+| ~~ICY metadata~~ | Solved on 2026-08-21. `MyHiFi.Player.IcyStream` takes the blocks out, and `MyHiFi.Player.HttpSource` asks for them. Read against real stations. | |
+| Latency | The `aplay` port adds a buffer, and the samples in front of the sink add more. | A stop gave silence in 35 to 245 ms on 2026-08-21, after the link to the sink got a limit of eight buffers. See section 6.2. |
 | HLS weight | `membrane_hls_plugin` pulls in 10 dependencies, and this firmware uses few of them. | Accept it for now. It holds no native code. |
 | Buffer size | A large ring buffer needs much RAM, and only about 176 MB is free. | Buffer the compressed bytes, and not the samples. Measure the memory use. |
 | Knob protocol | The I2C protocol and the detent commands need a design. | Design it with the RP2040 firmware, in a later version. Map it to the hint events. |

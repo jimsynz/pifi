@@ -30,7 +30,7 @@ defmodule MyHiFiWeb.NowPlayingLive do
      |> assign(:standby?, state.standby?)
      |> assign(:position_ms, state.position_ms)
      |> assign(:duration_ms, nil)
-     |> assign(:stream_title, nil)
+     |> assign(:stream_title, state.stream_title)
      |> assign(:reason, nil)}
   end
 
