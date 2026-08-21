@@ -119,7 +119,8 @@ defmodule MyHiFi.Source do
   @type ref :: term()
   @type container :: %{ref: ref(), title: String.t(), artwork: String.t() | nil}
   @type track :: %{ref: ref(), title: String.t(), subtitle: String.t() | nil,
-                   artwork: String.t() | nil, duration_ms: pos_integer() | nil}
+                   artwork: String.t() | nil, duration_ms: pos_integer() | nil,
+                   favourite?: boolean() | nil}
   @type entry :: {:container, container()} | {:track, track()}
   @type page :: %{entries: [entry()], cursor: term() | nil}
   @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
@@ -130,7 +131,12 @@ defmodule MyHiFi.Source do
   @callback root() :: ref()
   @callback browse(ref(), keyword()) :: {:ok, page()} | {:error, term()}
   @callback search(String.t(), keyword()) :: {:ok, page()} | {:error, term()}
+  @callback track(ref()) :: {:ok, track()} | {:error, term()}
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
+  @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
+
+  @spec all() :: [module()]
+  def all
 end
 ```
 
@@ -139,6 +145,19 @@ Notes on the behaviour:
 - `duration_ms` is `nil` for a live stream.
 - `cursor` gives the next page. A `nil` cursor means the last page.
 - `search/2` returns `{:error, :not_supported}` if the source has no search.
+- `track/1` describes one track. The now playing screen holds a `ref` and nothing
+  else, and without this callback it would have to move through the tree again to
+  find what it already had.
+- `favourite/2` marks one entry, and it removes that mark. A source with no
+  favourites returns `{:error, :not_supported}`, in the same way that `search/2`
+  does. Each service holds its own idea of this mark: a station list holds a
+  column, and another service holds a list of its own. A user interface therefore
+  never reads or writes the mark itself.
+- `favourite?` on a track is `nil` for a source with no favourites. A user
+  interface shows the control for `true` and for `false` only, so it needs no
+  knowledge of which source it shows.
+- `all/0` gives every source. A new source joins that list, and each user
+  interface then shows it without a change.
 - A source keeps its own configuration in an Ash resource.
 
 ### 5.2 Output behaviour
@@ -480,8 +499,9 @@ The web interface has these pages:
 - **Now playing.** It shows the artwork, the title, the station, and the state.
   It gives a stop control and a standby control.
 - **Browse.** It shows the source list. It then shows the tree of the source. It
-  gives a search field.
-- **Favourites.** It lists the stations that the person keeps.
+  gives a search field, and it hides that field for a source with no search. It
+  gives a control that marks a track as a favourite. The favourites are a
+  container in the tree of the source, so they need no page of their own.
 - **Settings.** It shows the output device, the station countries, the network
   state, and the storage state.
 

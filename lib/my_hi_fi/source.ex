@@ -26,13 +26,18 @@ defmodule MyHiFi.Source do
   An entry that plays.
 
   `duration_ms` is `nil` for a live stream, because a live stream has no length.
+
+  `favourite?` is `nil` for a source that holds no favourites. A user interface
+  shows the control only for `true` and for `false`, so it needs no knowledge of
+  which source it shows.
   """
   @type track :: %{
           ref: ref(),
           title: String.t(),
           subtitle: String.t() | nil,
           artwork: String.t() | nil,
-          duration_ms: pos_integer() | nil
+          duration_ms: pos_integer() | nil,
+          favourite?: boolean() | nil
         }
 
   @type entry :: {:container, container()} | {:track, track()}
@@ -87,4 +92,23 @@ defmodule MyHiFi.Source do
 
   @doc "Turn a track into something that the player can play."
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
+
+  @doc """
+  Make one entry a favourite, or remove that mark.
+
+  A source with no favourites gives `{:error, :not_supported}`, in the same way
+  that `search/2` does. Each service holds its own idea of this mark, and a user
+  interface therefore never reads or writes the mark itself.
+  """
+  @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
+
+  @doc """
+  Every source that this firmware holds.
+
+  Internet radio is the only one today. A new source joins this list, and the web
+  interface and the device interface then show it without a change. A test sets
+  `:sources` to give a source of its own.
+  """
+  @spec all() :: [module()]
+  def all, do: Application.get_env(:my_hi_fi, :sources, [MyHiFi.Source.InternetRadio])
 end

@@ -238,6 +238,31 @@ defmodule MyHiFi.Source.InternetRadioTest do
     end
   end
 
+  describe "favourite/2" do
+    test "makes a station a favourite, and removes that mark" do
+      created = station(%{title: "Concert"})
+      ref = {:station, created.id}
+
+      assert :ok = InternetRadio.favourite(ref, true)
+      assert {:ok, %{favourite?: true}} = InternetRadio.track(ref)
+
+      assert {:ok, %{entries: [{:track, %{title: "Concert"}}]}} =
+               InternetRadio.browse(:favourites)
+
+      assert :ok = InternetRadio.favourite(ref, false)
+      assert {:ok, %{favourite?: false}} = InternetRadio.track(ref)
+      assert {:ok, %{entries: []}} = InternetRadio.browse(:favourites)
+    end
+
+    test "gives an error for a container" do
+      assert {:error, {:not_a_track, :countries}} = InternetRadio.favourite(:countries, true)
+    end
+
+    test "gives an error for a station that is not there" do
+      assert {:error, _reason} = InternetRadio.favourite({:station, Ash.UUID.generate()}, true)
+    end
+  end
+
   describe "the whole tree" do
     test "a caller walks from the root to a playable stream" do
       station(%{title: "RNZ National", country_code: "NZ", stream_url: "http://rnz.test/s.mp3"})

@@ -112,6 +112,16 @@ defmodule MyHiFi.Source.InternetRadio do
 
   def resolve(ref), do: {:error, {:not_a_track, ref}}
 
+  @impl MyHiFi.Source
+  def favourite({:station, id}, true?) do
+    with {:ok, station} <- Radio.get_station(id),
+         {:ok, _station} <- mark(station, true?) do
+      :ok
+    end
+  end
+
+  def favourite(ref, _true?), do: {:error, {:not_a_track, ref}}
+
   @doc """
   The pipeline that a station needs.
 
@@ -141,6 +151,9 @@ defmodule MyHiFi.Source.InternetRadio do
     |> paginate(options)
   end
 
+  defp mark(station, true), do: Radio.set_favourite(station)
+  defp mark(station, false), do: Radio.clear_favourite(station)
+
   defp to_track(station) do
     %{
       ref: {:station, station.id},
@@ -148,7 +161,8 @@ defmodule MyHiFi.Source.InternetRadio do
       subtitle: subtitle(station),
       artwork: station.artwork_url,
       # A radio stream is live, so it has no length.
-      duration_ms: nil
+      duration_ms: nil,
+      favourite?: station.favourite?
     }
   end
 
