@@ -12,7 +12,7 @@ defmodule MyHiFi.MixProject do
   # value before the dependencies compile. `mix.exs` runs first in each mix task.
   # Add an entry for each new target.
   @bundlex_targets %{
-    rpi0_2: %{
+    myhifi_rpi0_2: %{
       "TARGET_ARCH" => "aarch64",
       "TARGET_VENDOR" => "nerves",
       "TARGET_OS" => "linux",
@@ -33,7 +33,7 @@ defmodule MyHiFi.MixProject do
     :qemu_aarch64,
     :rpi,
     :rpi0,
-    :rpi0_2,
+    :myhifi_rpi0_2,
     :rpi2,
     :rpi3,
     :rpi4,
@@ -135,7 +135,15 @@ defmodule MyHiFi.MixProject do
       {:nerves_system_qemu_aarch64, "~> 0.1", runtime: false, targets: :qemu_aarch64},
       {:nerves_system_rpi, "~> 2.0", runtime: false, targets: :rpi},
       {:nerves_system_rpi0, "~> 2.0", runtime: false, targets: :rpi0},
-      {:nerves_system_rpi0_2, "~> 2.0", runtime: false, targets: :rpi0_2},
+      # The stock rpi0_2 system holds no USB host stack and no USB audio driver,
+      # so a USB DAC cannot work on it. It also gives 192 MB to the GPU and
+      # reserves 128 MB of CMA, and this device drives no display over HDMI. See
+      # the README of the system.
+      {:nerves_system_myhifi_rpi0_2,
+       path: "../../mypihifiguy/nerves_system_myhifi_rpi0_2",
+       runtime: false,
+       targets: :myhifi_rpi0_2,
+       nerves: [compile: true]},
       {:nerves_system_rpi2, "~> 2.0", runtime: false, targets: :rpi2},
       {:nerves_system_rpi3, "~> 2.0", runtime: false, targets: :rpi3},
       {:nerves_system_rpi4, "~> 2.0", runtime: false, targets: :rpi4},
