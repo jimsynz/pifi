@@ -21,7 +21,7 @@ the Nerves, Phoenix, and Ash skeleton, and the specification.
 
 | Item | Choice |
 |---|---|
-| Board | Raspberry Pi Zero 2 W (`rpi0_2`) |
+| Board | Raspberry Pi Zero 2 W, with a custom Nerves system (`myhifi_rpi0_2`) |
 | Audio output | USB DAC, through `aplay` |
 | Audio pipeline | Membrane, with precompiled libmad and fdk-aac decoders |
 | Stream types | Shoutcast and HLS |

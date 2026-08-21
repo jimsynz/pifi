@@ -52,7 +52,7 @@ Version 1 excludes these items. Later versions add them.
 | Part | Choice | Note |
 |---|---|---|
 | Board | Raspberry Pi Zero 2 W | 4 cores. 512 MB of RAM, and Linux sees 301 MB of it. |
-| Nerves target | `rpi0_2` | Already in `mix.exs` |
+| Nerves target | `myhifi_rpi0_2` | A custom system. The stock `rpi0_2` cannot drive a USB DAC. See section 4.1. |
 | Audio output | USB DAC on the USB data port | The port must run in host mode |
 | Screen | Adafruit PiTFT clone, 2.8 inch, SPI, resistive touch | Later version |
 | Knob | SimpleFOC motor, RP2040-Zero controller | Later version |
@@ -62,6 +62,35 @@ Version 1 excludes these items. Later versions add them.
 The board has one USB data port. The USB DAC takes that port. For this reason the
 knob does not use USB. The knob uses I2C. This decision changes the RP2040
 firmware plan.
+
+### 4.1 The Nerves system
+
+The target is `myhifi_rpi0_2`, and that is a custom system. See
+<https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2>. It starts from
+`nerves_system_rpi0_2` 2.1.1, and it makes three changes that the stock system
+cannot give.
+
+**USB host support.** The stock system holds three USB options: the dwc2
+controller, gadget support, and the `g_ether` gadget. It holds no host stack and
+no `CONFIG_SND_USB_AUDIO`, so a USB DAC cannot work on it. No stock Nerves system
+for a Raspberry Pi holds that option.
+
+**The USB port acts as a host.** The stock `config.txt` leaves `dr_mode` at `otg`,
+and the role then comes from the ID pin of the micro-USB socket. A plain adapter
+leaves that pin open, so the port acts as a device. The custom system holds
+`dtoverlay=dwc2,dr_mode=host`. This ends the network over USB, so a device uses
+Wi-Fi, or the serial console on the GPIO header.
+
+**Less memory for graphics.** The stock system gave 192 MB to the GPU and reserved
+128 MB of CMA for the VC4 display driver. This device drives no display over HDMI.
+The custom system sets `gpu_mem=16`, it removes the VC4 overlay, and it sets CMA
+to 16 MB. `MemAvailable` on the board goes from 172 MB to 245 MB. Section 17 holds
+the measurements.
+
+A release of the system repository holds the built system, and `mix deps.get`
+downloads it. The repository is private, so the download needs a token in
+`FORGE_TOKEN`. Without it Nerves tries to build the system, and that takes about
+47 minutes.
 
 ## 5. Software structure
 
@@ -557,7 +586,7 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 | RAM | Linux sees 301 MB, and not 512 MB. A measurement on 2026-08-21 gave 176 MB free with the skeleton in operation, and the BEAM used 72 MB of the rest. Membrane, the decoders, the ring buffer, and the pages must fit in what is left. | Measure at each step. See #16. A 128 MB CMA reservation holds 91 MB that nothing uses. A change to `config.txt` gives that memory back, and such a change needs a custom Nerves system. |
 | ~~Bundlex target~~ | Solved on 2026-08-21. `mix.exs` sets the four variables, and the arm libraries download. | |
 | Precompiled builds | Membrane may change or remove an `aarch64` build. | Pin the versions, as `membrane_mp3_mad_plugin` already does. |
-| USB host mode | The OTG port must run in host mode for the DAC. | Confirm the `rpi0_2` system configuration. |
+| ~~USB host mode~~ | Solved on 2026-08-21. The custom system holds `dr_mode=host`, the USB host stack, and the USB audio driver. | |
 | ICY metadata | No Membrane element reads ICY titles. | Write a small element. Test it with real stations. |
 | Latency | The `aplay` port adds a buffer. | Measure the delay from a command to the sound. |
 | HLS weight | `membrane_hls_plugin` pulls in 10 dependencies, and this firmware uses few of them. | Accept it for now. It holds no native code. |
@@ -569,7 +598,7 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 
 ## 16. Order of work
 
-1. Bring up the `rpi0_2` firmware. Confirm Wi-Fi and the access point wizard.
+1. Bring up the firmware. Confirm Wi-Fi and the access point wizard.
 2. Fix the Bundlex target variables. Confirm that libmad and fdk-aac cross-compile.
 3. Detect the USB DAC. Play a test tone through `aplay` from Membrane.
 4. Build the Ash resources for `Station` and `Setting`.

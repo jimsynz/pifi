@@ -140,10 +140,10 @@ defmodule MyHiFi.MixProject do
       # reserves 128 MB of CMA, and this device drives no display over HDMI. See
       # the README of the system.
       {:nerves_system_myhifi_rpi0_2,
-       path: "../../mypihifiguy/nerves_system_myhifi_rpi0_2",
+       git: "https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2.git",
+       tag: "v0.1.0",
        runtime: false,
-       targets: :myhifi_rpi0_2,
-       nerves: [compile: true]},
+       targets: :myhifi_rpi0_2},
       {:nerves_system_rpi2, "~> 2.0", runtime: false, targets: :rpi2},
       {:nerves_system_rpi3, "~> 2.0", runtime: false, targets: :rpi3},
       {:nerves_system_rpi4, "~> 2.0", runtime: false, targets: :rpi4},

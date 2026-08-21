@@ -8,7 +8,11 @@ Licence: Apache-2.0.
 
 ## What you must know
 
-- **Target board.** Raspberry Pi Zero 2 W, Nerves target `rpi0_2`. It has 4
+- **Target board.** Raspberry Pi Zero 2 W, Nerves target `myhifi_rpi0_2`. That
+  target is a custom system, not the stock `rpi0_2`. See
+  <https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2>. The stock system
+  holds no USB host stack and no USB audio driver, so a USB DAC cannot work on
+  it, and it reserves 320 MB of the 512 MB for graphics. The board has 4
   cores and one USB data port. It holds 512 MB of RAM, and Linux sees 301 MB of
   it, because CMA and the GPU reserve the rest. A measurement on 2026-08-21 gave
   176 MB free with the skeleton in operation. Keep the memory use small.
@@ -121,7 +125,8 @@ background work.
   of the behaviour is that the rest of the firmware never changes. A person must
   be able to add an SSD1306 screen, or a different DAC, or a new music service,
   without a change to the player or to the user interface.
-- A Hex package does not always work on `rpi0_2`. Check the Nerves system, and
+- A Hex package does not always work on `myhifi_rpi0_2`. Check the Nerves
+  system, and
   look for native code, before you add the package.
 - Keep the specification current. If a decision changes, change `docs/spec.md`
   in the same commit.
