@@ -293,7 +293,7 @@ defmodule MyHiFiWeb.BrowseLive do
   defp options(_socket, cursor), do: [cursor: cursor]
 
   defp play(socket, track) do
-    case MyHiFi.Player.play(socket.assigns.source, track.ref) do
+    case MyHiFi.Playback.play(socket.assigns.source, track.ref) do
       :ok -> put_flash(socket, :info, "Playing #{track.title}.")
       {:error, reason} -> put_flash(socket, :error, "Could not play that: #{inspect(reason)}")
     end

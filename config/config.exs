@@ -16,7 +16,7 @@ config :my_hi_fi, Oban,
 
 config :my_hi_fi,
   ecto_repos: [MyHiFi.Repo],
-  ash_domains: [MyHiFi.Device, MyHiFi.Radio, MyHiFi.Settings]
+  ash_domains: [MyHiFi.Device, MyHiFi.Playback, MyHiFi.Radio, MyHiFi.Settings]
 
 # These enable behaviors that will become the default in the next major
 # version of Ash. Setting them now opts your application into the new

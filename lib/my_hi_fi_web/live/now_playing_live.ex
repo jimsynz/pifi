@@ -15,12 +15,13 @@ defmodule MyHiFiWeb.NowPlayingLive do
 
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
+  alias MyHiFi.Playback
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
     if connected?(socket), do: Event.subscribe(:player)
 
-    state = MyHiFi.Player.state()
+    state = Playback.state!()
 
     {:ok,
      socket
@@ -91,13 +92,13 @@ defmodule MyHiFiWeb.NowPlayingLive do
 
   @impl Phoenix.LiveView
   def handle_event("stop", _params, socket) do
-    :ok = MyHiFi.Player.stop()
+    :ok = Playback.stop!()
     {:noreply, socket}
   end
 
   @impl Phoenix.LiveView
   def handle_event("standby", _params, socket) do
-    _result = MyHiFi.Player.standby(not socket.assigns.standby?)
+    _result = Playback.standby(not socket.assigns.standby?)
     {:noreply, socket}
   end
 

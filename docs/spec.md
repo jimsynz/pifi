@@ -541,6 +541,20 @@ Domain `MyHiFi.Settings`:
 - The settings include the output device, the station countries, and the standby
   state.
 
+Domain `MyHiFi.Playback`:
+
+- `Player` holds no data. It gives one generic action for each control: `state`,
+  `play`, `stop`, `standby`, `output`, and `select_output`.
+- `MyHiFi.Player` is the process, and it holds the pipeline, the count of tries,
+  and the monitor. None of that belongs in an action, so each action calls that
+  process. Read the two names with care.
+- No page calls the process. Each page calls this domain, so the internal API and
+  a later external API have one shape, and a policy can guard each control.
+- `play` takes the `ref` of a source as it is, and a `ref` is a term of that
+  source. An external API needs the name of a `ref` instead, and
+  `MyHiFi.Source.ref_from_string/1` reads one. That step belongs to the API: a
+  source names the tracks only, and a user interface must play what it browses.
+
 Domain `MyHiFi.Device`:
 
 - `Network` and `Storage` hold no data. Each one gives one generic action that

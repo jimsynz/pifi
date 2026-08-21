@@ -36,7 +36,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
   @impl Phoenix.LiveView
   def handle_event("select_output", %{"id" => id}, socket) do
-    case MyHiFi.Player.select_output(id) do
+    case MyHiFi.Playback.select_output(id) do
       :ok ->
         {:noreply, socket |> put_flash(:info, "The output device is #{id}.") |> load()}
 
@@ -199,7 +199,7 @@ defmodule MyHiFiWeb.SettingsLive do
   # country code when the interval comes round.
   defp refresh(socket) do
     socket
-    |> assign(:output, MyHiFi.Player.output())
+    |> assign(:output, MyHiFi.Playback.output!())
     |> assign(:interfaces, Device.network!())
     |> assign(:storage, Device.storage!())
     |> assign(:station_count, Ash.count!(Station))

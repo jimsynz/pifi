@@ -1,0 +1,129 @@
+defmodule MyHiFi.PlaybackTest do
+  use MyHiFi.DataCase, async: false
+
+  alias MyHiFi.Playback
+  alias MyHiFi.Radio
+  alias MyHiFi.Settings
+
+  defp station(overrides) do
+    defaults = %{
+      remote_id: "remote-#{System.unique_integer([:positive])}",
+      title: "Station #{System.unique_integer([:positive])}",
+      stream_url: "http://example.test/stream.mp3",
+      codec: "MP3",
+      bitrate: 128,
+      hls?: false,
+      country_code: "NZ",
+      tags: ["news"],
+      click_count: 0
+    }
+
+    Radio.upsert_station_from_remote!(Map.merge(defaults, overrides))
+  end
+
+  setup do
+    reset = fn ->
+      Playback.stop!()
+      Playback.standby!(false)
+
+      for key <- ["standby", "last_source", "last_ref", "output_device"] do
+        case Settings.fetch(key) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end
+    end
+
+    reset.()
+    on_exit(reset)
+    :ok
+  end
+
+  describe "state/0" do
+    test "gives each field of the shape that the action declares" do
+      assert {:ok, state} = Playback.state()
+
+      assert %{
+               source: _source,
+               track: _track,
+               stream_title: _title,
+               artwork_path: _path,
+               playing?: playing?,
+               standby?: standby?,
+               position_ms: position
+             } = state
+
+      assert is_boolean(playing?)
+      assert is_boolean(standby?)
+      assert is_integer(position)
+    end
+  end
+
+  describe "stop/0" do
+    test "gives :ok, and the player then plays nothing" do
+      assert Playback.stop!() == :ok
+      assert %{playing?: false, track: nil} = Playback.state!()
+    end
+  end
+
+  describe "standby/1" do
+    test "enters standby and leaves it" do
+      assert Playback.standby!(true) == :ok
+      assert %{standby?: true} = Playback.state!()
+
+      assert Playback.standby!(false) == :ok
+      assert %{standby?: false} = Playback.state!()
+    end
+
+    test "refuses an argument that is not a boolean" do
+      assert_raise Ash.Error.Invalid, fn -> Playback.standby!("yes") end
+    end
+  end
+
+  describe "play/2" do
+    test "gives the reason when a track cannot play" do
+      # A host holds no USB DAC, so a play cannot succeed here.
+      created = station(%{})
+
+      assert {:error, _reason} =
+               Playback.play(MyHiFi.Source.InternetRadio, {:station, created.id})
+    end
+
+    test "needs both arguments" do
+      assert_raise Ash.Error.Invalid, fn -> Playback.play!(nil, {:station, "x"}) end
+    end
+  end
+
+  describe "output/0 and select_output/1" do
+    test "gives the devices and the choice" do
+      assert %{devices: devices, selected: _selected} = Playback.output!()
+      assert is_list(devices)
+    end
+
+    test "keeps a choice, and the state shows it" do
+      assert Playback.select_output!("Audio") == :ok
+      assert %{selected: "Audio"} = Playback.output!()
+    end
+
+    test "refuses an id that is not a string" do
+      assert_raise Ash.Error.Invalid, fn -> Playback.select_output!(42) end
+    end
+  end
+
+  describe "the domain" do
+    test "holds every control, so no page calls the process" do
+      # `MyHiFi.Player` is the process, and each page calls this domain instead.
+      for {name, arity} <- [
+            state: 0,
+            play: 2,
+            stop: 0,
+            standby: 1,
+            output: 0,
+            select_output: 1
+          ] do
+        assert function_exported?(Playback, name, arity),
+               "MyHiFi.Playback.#{name}/#{arity} is absent"
+      end
+    end
+  end
+end
