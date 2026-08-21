@@ -13,6 +13,17 @@ defmodule MyHiFi.Player.Pipeline do
 
   alias MyHiFi.Player.HttpSource
 
+  # How many decoded buffers may wait at the sink. Membrane gives 400 by default,
+  # and a buffer of MP3 samples is about 50 ms, so the default lets 20 seconds of
+  # samples pile up in front of `aplay`. The sink writes to a port and the write
+  # blocks, so the sink cannot read its own mailbox while it waits, and a request
+  # to stop waits behind all of those samples. A person then presses stop and
+  # hears several more seconds of music.
+  #
+  # Eight buffers is under half a second. ALSA holds another half second, and the
+  # decoder runs much faster than the sound, so the sound stays smooth.
+  @sink_queue_buffers 8
+
   @impl true
   def handle_init(_ctx, options) do
     spec =
@@ -22,6 +33,7 @@ defmodule MyHiFi.Player.Pipeline do
         buffer_bytes: options.buffer_bytes
       })
       |> decoder(options.format)
+      |> via_in(:input, auto_demand_size: @sink_queue_buffers)
       |> child(:sink, options.sink)
 
     {[spec: spec], %{parent: options.parent}}
@@ -57,7 +69,8 @@ defmodule MyHiFi.Player.Pipeline do
     raise ArgumentError, """
     No pipeline for #{inspect(format)}.
 
-    #8 covers MP3 and AAC over a plain HTTP stream. #10 covers HLS.
+    This pipeline plays MP3 and AAC over a plain HTTP stream. HLS needs a
+    playlist reader in front of the decoder, and this firmware has none yet.
     """
   end
 end

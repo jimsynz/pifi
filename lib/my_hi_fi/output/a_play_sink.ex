@@ -113,10 +113,25 @@ defmodule MyHiFi.Output.APlaySink do
   defp close_port(%State{port: nil} = state), do: state
 
   defp close_port(%State{port: port} = state) do
-    # A closed port makes `aplay` see the end of its input, so it plays what it
-    # holds and then stops.
-    Port.close(port)
+    # Closing the port alone is not enough. `aplay` then sees the end of its
+    # input, and it plays what it already holds before it stops. ALSA holds about
+    # half a second, and the pipeline sends more while it shuts down, so a person
+    # who presses stop waits several seconds for silence.
+    #
+    # Ending the program stops the sound at once. A person who wants to stop wants
+    # to stop.
+    stop_aplay(port)
+
+    if Port.info(port), do: Port.close(port)
+
     %State{state | port: nil, format: nil}
+  end
+
+  defp stop_aplay(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} -> System.cmd("kill", ["-TERM", to_string(os_pid)])
+      nil -> :ok
+    end
   end
 
   defp aplay do
