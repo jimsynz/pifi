@@ -213,17 +213,42 @@ defmodule MyHiFi.MixProject do
   defp prune_foreign_precompiled(release) do
     with {:ok, %{"TARGET_ARCH" => arch}} <- Map.fetch(@bundlex_targets, Mix.target()),
          {:ok, keep} <- precompiled_name(arch) do
+      build = Mix.Project.build_path()
+
+      # `_build/<target>/lib/bundlex/priv` is a symbolic link into `deps`, and it
+      # holds every architecture that any build has fetched. Replace the link with
+      # a copy, so this step can remove the foreign libraries from the copy and
+      # leave `deps` as it is.
+      #
+      # An earlier version of this step removed them from `deps` instead. That
+      # broke each build for the host: the library beside a host NIF is itself a
+      # symbolic link into that shared directory, and the NIF then failed to load
+      # with `unifex_create/0 is undefined`.
+      materialise_symlink(Path.join([build, "lib", "bundlex", "priv"]))
+
       [
-        Path.join(["deps", "bundlex", "priv", "shared", "precompiled", "*"]),
-        Path.join([Mix.Project.build_path(), "lib", "*", "priv", "bundlex", "nif", "*"])
+        Path.join([build, "lib", "bundlex", "priv", "shared", "precompiled", "*"]),
+        Path.join([build, "lib", "*", "priv", "bundlex", "nif", "*"])
       ]
       |> Enum.flat_map(&Path.wildcard/1)
-      |> Enum.filter(&(File.dir?(&1) and String.ends_with?(&1, ".tar.gz")))
+      |> Enum.filter(&String.ends_with?(&1, ".tar.gz"))
       |> Enum.reject(&String.contains?(Path.basename(&1), keep))
       |> Enum.each(&File.rm_rf!/1)
     end
 
     release
+  end
+
+  defp materialise_symlink(path) do
+    case File.read_link(path) do
+      {:ok, target} ->
+        real = Path.expand(target, Path.dirname(path))
+        File.rm!(path)
+        File.cp_r!(real, path)
+
+      {:error, _reason} ->
+        :ok
+    end
   end
 
   defp precompiled_name("aarch64"), do: {:ok, "linux_arm"}

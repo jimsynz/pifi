@@ -84,6 +84,16 @@ defmodule MyHiFi.Source.InternetRadio do
   end
 
   @impl MyHiFi.Source
+  def track({:station, id}) do
+    case Radio.get_station(id) do
+      {:ok, station} -> {:ok, to_track(station)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def track(ref), do: {:error, {:not_a_track, ref}}
+
+  @impl MyHiFi.Source
   def resolve({:station, id}) do
     case Radio.get_station(id) do
       {:ok, station} ->
@@ -127,18 +137,19 @@ defmodule MyHiFi.Source.InternetRadio do
 
   defp tracks(stations, options) do
     stations
-    |> Enum.map(fn station ->
-      {:track,
-       %{
-         ref: {:station, station.id},
-         title: station.title,
-         subtitle: subtitle(station),
-         artwork: station.artwork_url,
-         # A radio stream is live, so it has no length.
-         duration_ms: nil
-       }}
-    end)
+    |> Enum.map(&{:track, to_track(&1)})
     |> paginate(options)
+  end
+
+  defp to_track(station) do
+    %{
+      ref: {:station, station.id},
+      title: station.title,
+      subtitle: subtitle(station),
+      artwork: station.artwork_url,
+      # A radio stream is live, so it has no length.
+      duration_ms: nil
+    }
   end
 
   # The codec and the bitrate tell a person what to expect of the sound.

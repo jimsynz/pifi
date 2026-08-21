@@ -76,6 +76,15 @@ defmodule MyHiFi.Source do
   """
   @callback search(String.t(), keyword()) :: {:ok, page()} | {:error, term()}
 
+  @doc """
+  Describe one track.
+
+  The now playing screen needs the title and the artwork of the track that plays,
+  and it holds a `ref` and nothing else. Without this a caller would have to walk
+  the tree again to find what it already had.
+  """
+  @callback track(ref()) :: {:ok, track()} | {:error, term()}
+
   @doc "Turn a track into something that the player can play."
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
 end

@@ -22,6 +22,7 @@ defmodule MyHiFi.Application do
            Application.fetch_env!(:my_hi_fi, Oban)
          )},
         {Phoenix.PubSub, [name: MyHiFi.PubSub]},
+        MyHiFi.Player,
         MyHiFiWeb.Endpoint
       ] ++ target_children()
 
