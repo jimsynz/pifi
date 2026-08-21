@@ -14,7 +14,7 @@ config :my_hi_fi, Oban,
   repo: MyHiFi.Repo,
   plugins: [{Oban.Plugins.Cron, []}]
 
-config :my_hi_fi, ecto_repos: [MyHiFi.Repo], ash_domains: []
+config :my_hi_fi, ecto_repos: [MyHiFi.Repo], ash_domains: [MyHiFi.Radio, MyHiFi.Settings]
 
 # These enable behaviors that will become the default in the next major
 # version of Ash. Setting them now opts your application into the new
