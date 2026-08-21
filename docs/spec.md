@@ -134,6 +134,8 @@ defmodule MyHiFi.Source do
   @callback track(ref()) :: {:ok, track()} | {:error, term()}
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
   @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
+  @callback ref_to_string(ref()) :: {:ok, String.t()} | {:error, term()}
+  @callback ref_from_string(String.t()) :: {:ok, ref()} | {:error, term()}
 
   @spec all() :: [module()]
   def all
@@ -156,6 +158,11 @@ Notes on the behaviour:
 - `favourite?` on a track is `nil` for a source with no favourites. A user
   interface shows the control for `true` and for `false` only, so it needs no
   knowledge of which source it shows.
+- `ref_to_string/1` and `ref_from_string/1` name a `ref` and read that name back.
+  The player keeps the last station in the settings, and a setting holds a string.
+  A source gives `{:error, :cannot_name}` for a `ref` that it does not name: the
+  player needs the tracks, and internet radio therefore names a station and no
+  container. See section 9 for why the player stores a name and not a term.
 - `all/0` gives every source. A new source joins that list, and each user
   interface then shows it without a change.
 - A source keeps its own configuration in an Ash resource.
@@ -511,9 +518,23 @@ network and the web interface active. It also keeps the last position.
 
 When the device leaves standby, it starts the last track again. For a live stream
 it opens the station again, because a live stream has no position. For a track
-with a length, it starts at the last position.
+with a length, it starts at the last position. No source gives a track with a
+length yet, so the player stores no position and holds no way to move through a
+stream.
 
 On the first boot the device starts with nothing selected. It does not play.
+
+The settings hold the last station and the standby state, so both survive a
+restart. A restart selects that station and plays nothing, in the same way that a
+first boot does. A stereo that starts to play by itself after a power cut is a
+surprise.
+
+The settings hold a string, so a source names its own `ref` with
+`ref_to_string/1`. Nothing turns stored bytes back into a term. A changed row
+therefore cannot make an atom or run a function, a person can read the value, and
+a source that changes the shape of its `ref` can keep the old name working. Only
+a source in `MyHiFi.Source.all/0` comes back, so a source that a later version
+removes leaves the device with nothing selected.
 
 ## 10. Web interface
 

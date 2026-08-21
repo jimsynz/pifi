@@ -112,6 +112,26 @@ defmodule MyHiFi.Source.InternetRadio do
 
   def resolve(ref), do: {:error, {:not_a_track, ref}}
 
+  # A station holds a UUID, and a UUID holds no colon, so this name needs no
+  # escape rule. A tag holds any character, so a container ref would need one, and
+  # the player stores the tracks only.
+  @impl MyHiFi.Source
+  def ref_to_string({:station, id}), do: {:ok, "station:" <> id}
+
+  def ref_to_string(_ref), do: {:error, :cannot_name}
+
+  @impl MyHiFi.Source
+  def ref_from_string("station:" <> id) do
+    # Ash reads an empty string as `nil`, and a name with no UUID must not give a
+    # ref that names no station.
+    case Ash.Type.cast_input(Ash.Type.UUID, id) do
+      {:ok, id} when is_binary(id) -> {:ok, {:station, id}}
+      _other -> {:error, :not_a_name}
+    end
+  end
+
+  def ref_from_string(_name), do: {:error, :not_a_name}
+
   @impl MyHiFi.Source
   def favourite({:station, id}, true?) do
     with {:ok, station} <- Radio.get_station(id),

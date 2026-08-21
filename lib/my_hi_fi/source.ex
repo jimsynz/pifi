@@ -94,6 +94,32 @@ defmodule MyHiFi.Source do
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
 
   @doc """
+  Give a `ref` a name that a caller can store.
+
+  The player keeps the last station in the settings, and a setting holds a string.
+  A source therefore names its own `ref`, and it reads that name back with
+  `ref_from_string/1`.
+
+  The player could store the term itself instead. It does not, for three reasons.
+  A name is readable when a person looks in the database. Nothing turns stored
+  bytes back into a term, so a changed row cannot make an atom or run a function.
+  A source that changes the shape of its `ref` also keeps the old name working,
+  and a stored term gives it no way to do that.
+
+  A source gives `{:error, :cannot_name}` for a `ref` that it does not name. The
+  player needs the tracks, and a source needs no more than that.
+  """
+  @callback ref_to_string(ref()) :: {:ok, String.t()} | {:error, term()}
+
+  @doc """
+  Read a `ref` back from its name.
+
+  The name comes from `ref_to_string/1` of the same source. A source gives an
+  error for a name that it does not know, so an old setting cannot break a start.
+  """
+  @callback ref_from_string(String.t()) :: {:ok, ref()} | {:error, term()}
+
+  @doc """
   Make one entry a favourite, or remove that mark.
 
   A source with no favourites gives `{:error, :not_supported}`, in the same way

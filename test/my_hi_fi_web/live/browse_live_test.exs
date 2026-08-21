@@ -36,6 +36,13 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     @impl MyHiFi.Source
     def favourite(_ref, _true?), do: {:error, :not_supported}
 
+    @impl MyHiFi.Source
+    def ref_to_string(:only), do: {:ok, "only"}
+
+    @impl MyHiFi.Source
+    def ref_from_string("only"), do: {:ok, :only}
+    def ref_from_string(_name), do: {:error, :not_a_name}
+
     defp track do
       %{
         ref: :only,

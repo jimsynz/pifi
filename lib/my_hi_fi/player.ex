@@ -28,6 +28,9 @@ defmodule MyHiFi.Player do
   @restart_delay :timer.seconds(2)
   @max_restarts 5
   @output_device_key "output_device"
+  @last_source_key "last_source"
+  @last_ref_key "last_ref"
+  @standby_key "standby"
 
   defmodule State do
     @moduledoc false
@@ -115,7 +118,18 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def init(options) do
-    {:ok, %State{output: Keyword.get(options, :output, MyHiFi.Output.UsbDac)}}
+    state = %State{output: Keyword.get(options, :output, MyHiFi.Output.UsbDac)}
+
+    {:ok, state, {:continue, :restore}}
+  end
+
+  # The settings hold the last station and the standby state, so both survive a
+  # restart. The device selects that station and plays nothing: a stereo that
+  # starts to play by itself after a power cut is a surprise, and section 9 asks
+  # for silence at the first start.
+  @impl GenServer
+  def handle_continue(:restore, %State{} = state) do
+    {:noreply, restore_station(%State{state | standby?: stored_standby?()})}
   end
 
   @impl GenServer
@@ -123,8 +137,14 @@ defmodule MyHiFi.Player do
     state = stop_pipeline(state)
 
     case start(source, ref, state) do
-      {:ok, state} -> {:reply, :ok, state}
-      {:error, reason, state} -> {:reply, {:error, reason}, state}
+      {:ok, state} ->
+        # Only a new choice goes to the settings. Leaving standby and starting the
+        # stream again both use the choice that is already there.
+        store_station(source, ref)
+        {:reply, :ok, state}
+
+      {:error, reason, state} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -140,18 +160,21 @@ defmodule MyHiFi.Player do
   @impl GenServer
   def handle_call({:standby, true}, _from, %State{} = state) do
     state = stop_pipeline(state)
+    Settings.put(@standby_key, "true")
     Event.publish(:player, %Events.Standby{entered?: true})
     {:reply, :ok, %State{state | standby?: true, stream_title: nil}}
   end
 
   @impl GenServer
   def handle_call({:standby, false}, _from, %State{source: nil} = state) do
+    Settings.put(@standby_key, "false")
     Event.publish(:player, %Events.Standby{entered?: false})
     {:reply, :ok, %State{state | standby?: false}}
   end
 
   @impl GenServer
   def handle_call({:standby, false}, _from, %State{} = state) do
+    Settings.put(@standby_key, "false")
     Event.publish(:player, %Events.Standby{entered?: false})
 
     case start(state.source, state.ref, %State{state | standby?: false}) do
@@ -327,6 +350,53 @@ defmodule MyHiFi.Player do
     case Settings.fetch(@output_device_key) do
       {:ok, %{value: value}} -> value
       {:error, _reason} -> nil
+    end
+  end
+
+  # A source names its own ref, so nothing here turns stored bytes back into a
+  # term. See `MyHiFi.Source.ref_to_string/1`.
+  defp store_station(source, ref) do
+    case source.ref_to_string(ref) do
+      {:ok, name} ->
+        Settings.put(@last_source_key, inspect(source))
+        Settings.put(@last_ref_key, name)
+        :ok
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  defp restore_station(%State{} = state) do
+    with {:ok, source} <- stored_source(),
+         {:ok, name} <- stored_value(@last_ref_key),
+         {:ok, ref} <- source.ref_from_string(name),
+         {:ok, track} <- source.track(ref) do
+      %State{state | source: source, ref: ref, track: track}
+    else
+      _other -> state
+    end
+  end
+
+  # Only a source that this firmware holds can come back. A name from the
+  # settings therefore never makes an atom, and a source that a later version
+  # removes leaves the device with nothing selected.
+  defp stored_source do
+    with {:ok, name} <- stored_value(@last_source_key),
+         source when not is_nil(source) <-
+           Enum.find(MyHiFi.Source.all(), &(inspect(&1) == name)) do
+      {:ok, source}
+    else
+      _other -> :error
+    end
+  end
+
+  defp stored_standby?, do: stored_value(@standby_key) == {:ok, "true"}
+
+  defp stored_value(key) do
+    case Settings.fetch(key) do
+      {:ok, %{value: value}} -> {:ok, value}
+      {:error, _reason} -> :error
     end
   end
 

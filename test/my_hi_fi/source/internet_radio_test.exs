@@ -263,6 +263,29 @@ defmodule MyHiFi.Source.InternetRadioTest do
     end
   end
 
+  describe "naming a ref" do
+    test "a station ref goes to a name and back" do
+      created = station(%{})
+      ref = {:station, created.id}
+
+      assert {:ok, name} = InternetRadio.ref_to_string(ref)
+      assert name == "station:" <> created.id
+      assert {:ok, ^ref} = InternetRadio.ref_from_string(name)
+    end
+
+    test "a container gives an error, because the player stores the tracks only" do
+      for ref <- [:root, :favourites, :countries, :tags, {:country, "NZ"}, {:tag, "jazz"}] do
+        assert {:error, :cannot_name} = InternetRadio.ref_to_string(ref)
+      end
+    end
+
+    test "a name that this source did not write gives an error" do
+      for name <- ["", "rubbish", "station:", "station:not-a-uuid", "country:NZ"] do
+        assert {:error, :not_a_name} = InternetRadio.ref_from_string(name)
+      end
+    end
+  end
+
   describe "the whole tree" do
     test "a caller walks from the root to a playable stream" do
       station(%{title: "RNZ National", country_code: "NZ", stream_url: "http://rnz.test/s.mp3"})
