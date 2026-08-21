@@ -83,9 +83,13 @@ Licence: Apache-2.0.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `MyHiFi.Application` calls
-  `MyHiFi.SecretKeyBase.put/1` before it starts the endpoint, which reads a
-  secret from `/root` and writes one on the first boot. That runs for a target
-  build in any `MIX_ENV`, and never on the host. Do not restore `force_ssl`, and
+  `MyHiFi.DeviceSecrets.put/1` before it starts the endpoint, which reads the
+  endpoint secret and the LiveView signing salt from `/root` and writes each one
+  on the first boot. That runs for a target build in any `MIX_ENV`, and never on
+  the host. A signing salt is not a secret, and each place that uses one derives
+  the key from the salt and the endpoint secret. The salt of a device is therefore
+  defence in depth, and the session cookie salt of `MyHiFiWeb.Endpoint` stays
+  fixed, because a module attribute cannot hold a value for each device. Do not restore `force_ssl`, and
   do not make a boot depend on an environment variable: a device has nothing to
   set one.
 - **Setup mode and normal operation cannot happen together.** The Wi-Fi wizard

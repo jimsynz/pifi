@@ -21,3 +21,8 @@ config :nerves_runtime,
      }}
 
 config :nerves_uevent, manage_udev: true
+
+# A host keeps one salt, so a LiveView session continues after a restart of the
+# server. A target makes its own and keeps it under `/root`. See
+# `MyHiFi.DeviceSecrets`.
+config :my_hi_fi, MyHiFiWeb.Endpoint, live_view: [signing_salt: "EhXdl2qH"]

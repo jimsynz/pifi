@@ -93,8 +93,12 @@ config :my_hi_fi,
          formats: [json: MyHiFiWeb.ErrorJSON],
          layout: false
        ],
-       pubsub_server: MyHiFi.PubSub,
-       live_view: [signing_salt: "EhXdl2qH"]
+       pubsub_server: MyHiFi.PubSub
+
+# The LiveView signing salt is absent here on purpose. A target makes one for
+# itself and keeps it under `/root`, so two devices hold two salts. See
+# `MyHiFi.DeviceSecrets`. `config/host.exs` holds a fixed one, so a session in
+# local development continues after a restart.
 
 # Enable the Nerves integration with Mix
 Application.start(:nerves_bootstrap)

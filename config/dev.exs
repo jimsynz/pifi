@@ -31,7 +31,7 @@ if Mix.target() == :host do
   config :my_hi_fi,
          MyHiFiWeb.Endpoint,
          # A dev firmware makes its own secret at each first start, and it keeps
-         # the secret under `/root`. See `MyHiFi.SecretKeyBase`. The host keeps
+         # the secret under `/root`. See `MyHiFi.DeviceSecrets`. The host keeps
          # this fixed secret, so a session in local development stays valid after
          # a restart.
          secret_key_base: "pXfI5KnH7ehUWe6JjHZ2r1GzxdF7cX9F50DAa8z9/AKKabtJSx7uK10bzn05jrco",

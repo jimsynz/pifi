@@ -9,7 +9,7 @@ defmodule MyHiFi.Application do
   def start(_type, _args), do: start_app()
 
   defp start_normally do
-    put_secret_key_base()
+    put_device_secrets()
     migrate()
 
     children =
@@ -40,7 +40,7 @@ defmodule MyHiFi.Application do
   if Mix.target() == :host do
     defp start_app, do: start_normally()
 
-    defp put_secret_key_base, do: :ok
+    defp put_device_secrets, do: :ok
     defp migrate, do: :ok
 
     defp target_children do
@@ -83,7 +83,7 @@ defmodule MyHiFi.Application do
       end
     end
 
-    defp put_secret_key_base, do: MyHiFi.SecretKeyBase.put()
+    defp put_device_secrets, do: MyHiFi.DeviceSecrets.put()
     defp migrate, do: MyHiFi.Migrator.migrate()
 
     defp target_children do
