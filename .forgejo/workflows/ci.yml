@@ -14,14 +14,10 @@ jobs:
     with:
       targets: "myhifi_rpi0_2"
       assets_deploy_enabled: true
-      # `nbpr` holds the programs that decode Ogg Vorbis and FLAC, and NBPR
-      # publishes the read key of that organization, so the key belongs here and
-      # not in a secret. Add these two lines with the first `nbpr_*` package:
-      #
-      #   hex_organization: "nbpr"
-      #   hex_organization_key: "<the published key>"
-      #
-      # `mix hex.organization auth nbpr --key 15da04a2330d881e1301a73c5d39f59`
-      # answers "invalid API key" here, and the workflow runs that same command,
-      # so naming the organization now would stop every build.
+      # `nbpr` holds the programs that decode Ogg Vorbis and FLAC. NBPR shares the
+      # read key of that organization on purpose: it gates the download and it
+      # guards nothing, and `mix nbpr.install` holds the same value. The key
+      # therefore belongs here, where a reader can see it, and not in a secret.
+      hex_organization: "nbpr"
+      hex_organization_key: "15da04a2330d881e1301a73c5d39f591"
     secrets: inherit
