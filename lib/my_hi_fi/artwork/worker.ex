@@ -1,0 +1,56 @@
+defmodule MyHiFi.Artwork.Worker do
+  @moduledoc """
+  Reads one station logo and stores it.
+
+  The player asks for this job when it starts a track whose logo the cache does
+  not hold. The job then tells the `:player` topic, so a page that is open shows
+  the logo without a reload.
+
+  A station that gives no image, or an image that is too large, gives no retry. A
+  network fault gives one, and Oban holds the count.
+  """
+
+  use Oban.Worker, queue: :default, max_attempts: 3
+
+  require Logger
+
+  alias MyHiFi.Artwork
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Player, as: Events
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: %{"url" => url}}) do
+    case Artwork.fetch(url) do
+      {:ok, name} ->
+        Event.publish(:player, %Events.MetadataChanged{artwork_path: "/artwork/#{name}"})
+        :ok
+
+      # A station that holds no image cannot start to hold one, so this job stops.
+      {:error, {:not_an_image, type}} ->
+        Logger.info("#{url} gave #{inspect(type)} and not an image.")
+        {:cancel, :not_an_image}
+
+      {:error, {:too_large, bytes}} ->
+        Logger.info("#{url} gave #{bytes} bytes, and that is too large for a logo.")
+        {:cancel, :too_large}
+
+      {:error, {:status, status}} when status in 400..499 ->
+        {:cancel, {:status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc "Ask for one logo, unless the cache holds it."
+  @spec enqueue(String.t() | nil) :: :ok
+  def enqueue(url) when is_binary(url) and url != "" do
+    if is_nil(Artwork.name(url)) do
+      %{"url" => url} |> new() |> Oban.insert()
+    end
+
+    :ok
+  end
+
+  def enqueue(_url), do: :ok
+end

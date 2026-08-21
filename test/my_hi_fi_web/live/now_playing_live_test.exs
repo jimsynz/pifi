@@ -51,7 +51,7 @@ defmodule MyHiFiWeb.NowPlayingLiveTest do
       assert render(view) =~ "Buffering"
     end
 
-    test "a started track shows its title, station and artwork", %{conn: conn} do
+    test "a started track shows its title and station", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/")
 
       Event.publish(:player, %Events.Started{
@@ -64,7 +64,42 @@ defmodule MyHiFiWeb.NowPlayingLiveTest do
       assert html =~ "Playing"
       assert html =~ "RNZ National"
       assert html =~ "MP3, 64 kbps"
-      assert html =~ "https://example.test/logo.png"
+    end
+
+    test "the logo comes from this device, and never from the station" do
+      # The content security policy holds `'self'` alone, so the address of the
+      # station must not reach the page. See `MyHiFi.Artwork`.
+      {:ok, view, _html} = live(build_conn(), ~p"/")
+
+      Event.publish(:player, %Events.Started{
+        source: MyHiFi.Source.InternetRadio,
+        track: track(),
+        artwork_path: "/artwork/#{String.duplicate("a", 64)}.png"
+      })
+
+      html = render(view)
+
+      assert html =~ "/artwork/#{String.duplicate("a", 64)}.png"
+      refute html =~ "https://example.test/logo.png"
+    end
+
+    test "a logo that arrives after the track shows without a reload", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      Event.publish(:player, %Events.Started{
+        source: MyHiFi.Source.InternetRadio,
+        track: track(),
+        artwork_path: nil
+      })
+
+      assert render(view) =~ "No artwork"
+
+      # `MyHiFi.Artwork.Worker` reads the logo after the track started.
+      Event.publish(:player, %Events.MetadataChanged{
+        artwork_path: "/artwork/#{String.duplicate("b", 64)}.png"
+      })
+
+      assert render(view) =~ "/artwork/#{String.duplicate("b", 64)}.png"
     end
 
     test "a live stream shows the time from the start and no length", %{conn: conn} do

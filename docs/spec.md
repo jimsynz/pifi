@@ -643,15 +643,32 @@ gives the reason.
 
 ## 13. Cache and buffer
 
-The cache lives on the application data partition, under `/root`. It holds two
-types of data:
+The cache lives on the application data partition, at `/root/artwork`. It holds
+two types of data:
 
-1. **Artwork.** The device stores station logos and cover art. It stores them by
-   a hash of the source URL.
+1. **Artwork.** The device stores station logos. The name of a file is a hash of
+   the address and the extension of the type, such as
+   `553451c0…144e.png`. `MyHiFi.Artwork` holds it.
 2. **Downloads.** A later version stores podcast files and Plex files.
 
-The cache has a size limit. The device removes the oldest artwork first. The
-device sets the limit from the free space on the partition.
+The cache has a size limit, and the limit is a twentieth of the free space, up to
+64 MB. The device removes the oldest file first. A logo is small: 247 New Zealand
+stations need about 5 MB.
+
+The web interface serves each logo from this device and never from the station, so
+the content security policy holds `'self'` for an image. A page that holds no logo
+yet shows a space, and `MyHiFi.Artwork.Worker` reads the logo while the track
+plays. The page then shows it without a reload.
+
+Three rules keep the cache safe.
+
+- A name from a request reaches the file system only when it holds 64 hexadecimal
+  characters and one known extension. Any other name gives 404.
+- The type comes from the answer of the station, and not from the address. A
+  station that names `logo.png` and sends a JPEG gets a `.jpg` file.
+- The device serves PNG, JPEG, GIF and WEBP. It refuses SVG, because an SVG file
+  can hold a script, and this device serves each logo from its own address. Such
+  a script would run with the rights of the web interface.
 
 The stream buffer is not part of the cache. It is a ring buffer in memory. See
 section 6.2. A buffer on the SD card would write all the time, and that shortens

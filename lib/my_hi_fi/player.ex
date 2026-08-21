@@ -19,6 +19,7 @@ defmodule MyHiFi.Player do
 
   require Logger
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Player.Pipeline
@@ -42,6 +43,7 @@ defmodule MyHiFi.Player do
             playable: map() | nil,
             pipeline: pid() | nil,
             stream_title: String.t() | nil,
+            artwork_path: String.t() | nil,
             started_at: integer() | nil,
             restarts: non_neg_integer(),
             standby?: boolean(),
@@ -54,6 +56,7 @@ defmodule MyHiFi.Player do
               playable: nil,
               pipeline: nil,
               stream_title: nil,
+              artwork_path: nil,
               started_at: nil,
               restarts: 0,
               standby?: false,
@@ -154,7 +157,15 @@ defmodule MyHiFi.Player do
     Event.publish(:player, %Events.Stopped{reason: :requested})
 
     {:reply, :ok,
-     %State{state | source: nil, ref: nil, track: nil, playable: nil, stream_title: nil}}
+     %State{
+       state
+       | source: nil,
+         ref: nil,
+         track: nil,
+         playable: nil,
+         stream_title: nil,
+         artwork_path: nil
+     }}
   end
 
   @impl GenServer
@@ -190,6 +201,7 @@ defmodule MyHiFi.Player do
        source: state.source,
        track: state.track,
        stream_title: state.stream_title,
+       artwork_path: state.artwork_path,
        playing?: state.started_at != nil,
        standby?: state.standby?,
        position_ms: position_ms(state)
@@ -228,10 +240,12 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_info({:pipeline_playing, pipeline}, %State{pipeline: pipeline} = state) do
+    artwork_path = artwork_path(state.track)
+
     Event.publish(:player, %Events.Started{
       source: state.source,
       track: state.track,
-      artwork_path: nil
+      artwork_path: artwork_path
     })
 
     schedule_progress()
@@ -239,7 +253,13 @@ defmodule MyHiFi.Player do
     # The count of tries resets here and not where the pipeline starts. Building a
     # pipeline proves nothing: a stream that never arrives builds one each time,
     # and the player would then try for ever. Sound is the proof.
-    {:noreply, %State{state | started_at: System.monotonic_time(:millisecond), restarts: 0}}
+    {:noreply,
+     %State{
+       state
+       | started_at: System.monotonic_time(:millisecond),
+         restarts: 0,
+         artwork_path: artwork_path
+     }}
   end
 
   @impl GenServer
@@ -304,6 +324,7 @@ defmodule MyHiFi.Player do
                playable: playable,
                pipeline: pipeline,
                stream_title: nil,
+               artwork_path: nil,
                started_at: nil
            }}
 
@@ -346,6 +367,22 @@ defmodule MyHiFi.Player do
       nil -> {:error, :no_output_device}
     end
   end
+
+  # A page shows the local copy of a logo, and never the address of the station.
+  # The content security policy of the device holds `'self'` alone. A logo that the
+  # cache does not hold arrives in a later event, from `MyHiFi.Artwork.Worker`.
+  defp artwork_path(%{artwork: url}) do
+    case Artwork.name(url) do
+      nil ->
+        Artwork.Worker.enqueue(url)
+        nil
+
+      name ->
+        "/artwork/#{name}"
+    end
+  end
+
+  defp artwork_path(_track), do: nil
 
   defp chosen_device do
     case Settings.fetch(@output_device_key) do

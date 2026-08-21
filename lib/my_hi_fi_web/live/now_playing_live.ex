@@ -31,6 +31,7 @@ defmodule MyHiFiWeb.NowPlayingLive do
      |> assign(:position_ms, state.position_ms)
      |> assign(:duration_ms, nil)
      |> assign(:stream_title, state.stream_title)
+     |> assign(:artwork_path, state.artwork_path)
      |> assign(:reason, nil)}
   end
 
@@ -40,11 +41,12 @@ defmodule MyHiFiWeb.NowPlayingLive do
   end
 
   @impl Phoenix.LiveView
-  def handle_info(%Events.Started{track: track}, socket) do
+  def handle_info(%Events.Started{track: track, artwork_path: artwork_path}, socket) do
     {:noreply,
      assign(socket,
        status: :playing,
        track: track,
+       artwork_path: artwork_path,
        stream_title: nil,
        position_ms: 0,
        reason: nil
@@ -54,6 +56,14 @@ defmodule MyHiFiWeb.NowPlayingLive do
   @impl Phoenix.LiveView
   def handle_info(%Events.Progress{position_ms: position, duration_ms: duration}, socket) do
     {:noreply, assign(socket, position_ms: position, duration_ms: duration)}
+  end
+
+  # The cache reads a logo after the track started, so the path arrives later. A
+  # title of `nil` in such an event must not remove the title that is there.
+  @impl Phoenix.LiveView
+  def handle_info(%Events.MetadataChanged{title: nil, artwork_path: path}, socket)
+      when is_binary(path) do
+    {:noreply, assign(socket, artwork_path: path)}
   end
 
   @impl Phoenix.LiveView
@@ -105,8 +115,8 @@ defmodule MyHiFiWeb.NowPlayingLive do
 
       <div class="flex gap-6 items-start">
         <div class="w-32 h-32 shrink-0 rounded bg-zinc-200 overflow-hidden flex items-center justify-center">
-          <%= if artwork(@track) do %>
-            <img id="artwork" src={artwork(@track)} alt="" class="w-full h-full object-cover" />
+          <%= if @artwork_path do %>
+            <img id="artwork" src={@artwork_path} alt="" class="w-full h-full object-cover" />
           <% else %>
             <span class="text-zinc-500 text-sm">No artwork</span>
           <% end %>
@@ -162,9 +172,6 @@ defmodule MyHiFiWeb.NowPlayingLive do
     </div>
     """
   end
-
-  defp artwork(%{artwork: artwork}) when is_binary(artwork) and artwork != "", do: artwork
-  defp artwork(_track), do: nil
 
   defp title(%{title: title}) when is_binary(title), do: title
   defp title(_track), do: nil
