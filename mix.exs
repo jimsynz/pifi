@@ -113,6 +113,10 @@ defmodule MyHiFi.MixProject do
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_dashboard, "~> 0.8"},
       {:phoenix_live_view, "~> 1.0"},
+      # The sync job fetches the station list. `req` already arrives through a
+      # dependency of Membrane, and this line makes the reliance explicit, so a
+      # change there cannot take it away.
+      {:req, "~> 0.5"},
       {:ring_logger, "~> 0.11.0"},
       {:shoehorn, "~> 0.9.1"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},

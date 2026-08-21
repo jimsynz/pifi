@@ -18,6 +18,7 @@ defmodule MyHiFi.Radio do
       define :set_favourite, action: :set_favourite
       define :clear_favourite, action: :clear_favourite
       define :record_play, action: :record_play
+      define :sync_stations_from_remote, action: :sync_from_remote
     end
   end
 end

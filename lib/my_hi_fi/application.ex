@@ -25,6 +25,9 @@ defmodule MyHiFi.Application do
         MyHiFiWeb.Endpoint
       ] ++ target_children()
 
+    # `MyHiFi.Radio.FirstSync` comes after Oban, because it puts a job in the
+    # queue.
+
     Supervisor.start_link(children, supervisor_options())
   end
 
@@ -63,9 +66,7 @@ defmodule MyHiFi.Application do
 
     defp target_children do
       [
-        # Children for all targets except host
-        # Starts a worker by calling: Target.Worker.start_link(arg)
-        # {Target.Worker, arg},
+        MyHiFi.Radio.FirstSync
       ]
     end
   end

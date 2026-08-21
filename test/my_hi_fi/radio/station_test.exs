@@ -102,6 +102,21 @@ defmodule MyHiFi.Radio.StationTest do
       assert [%{title: "Rock B"}, %{title: "Rock A"}] = Radio.search_stations!("Rock")
     end
 
+    test "ignores the case of a title" do
+      remote_station(%{title: "RNZ National"})
+
+      assert [%{title: "RNZ National"}] = Radio.search_stations!("rnz")
+      assert [%{title: "RNZ National"}] = Radio.search_stations!("NATIONAL")
+    end
+
+    test "treats a wildcard in the text of the person as a letter" do
+      remote_station(%{title: "Plain FM"})
+      remote_station(%{title: "100% Hits"})
+
+      assert [%{title: "100% Hits"}] = Radio.search_stations!("100%")
+      assert [] = Radio.search_stations!("%%%")
+    end
+
     test "gives nothing when nothing matches" do
       remote_station(%{title: "Quiet", tags: ["talk"]})
 

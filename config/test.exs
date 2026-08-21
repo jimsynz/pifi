@@ -7,6 +7,12 @@ config :my_hi_fi, MyHiFi.Repo,
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10
 
+# A test gives its own answers for the station service, so nothing reaches the
+# network. See `Req.Test`.
+config :my_hi_fi, MyHiFi.Radio.RadioBrowser,
+  plug: {Req.Test, MyHiFi.Radio.RadioBrowser},
+  retry: false
+
 config :ash, policies: [show_policy_breakdowns?: true], disable_async?: true
 config :phoenix, plug_init_mode: :runtime
 config :logger, level: :warning

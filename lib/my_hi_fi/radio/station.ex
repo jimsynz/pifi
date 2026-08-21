@@ -10,11 +10,26 @@ defmodule MyHiFi.Radio.Station do
   use Ash.Resource,
     otp_app: :my_hi_fi,
     domain: MyHiFi.Radio,
-    data_layer: AshSqlite.DataLayer
+    data_layer: AshSqlite.DataLayer,
+    extensions: [AshOban]
 
   sqlite do
     table "stations"
     repo MyHiFi.Repo
+  end
+
+  oban do
+    scheduled_actions do
+      # A station list changes slowly, and each run asks the service for a whole
+      # country. One time each week is often enough, and it is kind to a service
+      # that asks nothing for its work.
+      schedule :sync_from_remote, "0 4 * * 0" do
+        action :sync_from_remote
+        worker_module_name MyHiFi.Radio.Station.Workers.SyncFromRemote
+        queue :default
+        max_attempts 3
+      end
+    end
   end
 
   actions do
@@ -32,10 +47,16 @@ defmodule MyHiFi.Radio.Station do
 
       argument :query, :string, allow_nil?: false
 
+      # `contains/2` compiles to `instr`, and `instr` in SQLite matches the case.
+      # A person searching for "rnz" would then miss "RNZ National". Both clauses
+      # therefore lower each side.
+      #
+      # `instr` is right and `like` is wrong here. `like` also ignores the case,
+      # and it reads `%` and `_` in the text of the person as wildcards.
       filter expr(
-               contains(title, ^arg(:query)) or
+               fragment("instr(lower(?), lower(?)) > 0", title, ^arg(:query)) or
                  fragment(
-                   "EXISTS (SELECT 1 FROM json_each(?) WHERE lower(value) LIKE '%' || lower(?) || '%')",
+                   "EXISTS (SELECT 1 FROM json_each(?) WHERE instr(lower(value), lower(?)) > 0)",
                    tags,
                    ^arg(:query)
                  )
@@ -87,6 +108,20 @@ defmodule MyHiFi.Radio.Station do
     update :clear_favourite do
       description "Remove the mark from a station."
       change set_attribute(:favourite?, false)
+    end
+
+    action :sync_from_remote, :map do
+      description """
+      Copy the station list of each chosen country into this table.
+
+      A weekly schedule runs this, and the first start of a device runs it once.
+      """
+
+      argument :countries, {:array, :string},
+        allow_nil?: true,
+        description: "The countries to copy. It reads the settings when this is absent."
+
+      run MyHiFi.Radio.Station.SyncFromRemote
     end
 
     update :record_play do
