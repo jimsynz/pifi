@@ -23,7 +23,13 @@ defmodule MyHiFi.PersistentLogger do
   """
 
   @path "/dev/pmsg0"
-  @max_bytes 800
+
+  # The message is cut to this length, and the line ending comes after the cut. An
+  # earlier version cut the whole line, so a long message lost its newline and ran
+  # into the next entry. Membrane writes a report of several kilobytes when an
+  # element fails, and one of those filled the window and broke the framing of
+  # everything after it.
+  @max_bytes 400
 
   @doc """
   Add this handler to the log.
@@ -50,8 +56,8 @@ defmodule MyHiFi.PersistentLogger do
   @doc false
   @spec log(:logger.log_event(), :logger.handler_config()) :: :ok
   def log(%{level: level, msg: message, meta: meta}, _config) do
-    line = "#{stamp(meta)} myhifi #{level}: #{text(message)}\n"
-    _ = File.write(@path, String.slice(line, 0, @max_bytes), [:append])
+    text = message |> text() |> String.slice(0, @max_bytes)
+    _ = File.write(@path, "#{stamp(meta)} myhifi #{level}: #{text}\n", [:append])
     :ok
   end
 

@@ -167,7 +167,11 @@ defmodule MyHiFi.Player do
     })
 
     schedule_progress()
-    {:noreply, %State{state | started_at: System.monotonic_time(:millisecond)}}
+
+    # The count of tries resets here and not where the pipeline starts. Building a
+    # pipeline proves nothing: a stream that never arrives builds one each time,
+    # and the player would then try for ever. Sound is the proof.
+    {:noreply, %State{state | started_at: System.monotonic_time(:millisecond), restarts: 0}}
   end
 
   @impl GenServer
@@ -222,8 +226,7 @@ defmodule MyHiFi.Player do
                track: track,
                playable: playable,
                pipeline: pipeline,
-               started_at: nil,
-               restarts: 0
+               started_at: nil
            }}
 
         {:error, reason} ->
