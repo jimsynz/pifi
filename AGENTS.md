@@ -54,6 +54,17 @@ Licence: Apache-2.0.
   build in any `MIX_ENV`, and never on the host. Do not restore `force_ssl`, and
   do not make a boot depend on an environment variable: a device has nothing to
   set one.
+- **Setup mode and normal operation cannot happen together.** The Wi-Fi wizard
+  serves on port 80, and its captive portal needs port 80 as well.
+  `MyHiFiWeb.Endpoint` uses the same port. `MyHiFi.Application` therefore starts
+  the wizard or the web interface, and never both. See `MyHiFi.Setup` and section
+  14 of the spec.
+- **A target-only module must hold no reference on the host.** `vintage_net` and
+  `vintage_net_wizard` are target dependencies, so the host build breaks the
+  compiler check. Wrap the module in `if Mix.target() != :host do`, as
+  `MyHiFi.Setup.Monitor` does, or branch the function bodies, as `MyHiFi.Setup`
+  does. `config/target.exs` cannot solve this, and neither can an empty list in
+  `Config`.
 - **The firmware migrates itself.** `MyHiFi.Application` calls
   `MyHiFi.Migrator.migrate/0` before it starts the supervision tree, and not as a
   child of it, because Oban queries its own tables as soon as it starts. Like the

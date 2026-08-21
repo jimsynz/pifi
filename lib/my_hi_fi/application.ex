@@ -6,7 +6,9 @@ defmodule MyHiFi.Application do
   use Application
 
   @impl true
-  def start(_type, _args) do
+  def start(_type, _args), do: start_app()
+
+  defp start_normally do
     put_secret_key_base()
     migrate()
 
@@ -23,14 +25,17 @@ defmodule MyHiFi.Application do
         MyHiFiWeb.Endpoint
       ] ++ target_children()
 
-    # See https://elixir.hexdocs.pm/Supervisor.html
-    # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: MyHiFi.Supervisor]
-    Supervisor.start_link(children, opts)
+    Supervisor.start_link(children, supervisor_options())
   end
+
+  # See https://elixir.hexdocs.pm/Supervisor.html
+  # for other strategies and supported options
+  defp supervisor_options, do: [strategy: :one_for_one, name: MyHiFi.Supervisor]
 
   # List all child processes to be supervised
   if Mix.target() == :host do
+    defp start_app, do: start_normally()
+
     defp put_secret_key_base, do: :ok
     defp migrate, do: :ok
 
@@ -44,6 +49,15 @@ defmodule MyHiFi.Application do
       ]
     end
   else
+    # Setup mode and normal operation cannot happen together, because each one
+    # needs port 80. See `MyHiFi.Setup`.
+    defp start_app do
+      case MyHiFi.Setup.start() do
+        :running -> Supervisor.start_link([MyHiFi.Setup.Monitor], supervisor_options())
+        :not_needed -> start_normally()
+      end
+    end
+
     defp put_secret_key_base, do: MyHiFi.SecretKeyBase.put()
     defp migrate, do: MyHiFi.Migrator.migrate()
 

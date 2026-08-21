@@ -500,11 +500,38 @@ the life of the card.
 
 ## 14. Network
 
-The device uses Wi-Fi. It has no Ethernet port.
+The device uses Wi-Fi. It has no Ethernet port. It also gives a network over the
+USB data port, and a workstation uses that during development.
 
-On the first boot the device makes its own access point. The person connects to
-it and opens a web page. The person then gives the Wi-Fi name and the password.
-VintageNetWizard does this work.
+The device has two states: **setup** and **normal**. It is never in both.
+
+In setup the device makes its own access point. The name is `myhifi`, and the
+network is open. A person connects to it and opens a web page at `192.168.0.1`. A
+wildcard DNS record sends each name to that address, so a telephone opens the page
+by itself. The person gives the Wi-Fi name and the password. VintageNetWizard does
+this work, and VintageNet keeps the details after a restart.
+
+`MyHiFi.Setup` chooses the state at each start. `VintageNetWizard`
+`run_if_unconfigured/1` gives `:configured` for a device that holds Wi-Fi
+details, and the firmware then starts the web interface. For a device with no
+details it starts the wizard, and the firmware then starts nothing else.
+
+The two states cannot happen together. The wizard serves on port 80, and its
+captive portal needs port 80 as well. `MyHiFiWeb.Endpoint` uses the same port.
+
+`MyHiFi.Setup.Monitor` ends setup mode. The wizard runs its `:on_exit` callback
+only when a browser asks for the last page of the wizard, and that page is out of
+reach in the usual case: the device leaves access point mode as soon as it applies
+the network, and the telephone then loses that access point. The monitor watches
+the VintageNet configuration of `wlan0` instead. It restarts the device when the
+configuration holds a real network and no access point network. The next start
+finds the Wi-Fi details and enters normal mode. A restart takes about 12 seconds.
+
+The wizard comes from the `main` branch of the project, at commit `c11eabea849e`,
+and not from release 0.4.17. That release is from 2024-06-05, and it needs
+plug_cowboy. Each cowlib release from 2.9.0 to 2.19.0 holds two advisories, and
+no release fixes them. The `main` branch uses Bandit, which Phoenix already
+gives, so cowboy and cowlib stay out of the dependency tree.
 
 ## 15. Risks and open items
 

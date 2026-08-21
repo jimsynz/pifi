@@ -82,6 +82,12 @@ defmodule MyHiFi.MixProject do
       {:usage_rules, "~> 1.0", only: [:dev]},
       {:nerves_runtime, "~> 0.13.12"},
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
+      # Release 0.4.17 is from 2024-06-05, and it needs plug_cowboy. Each cowlib
+      # release from 2.9.0 to 2.19.0 holds two advisories, and no release fixes
+      # them. The main branch uses Bandit instead, and Phoenix already gives us
+      # Bandit, so cowboy and cowlib leave the dependency tree.
+      {:vintage_net_wizard,
+       github: "nerves-networking/vintage_net_wizard", ref: "c11eabea849e", targets: @all_targets},
 
       # Targets
       {:nerves_system_bbb, "~> 2.19", runtime: false, targets: :bbb},

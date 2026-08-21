@@ -52,8 +52,14 @@ config :nerves_ssh,
 # Update regulatory_domain to your 2-letter country code E.g., "US"
 #
 # See https://github.com/nerves-networking/vintage_net for more information
+# The wizard makes the access point name from the hostname, and the hostname is
+# `nerves-<serial>`. A person looks for the name of the product instead.
+config :vintage_net_wizard, ssid: "myhifi"
+
 config :vintage_net,
-  regulatory_domain: "00",
+  # A real country code gives the correct channel list. Access point mode needs
+  # it. "00" is the world domain, and it allows fewer channels.
+  regulatory_domain: "NZ",
   config: [
     {"usb0", %{type: VintageNetDirect}},
     {"eth0",
