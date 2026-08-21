@@ -40,26 +40,34 @@ config :nerves, :erlinit,
   mount: "pstore:/sys/fs/pstore:pstore:nodev,noexec,nosuid:",
   shutdown_report: "/root/shutdown_report.txt"
 
-# Configure the device for SSH IEx prompt access and firmware updates
+# SSH belongs to a development firmware only. A stereo component in a home needs
+# no shell, and a production firmware therefore accepts no connection.
+#
+# `nerves_ssh` starts a daemon only when it holds an application environment. A
+# production build writes none of the configuration below, so the daemon never
+# starts, and the build asks for no key. See `NervesSSH.Application.start/2`.
 #
 # * See https://nerves-ssh.hexdocs.pm/readme.html for general SSH configuration
 # * See https://ssh-subsystem-fwup.hexdocs.pm/readme.html for firmware updates
+development_firmware? = Mix.env() == :dev
 
-keys =
-  System.user_home!()
-  |> Path.join(".ssh/id_{rsa,ecdsa,ed25519}.pub")
-  |> Path.wildcard()
+if development_firmware? do
+  keys =
+    System.user_home!()
+    |> Path.join(".ssh/id_{rsa,ecdsa,ed25519}.pub")
+    |> Path.wildcard()
 
-if keys == [],
-  do:
-    Mix.raise("""
-    No SSH public keys found in ~/.ssh. An ssh authorized key is needed to
-    log into the Nerves device and update firmware on it using ssh.
-    See your project's config.exs for this error message.
-    """)
+  if keys == [],
+    do:
+      Mix.raise("""
+      No SSH public keys found in ~/.ssh. A development firmware gives an IEx
+      prompt over SSH, and it needs an authorized key for that.
 
-config :nerves_ssh,
-  authorized_keys: Enum.map(keys, &File.read!/1)
+      Build a production firmware with MIX_ENV=prod for a device with no shell.
+      """)
+
+  config :nerves_ssh, authorized_keys: Enum.map(keys, &File.read!/1)
+end
 
 # Configure the network using vintage_net
 #
@@ -84,6 +92,19 @@ config :vintage_net,
     {"wlan0", %{type: VintageNetWiFi}}
   ]
 
+web_service = %{protocol: "http", transport: "tcp", port: 80}
+
+shell_services = [
+  %{protocol: "ssh", transport: "tcp", port: 22},
+  %{protocol: "sftp-ssh", transport: "tcp", port: 22},
+  %{protocol: "epmd", transport: "tcp", port: 4369}
+]
+
+mdns_services =
+  if development_firmware?,
+    do: [web_service | shell_services],
+    else: [web_service]
+
 config :mdns_lite,
   # The `hosts` key specifies what hostnames mdns_lite advertises.  `:hostname`
   # advertises the device's hostname.local. For the official Nerves systems, this
@@ -97,23 +118,9 @@ config :mdns_lite,
   ttl: 120,
 
   # Advertise the following services over mDNS.
-  services: [
-    %{
-      protocol: "ssh",
-      transport: "tcp",
-      port: 22
-    },
-    %{
-      protocol: "sftp-ssh",
-      transport: "tcp",
-      port: 22
-    },
-    %{
-      protocol: "epmd",
-      transport: "tcp",
-      port: 4369
-    }
-  ]
+  # A production firmware runs no SSH daemon, so it announces no SSH service. It
+  # announces the web interface instead, because that is the way to the device.
+  services: mdns_services
 
 # The application data partition mounts at /root on a Nerves target, and it is
 # the only writable storage. See the erlinit.config of the Nerves system.

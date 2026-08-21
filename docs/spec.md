@@ -92,6 +92,32 @@ downloads it. The repository is private, so the download needs a token in
 `FORGE_TOKEN`. Without it Nerves tries to build the system, and that takes about
 47 minutes.
 
+### 4.2 SSH and firmware updates
+
+A development firmware gives an IEx prompt over SSH. A production firmware gives
+no shell, and a stereo component in a home needs none.
+
+`nerves_ssh` starts a daemon only when it holds an application environment.
+`config/target.exs` writes that environment for `MIX_ENV=dev` alone, so a
+production build starts no daemon and asks for no key. The same test removes the
+`ssh`, the `sftp-ssh`, and the `epmd` services from the mDNS list. A production
+device announces `http` on port 80 instead, because the web interface is then the
+way to the device.
+
+A firmware without SSH also holds no `ssh_subsystem_fwup`, and that is how a
+device takes new firmware today. Two answers follow.
+
+- **Now.** A person writes an SD card. `mix burn` does that.
+- **Later.** The web interface takes a `.fw` file and gives it to `fwup`. The
+  device already answers on port 80, and a person already needs no shell for
+  anything else.
+
+The later answer needs a decision about who may do it. Section 10 says that the
+home network is the boundary, and that answer suits a station change. A firmware
+upload is the most powerful action on the device, and an unauthenticated one lets
+any person on the network replace the software. A shared secret, or a press of the
+knob to confirm, is the way to hold that. The knob arrives in a later version.
+
 ## 5. Software structure
 
 The software has five parts.
