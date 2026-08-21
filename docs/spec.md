@@ -150,8 +150,8 @@ defmodule MyHiFi.Source do
   @type entry :: {:container, container()} | {:track, track()}
   @type page :: %{entries: [entry()], cursor: term() | nil}
   @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
-                      transport: :http | :hls, container: :none | :mpeg_ts,
-                      format: :mp3 | :aac | :flac | :ogg | :unknown,
+                      transport: :http | :hls, container: :none | :mpeg_ts | :ogg,
+                      format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :unknown,
                       live?: boolean()}
 
   @callback title() :: String.t()
@@ -187,8 +187,9 @@ Notes on the behaviour:
   knowledge of which source it shows.
 - `transport`, `container` and `format` decide the pipeline, and they are separate
   because they vary separately. Of the 44 New Zealand HLS stations, 14 give AAC
-  with no container and 8 give MP3 inside MPEG-TS. One field cannot say that. See
-  section 6.3.
+  with no container and 8 give MP3 inside MPEG-TS. Of the 6 Ogg stations, 3 hold
+  Vorbis and 3 hold FLAC, and the service reports the codec `OGG` for every one.
+  One field cannot say any of that. See sections 6.3 and 6.4.
 - `ref_to_string/1` and `ref_from_string/1` name a `ref` and read that name back.
   The player keeps the last station in the settings, and a setting holds a string.
   A source gives `{:error, :cannot_name}` for a `ref` that it does not name: the
@@ -387,11 +388,39 @@ The libraries are small, and they need only glibc 2.17:
 For comparison, the precompiled ffmpeg is 32 MB compressed, and the precompiled
 portaudio is 17 MB. The design does not use either one.
 
+**Vorbis and FLAC come from a program, and not from a library.** Membrane holds no
+decoder for either: hex holds no Vorbis package at all, and
+`membrane_flac_plugin` is a parser that decodes nothing. The
+`membraneframework-precompiled` organisation holds 13 libraries, and neither
+`libvorbis` nor `libFLAC` is among them.
+
+`MyHiFi.Player.PortDecoder` therefore writes the bytes to the standard input of a
+program and reads the samples from the standard output. `MyHiFi.Output.APlaySink`
+already drives `aplay` that way, so the pattern is proven on this board. NBPR
+gives each program, and NBPR ships a binary and no header file, which is all that
+a port needs. A NIF would need the headers as well.
+
+Each program reads the Ogg container itself, so neither needs a demultiplexer, and
+`membrane_ogg_plugin` depayloads Ogg into an Opus stream only.
+
+Both programs write a WAV header before the samples, and that header names the
+rate, the channel count and the width of a sample. The element reads it and tells
+the pipeline. It reads the length from nothing: a live stream has no length, and
+the two programs disagree about what to write there. `oggdec` writes `0x7FFFFFD3`,
+and `flac` writes 0 and warns.
+
+One program cannot serve both codecs. `ogg123` names FLAC, Speex, Opus and Vorbis
+among its codecs, and it reads a file to find out which one it holds. Reading from
+a pipe it cannot go back to the start, so it takes the first module that it tries
+and stops with "Error opening" on a FLAC stream.
+
 ### 6.2 The elements
 
 | Job | Element | Native code |
 |---|---|---|
 | Read an HTTP stream | `MyHiFi.Player.HttpSource` | No |
+| Decode Ogg Vorbis | `oggdec` through a port | No |
+| Decode FLAC | `flac` through a port | No |
 | Read an HLS playlist | `MyHiFi.Player.Hls`, then `Membrane.HLS.Source` | No |
 | Read the MPEG-TS container | `Membrane.MPEG.TS.Demuxer` | No |
 | Remove the ID3 tags of a packed segment | `MyHiFi.Player.PackedAudio` | No |
@@ -481,7 +510,24 @@ answers a fault that a real station showed.
   decoder at the first frame of every such stream. The module documentation holds
   the detail.
 
-### 6.4 The Bundlex target problem
+### 6.4 Ogg holds more than one codec
+
+Ogg is a container, and it carries Vorbis, FLAC, Opus or Speex. Radio Browser
+reports the codec `OGG` for each one, so the table cannot say which codec a
+station sends. Two of the FLAC stations name FLAC in their title and `OGG` in
+their codec.
+
+The first page of the stream names it. Each codec writes an identification header
+at the start of that page: `\\x01vorbis`, `\\x7FFLAC`, `OpusHead`, or `Speex`.
+`MyHiFi.Player.Ogg` reads those bytes and no more, because a live stream never
+ends.
+
+A read of the 6 New Zealand Ogg stations on 2026-08-22 gave 3 Vorbis and 2 FLAC,
+and one station gave no answer. `container` therefore holds `:ogg` and `format`
+holds the codec inside it, in the same way that HLS separates the container from
+the codec. See section 5.1.
+
+### 6.5 The Bundlex target problem
 
 A build on 2026-08-21 proved this problem and the correction.
 

@@ -57,12 +57,15 @@ defmodule MyHiFi.Source do
 
   - `transport` is how the bytes arrive. `:http` is one continuous answer, and
     `:hls` is a playlist of segments that the player reads again and again.
-  - `container` is what holds the audio. `:mpeg_ts` needs a demultiplexer, and
-    `:none` gives the audio as it is.
+  - `container` is what holds the audio. `:mpeg_ts` needs a demultiplexer, `:ogg`
+    names a container that the decoder reads itself, and `:none` gives the audio as
+    it is.
   - `format` is the codec.
 
-  An HLS station shows why. Of the 44 New Zealand HLS stations, 14 give AAC with
-  no container and 8 give MP3 inside MPEG-TS. One field cannot say that.
+  Two kinds of station show why. Of the 44 New Zealand HLS stations, 14 give AAC
+  with no container and 8 give MP3 inside MPEG-TS. Of the 6 Ogg stations, 3 hold
+  Vorbis and 3 hold FLAC, and the service reports the codec `OGG` for every one of
+  them. One field cannot say any of that.
 
   `live?` is true for a stream with no end, such as a radio station.
   """
@@ -70,8 +73,8 @@ defmodule MyHiFi.Source do
           uri: String.t(),
           headers: [{String.t(), String.t()}],
           transport: :http | :hls,
-          container: :none | :mpeg_ts,
-          format: :mp3 | :aac | :flac | :ogg | :unknown,
+          container: :none | :mpeg_ts | :ogg,
+          format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :unknown,
           live?: boolean()
         }
 

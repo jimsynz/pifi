@@ -53,13 +53,29 @@ defmodule MyHiFi.Player.PipelineTest do
     end
   end
 
-  describe "a combination with no branch" do
-    test "FLAC raises, because Membrane holds no FLAC decoder" do
-      assert_raise ArgumentError, ~r/No pipeline for :flac/, fn ->
-        init(%{format: :flac})
-      end
+  describe "the codecs that a program decodes" do
+    test "Ogg Vorbis, which 3 stations give" do
+      assert {[spec: _spec], _state} = init(%{container: :ogg, format: :vorbis})
     end
 
+    test "Ogg FLAC, which 3 stations give" do
+      assert {[spec: _spec], _state} = init(%{container: :ogg, format: :flac})
+    end
+
+    test "FLAC with no container" do
+      assert {[spec: _spec], _state} = init(%{container: :none, format: :flac})
+    end
+  end
+
+  describe "a codec that needs a program this firmware holds none of" do
+    test "Opus inside Ogg raises and says so" do
+      assert_raise ArgumentError, ~r/No pipeline for :opus in :ogg/, fn ->
+        init(%{container: :ogg, format: :opus})
+      end
+    end
+  end
+
+  describe "a combination with no branch" do
     test "an unknown codec raises" do
       assert_raise ArgumentError, ~r/No pipeline for :unknown/, fn ->
         init(%{format: :unknown})

@@ -10,6 +10,9 @@ defmodule MyHiFi.Player.Pipeline do
       :hls,  :none,    :aac  ->  HLS source -> ID3 removal -> AAC parser -> FDK -> sink
       :hls,  :mpeg_ts, :aac  ->  HLS source -> demuxer -> AAC parser -> FDK -> sink
       :hls,  :mpeg_ts, :mp3  ->  HLS source -> demuxer -> timestamp removal -> MAD -> sink
+      :http, :ogg,     :vorbis -> HTTP source -> oggdec port -> sink
+      :http, :ogg,     :flac   -> HTTP source -> flac --ogg port -> sink
+      :http, :none,    :flac   -> HTTP source -> flac port -> sink
 
   An HTTP source holds the ring buffer, so the compressed bytes wait there and the
   samples never do. An HLS source holds the segments of the playlist instead, and
@@ -22,6 +25,7 @@ defmodule MyHiFi.Player.Pipeline do
 
   alias MyHiFi.Player.Hls
   alias MyHiFi.Player.HttpSource
+  alias MyHiFi.Player.PortDecoder
 
   # How many decoded buffers may wait at the sink. Membrane gives 400 by default,
   # and a buffer of MP3 samples is about 50 ms, so the default lets 20 seconds of
@@ -43,7 +47,7 @@ defmodule MyHiFi.Player.Pipeline do
       |> source(options.buffer_bytes)
       |> demuxer(playable.container)
       |> adapter(playable)
-      |> decoder(playable.format)
+      |> decoder(playable)
       |> via_in(:input, auto_demand_size: @sink_queue_buffers)
       |> child(:sink, options.sink)
 
@@ -111,6 +115,10 @@ defmodule MyHiFi.Player.Pipeline do
 
   defp demuxer(link, :none), do: link
 
+  # An Ogg container needs no step here. The program that decodes it reads the
+  # container itself. See `MyHiFi.Player.PortDecoder`.
+  defp demuxer(link, :ogg), do: link
+
   # The FDK decoder takes AAC with an ADTS header, or a plain stream of bytes, and
   # it refuses the names that the HLS source and the demultiplexer give. Each
   # transport therefore needs its own step in front of the decoder.
@@ -145,16 +153,42 @@ defmodule MyHiFi.Player.Pipeline do
 
   # MAD gives 24-bit samples, and FDK gives 16-bit ones. The sink reads the format
   # from the stream and tells `aplay`, so neither one needs a resampler.
-  defp decoder(link, :mp3), do: child(link, :decoder, Membrane.MP3.MAD.Decoder)
+  defp decoder(link, %{format: :mp3}), do: child(link, :decoder, Membrane.MP3.MAD.Decoder)
 
-  defp decoder(link, :aac), do: child(link, :decoder, Membrane.AAC.FDK.Decoder)
+  defp decoder(link, %{format: :aac}), do: child(link, :decoder, Membrane.AAC.FDK.Decoder)
 
-  defp decoder(_link, format) do
+  # Membrane holds a decoder for neither Vorbis nor FLAC, so a program does the
+  # work through a port. See `MyHiFi.Player.PortDecoder`. Each program reads the
+  # Ogg container itself, so neither needs a demultiplexer.
+  #
+  # One program cannot serve both. `ogg123` names FLAC and Vorbis among its codecs,
+  # and it reads a file to find out which one it holds. Reading from a pipe it
+  # cannot go back to the start, so it takes the first module that it tries and
+  # stops on a FLAC stream.
+  defp decoder(link, %{format: :vorbis}) do
+    child(link, :decoder, %PortDecoder{command: "oggdec", arguments: ["--quiet", "-o", "-", "-"]})
+  end
+
+  defp decoder(link, %{container: :ogg, format: :flac}) do
+    child(link, :decoder, %PortDecoder{
+      command: "flac",
+      arguments: ["--decode", "--ogg", "--stdout", "--silent", "-"]
+    })
+  end
+
+  defp decoder(link, %{format: :flac}) do
+    child(link, :decoder, %PortDecoder{
+      command: "flac",
+      arguments: ["--decode", "--stdout", "--silent", "-"]
+    })
+  end
+
+  defp decoder(_link, playable) do
     raise ArgumentError, """
-    No pipeline for #{inspect(format)}.
+    No pipeline for #{inspect(playable.format)} in #{inspect(playable.container)}.
 
-    This pipeline plays MP3 and AAC. FLAC and Ogg need a decoder that Membrane
-    does not hold.
+    This pipeline plays MP3, AAC, Ogg Vorbis, Ogg FLAC, and FLAC on its own.
+    Opus and Speex need another program, and no New Zealand station sends either.
     """
   end
 end

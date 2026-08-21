@@ -19,6 +19,7 @@ defmodule MyHiFi.Source.InternetRadio do
   @behaviour MyHiFi.Source
 
   alias MyHiFi.Player.Hls
+  alias MyHiFi.Player.Ogg
   alias MyHiFi.Radio
 
   @default_limit 100
@@ -122,16 +123,31 @@ defmodule MyHiFi.Source.InternetRadio do
     end
   end
 
-  defp playable(station) do
-    {:ok,
-     %{
-       uri: station.stream_url,
-       headers: [],
-       transport: :http,
-       container: :none,
-       format: format(station),
-       live?: true
-     }}
+  # Ogg is a container, and the service reports the codec `OGG` for each codec
+  # inside it. The first page of the stream names the codec, so this reads it. See
+  # `MyHiFi.Player.Ogg`.
+  defp playable(%{codec: codec} = station) when codec in ["OGG", "ogg", "FLAC", "flac"] do
+    case Ogg.codec(station.stream_url) do
+      {:ok, inside} ->
+        {:ok, http_playable(station, :ogg, inside)}
+
+      # A station that names FLAC and holds no Ogg container sends FLAC as it is.
+      {:error, _reason} ->
+        {:ok, http_playable(station, :none, format(station))}
+    end
+  end
+
+  defp playable(station), do: {:ok, http_playable(station, :none, format(station))}
+
+  defp http_playable(station, container, format) do
+    %{
+      uri: station.stream_url,
+      headers: [],
+      transport: :http,
+      container: container,
+      format: format,
+      live?: true
+    }
   end
 
   # The playlist names the codec in almost every case, and this answer applies
