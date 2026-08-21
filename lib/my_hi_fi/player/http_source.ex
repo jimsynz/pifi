@@ -143,12 +143,20 @@ defmodule MyHiFi.Player.HttpSource do
     {Enum.map(titles, &{:notify_parent, {:metadata, &1}}) ++ actions, state}
   end
 
-  # A live stream arrives at about the bitrate of the audio, so the queue stays
-  # near the low mark. If it ever grows far past that mark, something downstream
-  # has stopped asking, and this board holds 245 MB of memory. Dropping the
-  # oldest audio keeps the device alive, and a person hears a gap and not a
-  # restart.
-  defp trim(%State{} = state) do
+  @doc """
+  Drop the oldest audio when the queue grows far past the buffer.
+
+  A live stream arrives at about the bitrate of the audio, so the queue stays near
+  the low mark. If it ever grows far past that mark, something downstream has
+  stopped asking, and this board holds 363.9 MB of memory. Dropping the oldest
+  audio keeps the device alive, and a person hears a gap and not a restart.
+
+  This function is public so that a test can reach it. It is the guard that stopped
+  a board from running out of memory, and a caller inside this module is the only
+  one that needs it.
+  """
+  @spec trim(State.t()) :: State.t()
+  def trim(%State{} = state) do
     limit = state.buffer_bytes * 8
 
     if byte_size(state.queue) > limit do
