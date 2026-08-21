@@ -24,7 +24,21 @@ config :nerves_runtime, startup_guard_enabled: true
 # configuring erlinit.
 
 # Advance the system clock on devices without a real-time clock.
-config :nerves, :erlinit, update_clock: true
+#
+# MyHiFi: two more settings, so a restart leaves evidence behind.
+#
+# ramoops keeps a reserved part of RAM through a reset. The `pstore` mount makes
+# the record of the last boot readable at /sys/fs/pstore.
+# `MyHiFi.PersistentLogger` writes the log of this firmware to /dev/pmsg0, which
+# lands in the same place and costs no write to the SD card.
+#
+# `shutdown_report` names a file that erlinit writes when the VM exits in an
+# orderly way. A hard reset gives no chance to write it, and a crash of the VM
+# does.
+config :nerves, :erlinit,
+  update_clock: true,
+  mount: "pstore:/sys/fs/pstore:pstore:nodev,noexec,nosuid:",
+  shutdown_report: "/root/shutdown_report.txt"
 
 # Configure the device for SSH IEx prompt access and firmware updates
 #

@@ -56,9 +56,30 @@ defmodule MyHiFi.Application do
     # Setup mode and normal operation cannot happen together, because each one
     # needs port 80. See `MyHiFi.Setup`.
     defp start_app do
+      MyHiFi.PersistentLogger.attach()
+      report_last_boot()
+
       case MyHiFi.Setup.start() do
         :running -> Supervisor.start_link([MyHiFi.Setup.Monitor], supervisor_options())
         :not_needed -> start_normally()
+      end
+    end
+
+    require Logger
+
+    alias Nerves.Runtime.Heart
+
+    # The reason for a restart is worth knowing, and the log now survives one.
+    defp report_last_boot do
+      case Heart.status() do
+        {:ok, %{wdt_last_boot: reason} = status} ->
+          Logger.info(
+            "Boot reason #{inspect(reason)}. The heartbeat times out after " <>
+              "#{status.heartbeat_timeout} s, and the watchdog after #{status.wdt_timeout} s."
+          )
+
+        other ->
+          Logger.info("The heart gave no status: #{inspect(other)}")
       end
     end
 
