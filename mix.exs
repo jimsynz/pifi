@@ -74,6 +74,7 @@ defmodule MyHiFi.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:nbpr, "~> 0.2"},
       # Dependencies for all targets
       {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.8"},
@@ -193,7 +194,8 @@ defmodule MyHiFi.MixProject do
       "assets.deploy": ["esbuild my_hi_fi --minify", "tailwind my_hi_fi --minify", "phx.digest"],
       setup: ["deps.get", "assets.setup", "assets.build"],
       test: ["ash.setup --quiet", "test"],
-      credo: ["credo --strict"]
+      credo: ["credo --strict"],
+      firmware: ["nbpr.fetch", "firmware"]
     ]
   end
 
