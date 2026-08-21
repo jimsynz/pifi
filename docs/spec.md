@@ -124,7 +124,8 @@ defmodule MyHiFi.Source do
   @type entry :: {:container, container()} | {:track, track()}
   @type page :: %{entries: [entry()], cursor: term() | nil}
   @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
-                      format: :mp3 | :aac | :flac | :ogg | :hls | :unknown,
+                      transport: :http | :hls, container: :none | :mpeg_ts,
+                      format: :mp3 | :aac | :flac | :ogg | :unknown,
                       live?: boolean()}
 
   @callback title() :: String.t()
@@ -158,6 +159,10 @@ Notes on the behaviour:
 - `favourite?` on a track is `nil` for a source with no favourites. A user
   interface shows the control for `true` and for `false` only, so it needs no
   knowledge of which source it shows.
+- `transport`, `container` and `format` decide the pipeline, and they are separate
+  because they vary separately. Of the 44 New Zealand HLS stations, 14 give AAC
+  with no container and 8 give MP3 inside MPEG-TS. One field cannot say that. See
+  section 6.3.
 - `ref_to_string/1` and `ref_from_string/1` name a `ref` and read that name back.
   The player keeps the last station in the settings, and a setting holds a string.
   A source gives `{:error, :cannot_name}` for a `ref` that it does not name: the
@@ -805,3 +810,36 @@ The numbers change three of the plans above.
   sound. Neither number changes a decision.
 
 The HE-AAC measurement over HLS is absent, because the device plays no HLS yet.
+
+HLS ran on the board on 2026-08-22, from a firmware that had just started. The
+numbers for a plain HTTP stream sit above.
+
+| Measurement | MPEG-TS, MP3 | MPEG-TS, AAC | Packed, AAC |
+|---|---|---|---|
+| CPU of the four cores | 4.7% | 4.8% | 3.3% |
+| BEAM memory | 86.6 MB | 87.6 MB | 89.7 MB |
+| Memory available | 206.3 MB | 203.5 MB | 198.9 MB |
+| Time from a play command to the first sound | 5.1 s | 6.4 s | 3.4 s |
+
+- HLS needs about twice the CPU of a plain stream, and 4.8% of the four cores is
+  still small.
+- HLS waits 3 to 6 seconds for the first sound, and a plain stream waits 1.3
+  seconds. A player must read a playlist and then a segment before it holds any
+  audio, and a segment holds 8 to 10 seconds of sound.
+- The 13 dependencies of HLS cost no memory while the device sits idle. A firmware
+  that had just started held 75.4 MB in the BEAM with HLS, and 77.0 MB without it.
+- One earlier reading gave 15.8% of the CPU for MPEG-TS with AAC. That firmware
+  had played 40 stations one after the other, and it was starting a pipeline again
+  at that moment. A measurement of a device in this state is not a measurement of
+  the codec.
+
+38 of the 40 HLS addresses in the table play. Both of the other two give a
+transport error before any playlist arrives, and `curl` from another machine
+cannot reach them either.
+
+| Shape | Stations that play |
+|---|---|
+| Packed audio, AAC | 19 |
+| MPEG-TS, AAC | 12 |
+| MPEG-TS, MP3 | 7 |
+| No answer from the station | 2 |
