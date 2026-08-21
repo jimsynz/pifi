@@ -14,6 +14,8 @@ defmodule MyHiFi.Radio do
       define :get_station, action: :read, get_by: [:id]
       define :search_stations, action: :search, args: [:query]
       define :favourite_stations, action: :favourites
+      define :stations_by_country, action: :by_country, args: [:country_code]
+      define :stations_by_tag, action: :by_tag, args: [:tag]
       define :upsert_station_from_remote, action: :upsert_from_remote
       define :set_favourite, action: :set_favourite
       define :clear_favourite, action: :clear_favourite

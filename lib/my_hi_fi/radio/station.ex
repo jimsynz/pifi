@@ -65,6 +65,37 @@ defmodule MyHiFi.Radio.Station do
       prepare build(sort: [click_count: :desc, title: :asc])
     end
 
+    read :by_country do
+      description "List the stations of one country, the best known first."
+
+      argument :country_code, :string, allow_nil?: false
+
+      filter expr(country_code == ^arg(:country_code))
+      prepare build(sort: [click_count: :desc, title: :asc])
+    end
+
+    read :by_tag do
+      description """
+      List the stations that carry one tag, the best known first.
+
+      The tag must match in full, and not in part, because the tag comes from the
+      list that this resource gave. SQLite holds no operator for an array, so this
+      reads the tags with a `json_each` fragment.
+      """
+
+      argument :tag, :string, allow_nil?: false
+
+      filter expr(
+               fragment(
+                 "EXISTS (SELECT 1 FROM json_each(?) WHERE lower(value) = lower(?))",
+                 tags,
+                 ^arg(:tag)
+               )
+             )
+
+      prepare build(sort: [click_count: :desc, title: :asc])
+    end
+
     read :favourites do
       description "List the stations that a person marked."
 
