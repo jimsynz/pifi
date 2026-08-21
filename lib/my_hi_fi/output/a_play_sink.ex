@@ -151,24 +151,31 @@ defmodule MyHiFi.Output.APlaySink do
       raise "aplay is not on the PATH. The Nerves system gives it, and a host needs alsa-utils."
   end
 
-  # Membrane packs a 24-bit sample in 3 bytes, and that is `S24_3LE` for ALSA.
-  # `S24_LE` holds 24 bits in 4 bytes, so it is the wrong name here.
-  defp alsa_format(:s8), do: "S8"
-  defp alsa_format(:u8), do: "U8"
-  defp alsa_format(:s16le), do: "S16_LE"
-  defp alsa_format(:s16be), do: "S16_BE"
-  defp alsa_format(:u16le), do: "U16_LE"
-  defp alsa_format(:u16be), do: "U16_BE"
-  defp alsa_format(:s24le), do: "S24_3LE"
-  defp alsa_format(:s24be), do: "S24_3BE"
-  defp alsa_format(:u24le), do: "U24_3LE"
-  defp alsa_format(:u24be), do: "U24_3BE"
-  defp alsa_format(:s32le), do: "S32_LE"
-  defp alsa_format(:s32be), do: "S32_BE"
-  defp alsa_format(:u32le), do: "U32_LE"
-  defp alsa_format(:u32be), do: "U32_BE"
-  defp alsa_format(:f32le), do: "FLOAT_LE"
-  defp alsa_format(:f32be), do: "FLOAT_BE"
-  defp alsa_format(:f64le), do: "FLOAT64_LE"
-  defp alsa_format(:f64be), do: "FLOAT64_BE"
+  @doc """
+  The ALSA name of one sample format of Membrane.
+
+  Membrane packs a 24-bit sample in 3 bytes, and that is `S24_3LE` for ALSA.
+  `S24_LE` holds 24 bits in 4 bytes, so it is the wrong name here, and libmad gives
+  24-bit samples for each MP3 stream. A wrong name here gives noise and not music,
+  so a test holds each pair.
+  """
+  @spec alsa_format(Membrane.RawAudio.SampleFormat.t()) :: String.t()
+  def alsa_format(:s8), do: "S8"
+  def alsa_format(:u8), do: "U8"
+  def alsa_format(:s16le), do: "S16_LE"
+  def alsa_format(:s16be), do: "S16_BE"
+  def alsa_format(:u16le), do: "U16_LE"
+  def alsa_format(:u16be), do: "U16_BE"
+  def alsa_format(:s24le), do: "S24_3LE"
+  def alsa_format(:s24be), do: "S24_3BE"
+  def alsa_format(:u24le), do: "U24_3LE"
+  def alsa_format(:u24be), do: "U24_3BE"
+  def alsa_format(:s32le), do: "S32_LE"
+  def alsa_format(:s32be), do: "S32_BE"
+  def alsa_format(:u32le), do: "U32_LE"
+  def alsa_format(:u32be), do: "U32_BE"
+  def alsa_format(:f32le), do: "FLOAT_LE"
+  def alsa_format(:f32be), do: "FLOAT_BE"
+  def alsa_format(:f64le), do: "FLOAT64_LE"
+  def alsa_format(:f64be), do: "FLOAT64_BE"
 end
