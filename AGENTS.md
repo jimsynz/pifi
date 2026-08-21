@@ -13,9 +13,11 @@ Licence: Apache-2.0.
   <https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2>. The stock system
   holds no USB host stack and no USB audio driver, so a USB DAC cannot work on
   it, and it reserves 320 MB of the 512 MB for graphics. The board has 4
-  cores and one USB data port. It holds 512 MB of RAM, and Linux sees 301 MB of
-  it, because CMA and the GPU reserve the rest. A measurement on 2026-08-21 gave
-  176 MB free with the skeleton in operation. Keep the memory use small.
+  cores and one USB data port. It holds 512 MB of RAM, and Linux sees 363.9 MB of
+  it, because the custom system gives 16 MB to the GPU and 16 MB to CMA. A
+  measurement on 2026-08-22 gave 202.4 MB available with HE-AAC in play, and the
+  BEAM held 84.3 MB. One stream needs 2.3% of the four cores. The memory and the
+  CPU are therefore not tight, and HLS and the artwork cache are still to come.
 - **The USB port holds the DAC.** For this reason the knob uses I2C, not USB.
 - **The Nerves system holds no audio decoder.** It holds `alsa-lib`, `aplay`, and
   `amixer` only. `membrane_alsa_plugin` does not exist. The output sink sends raw

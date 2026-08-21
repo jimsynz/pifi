@@ -51,7 +51,7 @@ Version 1 excludes these items. Later versions add them.
 
 | Part | Choice | Note |
 |---|---|---|
-| Board | Raspberry Pi Zero 2 W | 4 cores. 512 MB of RAM, and Linux sees 301 MB of it. |
+| Board | Raspberry Pi Zero 2 W | 4 cores. 512 MB of RAM, and Linux sees 363.9 MB of it. |
 | Nerves target | `myhifi_rpi0_2` | A custom system. The stock `rpi0_2` cannot drive a USB DAC. See section 4.1. |
 | Audio output | USB DAC on the USB data port | The port must run in host mode |
 | Screen | Adafruit PiTFT clone, 2.8 inch, SPI, resistive touch | Later version |
@@ -658,14 +658,14 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 
 | Item | Risk | Action |
 |---|---|---|
-| RAM | Linux sees 301 MB, and not 512 MB. A measurement on 2026-08-21 gave 176 MB free with the skeleton in operation, and the BEAM used 72 MB of the rest. Membrane, the decoders, the ring buffer, and the pages must fit in what is left. | Measure at each step. See #16. A 128 MB CMA reservation holds 91 MB that nothing uses. A change to `config.txt` gives that memory back, and such a change needs a custom Nerves system. |
+| ~~RAM~~ | Small, and no longer a risk. Linux sees 363.9 MB of the 512 MB, because the custom system gives 16 MB to the GPU and 16 MB to CMA. A measurement on 2026-08-22 gave 202.4 MB available with HE-AAC in play, and the BEAM held 84.3 MB. | HLS and the artwork cache are still to come. Measure again after each one. |
 | ~~Bundlex target~~ | Solved on 2026-08-21. `mix.exs` sets the four variables, and the arm libraries download. | |
 | Precompiled builds | Membrane may change or remove an `aarch64` build. | Pin the versions, as `membrane_mp3_mad_plugin` already does. |
 | ~~USB host mode~~ | Solved on 2026-08-21. The custom system holds `dr_mode=host`, the USB host stack, and the USB audio driver. | |
 | ~~ICY metadata~~ | Solved on 2026-08-21. `MyHiFi.Player.IcyStream` takes the blocks out, and `MyHiFi.Player.HttpSource` asks for them. Read against real stations. | |
 | Latency | The `aplay` port adds a buffer, and the samples in front of the sink add more. | A stop gave silence in 35 to 245 ms on 2026-08-21, after the link to the sink got a limit of eight buffers. See section 6.2. |
 | HLS weight | `membrane_hls_plugin` pulls in 10 dependencies, and this firmware uses few of them. | Accept it for now. It holds no native code. |
-| Buffer size | A large ring buffer needs much RAM, and only about 176 MB is free. | Buffer the compressed bytes, and not the samples. Measure the memory use. |
+| Buffer size | A large ring buffer needs much RAM. 202.4 MB is available with HE-AAC in play. | Buffer the compressed bytes, and not the samples. A stream in play adds 3 MB to the BEAM for MP3, and 7 MB for HE-AAC. |
 | Knob protocol | The I2C protocol and the detent commands need a design. | Design it with the RP2040 firmware, in a later version. Map it to the hint events. |
 | Event rate | A `Player.Progress` event each second, and a slow SPI display, may not agree. | Let a display drop events. Measure the PiTFT refresh time. |
 | PiTFT pins | The HAT uses SPI0 and some GPIO pins. | Confirm that the I2C pins stay free. |
@@ -708,7 +708,10 @@ I found these results on 2026-08-20. They support the decisions above.
 | How large is the New Zealand station list? | 280 KB of JSON. |
 
 A dev firmware ran on the board on 2026-08-21. These measurements come from that
-device, with the skeleton in operation and no audio in play.
+device, with the skeleton in operation and no audio in play. It still held the
+stock CMA reservation of 128 MB, so the memory rows are the state before the
+change of section 4.1. The last table of this section holds the numbers after that
+change.
 
 | Measurement | Value |
 |---|---|
@@ -734,3 +737,38 @@ National MP3 stream.
 | One core | 1.2% for one stream |
 | Format from the decoder | 24 kHz, 2 channels, s24le |
 | Bytes skipped to find the first frame | 384 |
+
+The whole firmware ran on the board on 2026-08-22, with a stream in play. The
+`aplay` sink sent the samples to the SA9023 USB DAC.
+
+| Measurement | Idle | MP3 in play | HE-AAC in play |
+|---|---|---|---|
+| Memory that Linux sees | 363.9 MB | 363.9 MB | 363.9 MB |
+| Memory available | 222.6 MB | 219.6 MB | 202.4 MB |
+| BEAM memory | 77.0 MB | 80.2 MB | 84.3 MB |
+| Process memory | 23.1 MB | 24.1 MB | — |
+| Binary memory | 3.1 MB | 4.8 MB | — |
+| CPU of the four cores | — | 2.3% | 2.3% |
+| Load average over one minute | — | 0.04 | — |
+
+| Measurement | Value |
+|---|---|
+| Time from a play command to the first sound, MP3 | 1.3 seconds |
+| Time from a play command to the first sound, HE-AAC | 3.7 seconds |
+| Station table, 247 New Zealand stations | 148 KB |
+| Artwork cache | Absent. See section 13. |
+| Time from a stop command to silence | 35 to 245 ms |
+
+The numbers change three of the plans above.
+
+- The memory is not tight. 202 MB stays free with the heavier codec in play, and
+  the earlier note of 176 MB came from a system with a 128 MB CMA reservation.
+  Section 15 keeps the RAM row, because HLS and the artwork cache are still to
+  come.
+- The CPU is not a risk. One stream needs 2.3% of the four cores, and the decoder
+  runs 82 times faster than the sound. A second stream, a screen, and a knob all
+  fit.
+- HE-AAC needs 17 MB more than MP3, and it waits 2.4 seconds longer for the first
+  sound. Neither number changes a decision.
+
+The HE-AAC measurement over HLS is absent, because the device plays no HLS yet.
