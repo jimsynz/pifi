@@ -38,6 +38,14 @@ defmodule MyHiFi.Player.Pipeline do
   # decoder runs much faster than the sound, so the sound stays smooth.
   @sink_queue_buffers 8
 
+  # How many bytes of AAC may reach the decoder in one buffer. The field that
+  # holds the length of an ADTS frame is 13 bits, so 8191 bytes is the largest
+  # frame that the format allows, and this size therefore always carries a whole
+  # frame. It is also well under the input buffer of libfdk-aac: a measurement of
+  # a 128 kbps stream lost no audio at 16 KB and lost most of it at 32 KB. See
+  # `adapter/2`.
+  @fdk_input_bytes 8192
+
   @impl true
   def handle_init(_ctx, options) do
     playable = options.playable
@@ -147,8 +155,25 @@ defmodule MyHiFi.Player.Pipeline do
     child(link, :mpeg_audio, MyHiFi.Player.MpegAudio)
   end
 
-  # A plain HTTP stream needs nothing: `MyHiFi.Player.HttpSource` gives a
-  # `Membrane.RemoteStream` with no content format, and both decoders take that.
+  # libfdk-aac holds an input buffer of its own, and `aacDecoder_Fill` copies only
+  # what fits. It reports the count of the bytes that it did not take, and its
+  # manual then says to refill only when that count is zero.
+  # `Membrane.AAC.FDK.Decoder` refills on each buffer and removes the rest, so a
+  # large buffer loses most of its audio. The decoder then stops with `:unknown`,
+  # the pipeline dies, and the player starts it again. That is why a station
+  # played for a few seconds and then buffered again, for ever.
+  #
+  # This path needs no parser. The transport layer of libfdk-aac reads the ADTS
+  # headers, and it finds the first frame of a stream that starts in the middle of
+  # one. 3 of 9 New Zealand AAC stations start in the middle of a frame, and
+  # `Membrane.AAC.Parser` stops with `:invalid_adts_header` on each of those.
+  defp adapter(link, %{transport: :http, container: :none, format: :aac}) do
+    via_in(link, :input, auto_demand_size: @fdk_input_bytes)
+  end
+
+  # An MP3 or an Ogg stream needs nothing. `MyHiFi.Player.HttpSource` gives a
+  # `Membrane.RemoteStream` with no content format. MAD holds the bytes that it
+  # cannot use yet, and a port decoder reads a pipe, so neither loses anything.
   defp adapter(link, _playable), do: link
 
   # MAD gives 24-bit samples, and FDK gives 16-bit ones. The sink reads the format

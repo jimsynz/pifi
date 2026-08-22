@@ -29,27 +29,21 @@ defmodule MyHiFi.Artwork do
   @free_space_share 20
   @byte_limit 4 * 1024 * 1024
 
-  # A station sends one of these, and this firmware serves what it stored. A type
-  # that is absent here never reaches the disk.
+  # This firmware stores one of these, and it serves what it stored. A type that is
+  # absent here never reaches the disk.
   #
   # SVG is absent on purpose. An SVG file can hold a script, and this device serves
   # each logo from its own address, so such a script would run with the rights of
   # the web interface. A logo of a station is a raster image in each case that this
   # project has seen.
-  @types %{
-    "image/png" => "png",
-    "image/jpeg" => "jpg",
-    "image/jpg" => "jpg",
-    "image/gif" => "gif",
-    "image/webp" => "webp"
-  }
-
   @content_types %{
     "png" => "image/png",
     "jpg" => "image/jpeg",
     "gif" => "image/gif",
     "webp" => "image/webp"
   }
+
+  @extensions Map.keys(@content_types)
 
   @doc """
   The name of the file for one address, if the cache holds it.
@@ -61,7 +55,7 @@ defmodule MyHiFi.Artwork do
   def name(url) when is_binary(url) and url != "" do
     hash = hash(url)
 
-    Enum.find_value(Map.values(@types), fn extension ->
+    Enum.find_value(@extensions, fn extension ->
       candidate = "#{hash}.#{extension}"
 
       if File.exists?(path(candidate)), do: candidate
@@ -172,8 +166,8 @@ defmodule MyHiFi.Artwork do
   @sobelow_skip ["Traversal.FileModule"]
   defp download(url) do
     with {:ok, response} <- get(url),
-         {:ok, extension} <- extension(response),
-         {:ok, body} <- body(response) do
+         {:ok, body} <- body(response),
+         {:ok, extension} <- extension(body, declared_type(response)) do
       name = "#{hash(url)}.#{extension}"
       path = Path.join(directory(), name)
 
@@ -198,21 +192,38 @@ defmodule MyHiFi.Artwork do
     end
   end
 
-  defp extension(response) do
-    type =
-      response
-      |> Req.Response.get_header("content-type")
-      |> List.first()
-      |> to_string()
-      |> String.split(";")
-      |> List.first()
-      |> String.trim()
-      |> String.downcase()
+  # The first bytes give the type, and the `content-type` header does not. A
+  # station server often names the wrong type: of the 11 New Zealand stations that
+  # answer `image/x-icon`, 5 send a JPEG and 3 send a PNG. The header alone
+  # therefore threw away a logo of 600 by 600 pixels, and 2 stations hold a true
+  # icon of 32 by 32 pixels. Each format below starts with bytes of its own, so
+  # these clauses name the type of any logo that this firmware serves.
+  #
+  # The header stays for the message alone, because a person who reads the log
+  # wants to know what the server said.
+  defp extension(<<0x89, "PNG\r\n", 0x1A, "\n", _rest::binary>>, _declared), do: {:ok, "png"}
 
-    case Map.fetch(@types, type) do
-      {:ok, extension} -> {:ok, extension}
-      :error -> {:error, {:not_an_image, type}}
-    end
+  defp extension(<<0xFF, 0xD8, 0xFF, _rest::binary>>, _declared), do: {:ok, "jpg"}
+
+  defp extension(<<"GIF87a", _rest::binary>>, _declared), do: {:ok, "gif"}
+
+  defp extension(<<"GIF89a", _rest::binary>>, _declared), do: {:ok, "gif"}
+
+  # A WebP file holds the count of its bytes between the two names.
+  defp extension(<<"RIFF", _size::binary-size(4), "WEBP", _rest::binary>>, _declared),
+    do: {:ok, "webp"}
+
+  defp extension(_body, declared), do: {:error, {:not_an_image, declared}}
+
+  defp declared_type(response) do
+    response
+    |> Req.Response.get_header("content-type")
+    |> List.first()
+    |> to_string()
+    |> String.split(";")
+    |> List.first()
+    |> String.trim()
+    |> String.downcase()
   end
 
   defp body(%{body: body}) when is_binary(body) and byte_size(body) > 0 do
@@ -245,7 +256,7 @@ defmodule MyHiFi.Artwork do
   defp valid_name?(name) when is_binary(name) do
     case String.split(name, ".") do
       [hash, extension] ->
-        extension in Map.values(@types) and String.length(hash) == 64 and
+        extension in @extensions and String.length(hash) == 64 and
           String.match?(hash, ~r/\A[0-9a-f]{64}\z/)
 
       _other ->

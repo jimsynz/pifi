@@ -4,6 +4,9 @@ defmodule MyHiFi.ArtworkTest do
   alias MyHiFi.Artwork
 
   @png <<0x89, "PNG\r\n", 0x1A, "\n", "the rest of a small image">>
+  @jpeg <<0xFF, 0xD8, 0xFF, "the rest of a small image">>
+  @gif <<"GIF89a", "the rest of a small image">>
+  @webp <<"RIFF", 26::little-32, "WEBP", "the rest of a small image">>
 
   setup do
     Application.put_env(:my_hi_fi, Artwork, plug: {Req.Test, Artwork}, retry: false)
@@ -52,10 +55,30 @@ defmodule MyHiFi.ArtworkTest do
 
     test "reads the type from the answer, and not from the address" do
       # A station names a `.png` address and sends a JPEG.
-      stub("image/jpeg", "the bytes of a jpeg")
+      stub("image/jpeg", @jpeg)
 
       assert {:ok, name} = Artwork.fetch("https://station.test/logo.png")
       assert String.ends_with?(name, ".jpg")
+    end
+
+    # 11 New Zealand stations answer `image/x-icon`, and 8 of those send a PNG or a
+    # JPEG. The header of the answer is therefore not the type.
+    test "reads the type from the bytes, and not from the content type header" do
+      stub("image/x-icon", @png)
+
+      assert {:ok, name} = Artwork.fetch("https://station.test/favicon.ico")
+      assert String.ends_with?(name, ".png")
+      assert Artwork.content_type(name) == "image/png"
+    end
+
+    test "reads a GIF and a WebP from their bytes" do
+      stub("application/octet-stream", @gif)
+      assert {:ok, gif} = Artwork.fetch("https://station.test/one")
+      assert String.ends_with?(gif, ".gif")
+
+      stub("application/octet-stream", @webp)
+      assert {:ok, webp} = Artwork.fetch("https://station.test/two")
+      assert String.ends_with?(webp, ".webp")
     end
 
     test "refuses an answer that is not an image" do
@@ -63,6 +86,33 @@ defmodule MyHiFi.ArtworkTest do
 
       assert {:error, {:not_an_image, "text/html"}} =
                Artwork.fetch("https://station.test/logo.png")
+    end
+
+    # A server that names an image and sends a page must not fill the cache with
+    # that page. The bytes decide, so this answer goes nowhere.
+    test "refuses a page that names itself an image" do
+      stub("image/png", "<html>not found</html>")
+
+      assert {:error, {:not_an_image, "image/png"}} =
+               Artwork.fetch("https://station.test/logo.png")
+    end
+
+    # An SVG file can hold a script, and this device serves each logo from its own
+    # address. No signature clause names SVG, so it never reaches the disk.
+    test "refuses an SVG file" do
+      stub("image/svg+xml", ~s(<svg xmlns="http://www.w3.org/2000/svg"></svg>))
+
+      assert {:error, {:not_an_image, "image/svg+xml"}} =
+               Artwork.fetch("https://station.test/logo.svg")
+    end
+
+    # A true icon is 32 by 32 pixels or smaller, and the device screen cannot read
+    # the format. The cache holds the four formats that it can read.
+    test "refuses a true icon" do
+      stub("image/x-icon", <<0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x20, 0x20>>)
+
+      assert {:error, {:not_an_image, "image/x-icon"}} =
+               Artwork.fetch("https://station.test/favicon.ico")
     end
 
     test "refuses an image that is too large for a logo" do

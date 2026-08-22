@@ -143,14 +143,22 @@ defmodule MyHiFiWeb.PlayerLiveTest do
     test "a stop returns the page to idle", %{conn: conn} do
       {_view, player} = mount_player(conn)
 
-      Event.publish(:player, %Events.Started{track: track(), source: nil, artwork_path: nil})
-      assert render(player) =~ "RNZ National"
+      Event.publish(:player, %Events.Started{
+        track: track(),
+        source: nil,
+        artwork_path: "/artwork/station.png"
+      })
+
+      html = render(player)
+      assert html =~ "RNZ National"
+      assert html =~ "/artwork/station.png"
 
       Event.publish(:player, %Events.Stopped{reason: :requested})
 
       html = render(player)
       assert html =~ "Idle"
       assert html =~ "Nothing selected"
+      refute html =~ "/artwork/station.png"
     end
 
     test "a fault shows the reason", %{conn: conn} do

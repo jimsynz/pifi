@@ -181,12 +181,17 @@ defmodule MyHiFi.MixProject do
       {:credo, "~> 1.7", runtime: false, only: [:dev, :test], target: :host},
       # Phoenix LiveView needs this to read the HTML that a test renders.
       {:lazy_html, ">= 0.1.0", only: :test, target: :host},
-      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev, target: :host},
+      # `esbuild` and `tailwind` hold no target of their own on purpose. The
+      # `firmware` alias runs `assets.deploy`, so a target build needs both tasks.
+      # Each program runs on the build machine and writes to `priv/static`, and a
+      # firmware build uses `MIX_ENV=prod`, so `runtime:` keeps both out of the
+      # release.
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:ex_check_ng, "~> 1.0.0-rc.2", only: [:dev, :test], target: :host},
       {:ex_doc, "~> 0.40", only: [:dev, :test], target: :host},
       {:phx_install, "~> 0.1", only: [:dev], target: :host},
       {:sobelow, "~> 0.15", only: [:dev, :test], target: :host},
-      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev, target: :host}
+      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev}
     ]
   end
 
@@ -214,7 +219,11 @@ defmodule MyHiFi.MixProject do
       setup: ["deps.get", "assets.setup", "assets.build"],
       test: ["ash.setup --quiet", "test"],
       credo: ["credo --strict"],
-      firmware: ["nbpr.fetch", "firmware"]
+      # `assets.deploy` comes first, because `priv/static/assets` holds no file
+      # that the repository keeps, and the release copies `priv` as it finds it.
+      # It also runs before `nbpr.fetch`, so a fault in the assets stops the build
+      # before the 10 minutes that a source build of the NBPR packages needs.
+      firmware: ["assets.deploy", "nbpr.fetch", "firmware"]
     ]
   end
 

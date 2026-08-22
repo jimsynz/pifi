@@ -93,6 +93,7 @@ defmodule MyHiFiWeb.PlayerLive do
        status: :idle,
        track: nil,
        stream_title: nil,
+       artwork_path: nil,
        position_ms: 0,
        live?: false
      )}

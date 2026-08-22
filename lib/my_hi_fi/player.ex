@@ -28,6 +28,7 @@ defmodule MyHiFi.Player do
 
   @progress_interval :timer.seconds(1)
   @restart_delay :timer.seconds(2)
+  @terminate_timeout :timer.seconds(5)
   @max_restarts 5
   @output_device_key "output_device"
   @last_source_key "last_source"
@@ -43,6 +44,7 @@ defmodule MyHiFi.Player do
             track: map() | nil,
             playable: map() | nil,
             pipeline: pid() | nil,
+            monitor: reference() | nil,
             stream_title: String.t() | nil,
             artwork_path: String.t() | nil,
             started_at: integer() | nil,
@@ -55,6 +57,7 @@ defmodule MyHiFi.Player do
               track: nil,
               playable: nil,
               pipeline: nil,
+              monitor: nil,
               stream_title: nil,
               artwork_path: nil,
               started_at: nil,
@@ -280,11 +283,11 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_info(
-        {:DOWN, _monitor, :process, pipeline, reason},
-        %State{pipeline: pipeline} = state
+        {:DOWN, monitor, :process, pipeline, reason},
+        %State{pipeline: pipeline, monitor: monitor} = state
       ) do
     Logger.warning("The pipeline stopped: #{inspect(reason)}")
-    {:noreply, restart(%State{state | pipeline: nil})}
+    {:noreply, restart(%State{state | pipeline: nil, monitor: nil})}
   end
 
   @impl GenServer
@@ -310,7 +313,7 @@ defmodule MyHiFi.Player do
 
       case start_pipeline(playable, sink, state) do
         {:ok, pipeline} ->
-          Process.monitor(pipeline)
+          monitor = Process.monitor(pipeline)
 
           # `Started` waits for the source to say that sound began. See
           # `handle_info({:pipeline_playing, _}, _)`. A stream that never arrives
@@ -324,6 +327,7 @@ defmodule MyHiFi.Player do
                track: track,
                playable: playable,
                pipeline: pipeline,
+               monitor: monitor,
                stream_title: nil,
                artwork_path: nil,
                started_at: nil
@@ -458,9 +462,27 @@ defmodule MyHiFi.Player do
 
   defp stop_pipeline(%State{pipeline: nil} = state), do: state
 
-  defp stop_pipeline(%State{pipeline: pipeline} = state) do
-    if Process.alive?(pipeline), do: Membrane.Pipeline.terminate(pipeline, asynchronous?: true)
-    %State{state | pipeline: nil, started_at: nil}
+  # This waits for the old pipeline, and the wait is what makes a change of
+  # station work. The sink holds `aplay`, and `aplay` holds the sound card. A
+  # pipeline that starts while the old one still runs therefore finds the card
+  # busy, its `aplay` stops at once, the sink breaks with `:epipe`, and the new
+  # pipeline dies. The player then starts a third one 2 seconds later, so a person
+  # hears the station after a wait and sees the buffering state twice.
+  #
+  # The monitor goes first. Without that step this stop reaches `handle_info/2`
+  # as the fault of a pipeline that no person stopped, and the player then starts
+  # the old station again.
+  defp stop_pipeline(%State{pipeline: pipeline, monitor: monitor} = state) do
+    if monitor, do: Process.demonitor(monitor, [:flush])
+
+    # `force?: true` ends a pipeline that does not answer. A stereo must play the
+    # next station, and it must not wait for ever.
+    case Membrane.Pipeline.terminate(pipeline, timeout: @terminate_timeout, force?: true) do
+      :ok -> :ok
+      {:error, :timeout} -> Logger.warning("The pipeline did not stop. Killing it.")
+    end
+
+    %State{state | pipeline: nil, monitor: nil, started_at: nil}
   end
 
   defp restart(%State{restarts: restarts} = state) when restarts >= @max_restarts do
