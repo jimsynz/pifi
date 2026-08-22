@@ -72,33 +72,34 @@ defmodule MyHiFiWeb.SettingsLive do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <div id="settings" class="mx-auto max-w-xl p-6">
-      <div class="flex items-baseline justify-between mb-6">
-        <h1 class="text-2xl font-semibold">Settings</h1>
-        <nav class="flex gap-4 text-sm">
-          <.link navigate={~p"/"} class="underline">Now playing</.link>
-          <.link navigate={~p"/browse"} class="underline">Browse</.link>
-        </nav>
-      </div>
+    <div id="settings" class="space-y-4">
+      <section id="output" class="glass sheen rounded-xl p-4">
+        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Output device</h2>
 
-      <section id="output" class="mb-8">
-        <h2 class="text-lg font-medium mb-2">Output device</h2>
-
-        <p :if={@output.devices == []} id="no-output" class="text-zinc-500">
-          No USB DAC is present.
+        <p :if={@output.devices == []} id="no-output" class="text-sm text-ink-dim">
+          No sound card is present.
         </p>
 
-        <ul class="divide-y divide-zinc-200">
+        <ul class="divide-y divide-edge">
           <li
             :for={{device, index} <- Enum.with_index(@output.devices)}
-            class="py-2 flex items-center gap-3"
+            class="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
           >
-            <span class="grow">
-              <span class="block">{device.title}</span>
-              <span class="block text-sm text-zinc-500">{device.id}</span>
+            <.icon
+              name="hero-speaker-wave"
+              class={["size-5 shrink-0", if(device.id == @output.selected, do: "text-accent", else: "text-ink-faint")]}
+            />
+
+            <span class="min-w-0 grow">
+              <span class="block truncate text-ink">{device.title}</span>
+              <span class="numerals block truncate text-xs text-ink-faint">{device.id}</span>
             </span>
 
-            <span :if={device.id == @output.selected} id={"selected-#{index}"} class="text-sm">
+            <span
+              :if={device.id == @output.selected}
+              id={"selected-#{index}"}
+              class="shrink-0 text-xs uppercase tracking-widest text-accent"
+            >
               In use
             </span>
 
@@ -108,7 +109,7 @@ defmodule MyHiFiWeb.SettingsLive do
               id={"select-output-#{index}"}
               phx-click="select_output"
               phx-value-id={device.id}
-              class="rounded px-3 py-1 border border-zinc-400 text-sm"
+              class="control shrink-0 rounded-lg px-3 py-1.5 text-xs"
             >
               Use this one
             </button>
@@ -116,18 +117,18 @@ defmodule MyHiFiWeb.SettingsLive do
         </ul>
       </section>
 
-      <section id="countries" class="mb-8">
-        <h2 class="text-lg font-medium mb-2">Station countries</h2>
+      <section id="countries" class="glass sheen rounded-xl p-4">
+        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Station countries</h2>
 
-        <p class="text-sm text-zinc-500 mb-2">
+        <p class="mb-3 text-sm text-ink-dim">
           Name each country by its two letter code, and put a comma between them.
           The station list holds {stations(@station_count)}.
         </p>
 
         <.form for={@countries_form} id="countries-form" phx-submit="save_countries">
-          <div class="flex gap-2">
-            <.input field={@countries_form[:codes]} type="text" />
-            <button type="submit" id="save-countries" class="rounded px-4 py-2 bg-zinc-800 text-white">
+          <div class="flex items-start gap-2">
+            <.input field={@countries_form[:codes]} type="text" class="grow" />
+            <button type="submit" id="save-countries" class="control rounded-lg px-4 py-2 text-sm">
               Save
             </button>
           </div>
@@ -137,49 +138,58 @@ defmodule MyHiFiWeb.SettingsLive do
           type="button"
           id="sync"
           phx-click="sync"
-          class="mt-3 rounded px-4 py-2 border border-zinc-400"
+          class="control mt-3 flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
         >
+          <.icon name="hero-arrow-path" class="size-4" />
           Ask for the stations now
         </button>
       </section>
 
-      <section id="network" class="mb-8">
-        <h2 class="text-lg font-medium mb-2">Network</h2>
+      <section id="network" class="glass sheen rounded-xl p-4">
+        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Network</h2>
 
-        <p :if={@interfaces == []} id="no-network" class="text-zinc-500">
+        <p :if={@interfaces == []} id="no-network" class="text-sm text-ink-dim">
           The network state comes from the device.
         </p>
 
-        <ul class="divide-y divide-zinc-200">
-          <li :for={interface <- @interfaces} id={"interface-#{interface.name}"} class="py-2">
-            <span class="font-medium">{interface.name}</span>
-            <span class="text-sm text-zinc-500">{interface.type}</span>
-            <span class="block text-sm">{connection(interface.connection)}</span>
-            <span :if={interface.ssid} class="block text-sm text-zinc-600">
+        <ul class="divide-y divide-edge">
+          <li
+            :for={interface <- @interfaces}
+            id={"interface-#{interface.name}"}
+            class="py-2 first:pt-0 last:pb-0"
+          >
+            <div class="flex items-baseline gap-2">
+              <span class="numerals text-ink">{interface.name}</span>
+              <span class="text-xs uppercase tracking-widest text-ink-faint">{interface.type}</span>
+            </div>
+            <span class="block text-sm text-ink-dim">{connection(interface.connection)}</span>
+            <span :if={interface.ssid} class="block text-sm text-ink-dim">
               {interface.ssid}, signal {interface.signal_percent}%
             </span>
-            <span :if={interface.addresses != []} class="block text-sm font-mono">
+            <span :if={interface.addresses != []} class="numerals block text-xs text-ink-faint">
               {Enum.join(interface.addresses, ", ")}
             </span>
           </li>
         </ul>
       </section>
 
-      <section id="storage">
-        <h2 class="text-lg font-medium mb-2">Storage</h2>
+      <section id="storage" class="glass sheen rounded-xl p-4">
+        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Storage</h2>
 
         <dl class="text-sm">
-          <div class="flex justify-between py-1">
-            <dt class="text-zinc-500">Partition</dt>
-            <dd class="font-mono">{@storage.path}</dd>
+          <div class="flex justify-between gap-4 border-b border-edge py-2 first:pt-0">
+            <dt class="text-ink-faint">Partition</dt>
+            <dd class="numerals text-ink-dim">{@storage.path}</dd>
           </div>
-          <div class="flex justify-between py-1">
-            <dt class="text-zinc-500">Free</dt>
-            <dd id="free-space">{size(@storage.free_bytes)} of {size(@storage.total_bytes)}</dd>
+          <div class="flex justify-between gap-4 border-b border-edge py-2">
+            <dt class="text-ink-faint">Free</dt>
+            <dd id="free-space" class="numerals text-ink-dim">
+              {size(@storage.free_bytes)} of {size(@storage.total_bytes)}
+            </dd>
           </div>
-          <div class="flex justify-between py-1">
-            <dt class="text-zinc-500">Database</dt>
-            <dd id="database-size">{size(@storage.database_bytes)}</dd>
+          <div class="flex justify-between gap-4 py-2 last:pb-0">
+            <dt class="text-ink-faint">Database</dt>
+            <dd id="database-size" class="numerals text-ink-dim">{size(@storage.database_bytes)}</dd>
           </div>
         </dl>
       </section>

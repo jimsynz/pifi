@@ -7,15 +7,23 @@ defmodule MyHiFi.Event.Player do
   """
 
   defmodule Started do
-    @moduledoc "The player began a track."
+    @moduledoc """
+    The player began a track.
+
+    `live?` comes from the playable, and not from the track. A stream with no end,
+    such as a radio station, gives `true`. A user interface shows that fact, and
+    `duration_ms` cannot say it: a track of a known length holds no duration until
+    the first progress event.
+    """
 
     @type t :: %__MODULE__{
             source: module(),
             track: MyHiFi.Source.track(),
-            artwork_path: String.t() | nil
+            artwork_path: String.t() | nil,
+            live?: boolean()
           }
 
-    defstruct [:source, :track, :artwork_path]
+    defstruct [:source, :track, :artwork_path, live?: false]
   end
 
   defmodule Stopped do

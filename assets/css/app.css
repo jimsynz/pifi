@@ -14,4 +14,163 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
-/* This file is for your main application CSS */
+@theme {
+  --color-shell: oklch(0.14 0.006 264);
+  --color-fascia: oklch(0.21 0.008 264);
+  --color-fascia-top: oklch(0.27 0.009 264);
+  --color-panel: oklch(0.19 0.007 264);
+  --color-recess: oklch(0.16 0.006 264);
+
+  --color-edge: oklch(1 0 0 / 0.09);
+  --color-edge-bright: oklch(1 0 0 / 0.16);
+
+  --color-ink: oklch(0.95 0.004 264);
+  --color-ink-dim: oklch(0.72 0.006 264);
+  --color-ink-faint: oklch(0.55 0.008 264);
+
+  --color-accent: oklch(0.78 0.15 74);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* The accent follows the artwork, so it needs a type before it can transition. */
+@property --color-accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: rgb(226 168 84);
+}
+
+html {
+  transition: --color-accent 700ms ease;
+}
+
+body {
+  background:
+    radial-gradient(
+      120% 42% at 50% 0%,
+      color-mix(in oklab, var(--color-accent) 12%, transparent) 0%,
+      transparent 70%
+    ),
+    var(--color-shell);
+  background-attachment: fixed;
+}
+
+@utility faceplate {
+  background:
+    linear-gradient(
+      180deg,
+      var(--color-fascia-top) 0%,
+      var(--color-fascia) 58%,
+      color-mix(in oklab, var(--color-fascia) 88%, black) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-bright),
+    inset 0 -1px 0 oklch(0 0 0 / 0.5),
+    0 18px 40px -20px oklch(0 0 0 / 0.9);
+}
+
+@utility brushed {
+  background-image: repeating-linear-gradient(
+    90deg,
+    oklch(1 0 0 / 0.022) 0px,
+    oklch(1 0 0 / 0.022) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+@utility glass {
+  background: color-mix(in oklab, var(--color-panel) 72%, transparent);
+  backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid var(--color-edge);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-bright),
+    0 10px 30px -18px oklch(0 0 0 / 0.8);
+}
+
+@utility recess {
+  background: var(--color-recess);
+  box-shadow:
+    inset 0 2px 6px oklch(0 0 0 / 0.55),
+    inset 0 -1px 0 var(--color-edge);
+}
+
+/* A curved glass fascia catches the light along its top edge. */
+@utility sheen {
+  position: relative;
+  isolation: isolate;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(
+      168deg,
+      oklch(1 0 0 / 0.07) 0%,
+      oklch(1 0 0 / 0.02) 34%,
+      transparent 52%
+    );
+  }
+}
+
+@utility numerals {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+@utility led {
+  background: var(--color-accent);
+  box-shadow:
+    0 0 6px color-mix(in oklab, var(--color-accent) 80%, transparent),
+    0 0 16px color-mix(in oklab, var(--color-accent) 45%, transparent);
+}
+
+@utility control {
+  color: var(--color-ink-dim);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--color-fascia-top) 92%, transparent) 0%,
+    var(--color-panel) 100%
+  );
+  border: 1px solid var(--color-edge);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-bright),
+    0 2px 4px -2px oklch(0 0 0 / 0.7);
+  transition: color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+
+  &:hover:not(:disabled) {
+    color: var(--color-ink);
+    border-color: var(--color-edge-bright);
+  }
+
+  &:active:not(:disabled) {
+    box-shadow: inset 0 2px 5px oklch(0 0 0 / 0.6);
+  }
+
+  &:disabled {
+    color: var(--color-ink-faint);
+    box-shadow: none;
+    opacity: 0.55;
+  }
+}
+
+@utility control-on {
+  color: var(--color-accent);
+  border-color: color-mix(in oklab, var(--color-accent) 45%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-bright),
+    0 0 0 1px color-mix(in oklab, var(--color-accent) 22%, transparent),
+    0 0 18px -4px color-mix(in oklab, var(--color-accent) 55%, transparent);
+}
+
+@utility scroller {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-bright) transparent;
+}

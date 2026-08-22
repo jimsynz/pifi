@@ -22,6 +22,7 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Artwork
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
+  alias MyHiFi.Output
   alias MyHiFi.Player.Pipeline
   alias MyHiFi.Settings
 
@@ -46,8 +47,7 @@ defmodule MyHiFi.Player do
             artwork_path: String.t() | nil,
             started_at: integer() | nil,
             restarts: non_neg_integer(),
-            standby?: boolean(),
-            output: module()
+            standby?: boolean()
           }
 
     defstruct source: nil,
@@ -59,8 +59,7 @@ defmodule MyHiFi.Player do
               artwork_path: nil,
               started_at: nil,
               restarts: 0,
-              standby?: false,
-              output: MyHiFi.Output.UsbDac
+              standby?: false
   end
 
   @doc false
@@ -120,10 +119,8 @@ defmodule MyHiFi.Player do
   def output_device_key, do: @output_device_key
 
   @impl GenServer
-  def init(options) do
-    state = %State{output: Keyword.get(options, :output, MyHiFi.Output.UsbDac)}
-
-    {:ok, state, {:continue, :restore}}
+  def init(_options) do
+    {:ok, %State{}, {:continue, :restore}}
   end
 
   # The settings hold the last station and the standby state, so both survive a
@@ -204,12 +201,15 @@ defmodule MyHiFi.Player do
        artwork_path: state.artwork_path,
        playing?: state.started_at != nil,
        standby?: state.standby?,
-       position_ms: position_ms(state)
+       position_ms: position_ms(state),
+       live?: live?(state)
      }, state}
   end
 
   @impl GenServer
-  def handle_call(:output, _from, %State{output: output} = state) do
+  def handle_call(:output, _from, %State{} = state) do
+    output = Output.module()
+
     {:reply, %{devices: output.devices(), selected: chosen_device()}, state}
   end
 
@@ -245,7 +245,8 @@ defmodule MyHiFi.Player do
     Event.publish(:player, %Events.Started{
       source: state.source,
       track: state.track,
-      artwork_path: artwork_path
+      artwork_path: artwork_path,
+      live?: live?(state)
     })
 
     schedule_progress()
@@ -358,7 +359,8 @@ defmodule MyHiFi.Player do
   # A person chooses a device, and that choice stays in the settings. A DAC can
   # leave the device, so a choice that names an absent card gives way to the first
   # card that is present. Silence is worse than the wrong socket.
-  defp sink(%State{output: output}) do
+  defp sink(%State{}) do
+    output = Output.module()
     devices = output.devices()
     chosen = chosen_device()
 
@@ -383,6 +385,9 @@ defmodule MyHiFi.Player do
   end
 
   defp artwork_path(_track), do: nil
+
+  defp live?(%State{playable: %{live?: live?}}), do: live?
+  defp live?(%State{}), do: false
 
   defp chosen_device do
     case Settings.fetch(@output_device_key) do

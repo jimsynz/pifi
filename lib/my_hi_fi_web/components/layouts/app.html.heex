@@ -1,4 +1,44 @@
-<main class="container">
+<div class="min-h-dvh">
+  <div class="faceplate brushed sheen sticky top-0 z-40">
+    <div class="mx-auto max-w-3xl px-3 sm:px-5">
+      <div class="flex items-center gap-2 border-b border-edge py-2">
+        <nav id="sources" aria-label="Sources" class="scroller flex grow items-center gap-1 overflow-x-auto">
+          <.link
+            :for={source <- @sources}
+            id={"source-#{source.slug}"}
+            navigate={~p"/browse/#{source.slug}"}
+            aria-current={source.slug == @current_source && "page"}
+            class={[
+              "control flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm",
+              source.slug == @current_source && "control-on"
+            ]}
+          >
+            <.source_icon name={source.icon} />
+            <span class="hidden sm:inline">{source.title}</span>
+          </.link>
+        </nav>
+
+        <.link
+          id="settings-link"
+          navigate={~p"/settings"}
+          aria-label="Settings"
+          aria-current={is_nil(@current_source) && "page"}
+          class={[
+            "control flex shrink-0 items-center rounded-lg p-2",
+            is_nil(@current_source) && "control-on"
+          ]}
+        >
+          <.icon name="hero-cog-6-tooth" class="size-5" />
+        </.link>
+      </div>
+    </div>
+
+    {live_render(@socket, MyHiFiWeb.PlayerLive, id: "player", sticky: true)}
+  </div>
+
+  <main class="mx-auto max-w-3xl px-3 py-6 sm:px-5">
+    {@inner_content}
+  </main>
+
   <.flash_group flash={@flash} />
-  {@inner_content}
-</main>
+</div>

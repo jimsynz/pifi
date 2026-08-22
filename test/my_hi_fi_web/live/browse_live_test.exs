@@ -1,6 +1,8 @@
 defmodule MyHiFiWeb.BrowseLiveTest do
   use MyHiFiWeb.ConnCase, async: false
 
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Radio
 
   defmodule PlainSource do
@@ -15,6 +17,9 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     @impl MyHiFi.Source
     def title, do: "Plain source"
+
+    @impl MyHiFi.Source
+    def icon, do: :library
 
     @impl MyHiFi.Source
     def root, do: :root
@@ -84,24 +89,31 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     :ok
   end
 
-  describe "the source list" do
-    test "names each source", %{conn: conn} do
-      {:ok, view, html} = live(conn, ~p"/browse")
+  describe "the source of the page" do
+    test "the top row holds one control for each source", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/browse/internet-radio")
 
       assert html =~ "Internet radio"
-      assert has_element?(view, "#source-0")
-      refute has_element?(view, "#entries")
+      assert has_element?(view, "#source-internet-radio")
+      assert has_element?(view, "#settings-link")
     end
 
-    test "choosing a source shows the top of its tree", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      html = view |> element("#source-0") |> render_click()
+    test "the address of a source shows the top of its tree", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/browse/internet-radio")
 
       assert html =~ "Favourites"
       assert html =~ "Countries"
       assert html =~ "Tags"
       assert has_element?(view, "#crumbs")
+    end
+
+    test "the first source shows for an address with no source", %{conn: conn} do
+      assert {:error, {:live_redirect, %{to: "/browse/internet-radio"}}} = live(conn, ~p"/")
+    end
+
+    test "a name that no source holds shows the first source", %{conn: conn} do
+      assert {:error, {:live_redirect, %{to: "/browse/internet-radio"}}} =
+               live(conn, ~p"/browse/gramophone")
     end
   end
 
@@ -109,9 +121,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "a person reaches a station through the countries", %{conn: conn} do
       station(%{title: "RNZ National", country_code: "NZ"})
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       html = open(view, "Countries")
 
       assert html =~ "NZ"
@@ -125,9 +135,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "a person reaches a station through the tags", %{conn: conn} do
       station(%{title: "Tagged", tags: ["jazz"]})
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       open(view, "Tags")
       html = open(view, "jazz")
 
@@ -137,9 +145,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "a crumb goes back to a container that the person left", %{conn: conn} do
       station(%{title: "RNZ National", country_code: "NZ"})
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       open(view, "Countries")
       open(view, "NZ")
 
@@ -149,20 +155,8 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       refute html =~ "RNZ National"
     end
 
-    test "the source list comes back", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
-      html = view |> element("#crumbs button", "Sources") |> render_click()
-
-      assert html =~ "Internet radio"
-      refute has_element?(view, "#crumbs")
-    end
-
     test "a container with nothing in it says so", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       html = open(view, "Favourites")
 
       assert html =~ "Nothing here."
@@ -174,9 +168,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       station(%{title: "RNZ National"})
       station(%{title: "Radio Hauraki"})
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
 
       html =
         view
@@ -190,9 +182,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "clearing the search gives the tree again", %{conn: conn} do
       station(%{title: "Radio Hauraki"})
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       view |> form("#search-form", search: %{query: "hauraki"}) |> render_submit()
 
       html = view |> element("#clear-search") |> render_click()
@@ -202,9 +192,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     end
 
     test "an empty query gives the tree again", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       html = view |> form("#search-form", search: %{query: "   "}) |> render_submit()
 
       assert html =~ "Favourites"
@@ -213,9 +201,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "the field goes away for a source with no search", %{conn: conn} do
       use_source(PlainSource)
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/plain-source")
 
       assert has_element?(view, "#search-form")
 
@@ -227,24 +213,82 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     end
   end
 
+  describe "the marker of the entry that plays" do
+    test "the entry that plays holds the marker, and another entry holds none", %{conn: conn} do
+      playing = station(%{title: "RNZ National", country_code: "NZ"})
+      station(%{title: "RNZ Concert", country_code: "NZ"})
+
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+      open(view, "Countries")
+      open(view, "NZ")
+
+      Event.publish(:player, %Events.Started{
+        source: MyHiFi.Source.InternetRadio,
+        track: %{ref: {:station, playing.id}, title: "RNZ National"},
+        artwork_path: nil,
+        live?: true
+      })
+
+      assert has_element?(view, ~s(button[aria-current="true"]), "RNZ National")
+      refute has_element?(view, ~s(button[aria-current="true"]), "RNZ Concert")
+    end
+
+    test "a stop removes the marker", %{conn: conn} do
+      playing = station(%{title: "RNZ National", country_code: "NZ"})
+
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+      open(view, "Countries")
+      open(view, "NZ")
+
+      Event.publish(:player, %Events.Started{
+        source: MyHiFi.Source.InternetRadio,
+        track: %{ref: {:station, playing.id}, title: "RNZ National"},
+        artwork_path: nil,
+        live?: true
+      })
+
+      assert has_element?(view, ~s(#play-0[aria-current="true"]))
+
+      Event.publish(:player, %Events.Stopped{reason: :requested})
+
+      refute has_element?(view, ~s(#play-0[aria-current="true"]))
+    end
+
+    # A station of another source cannot hold the marker of this list.
+    test "an entry of another source holds no marker", %{conn: conn} do
+      station(%{title: "RNZ National", country_code: "NZ"})
+
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+      open(view, "Countries")
+      open(view, "NZ")
+
+      Event.publish(:player, %Events.Started{
+        source: PlainSource,
+        track: %{ref: :only, title: "One track"},
+        artwork_path: nil,
+        live?: false
+      })
+
+      refute has_element?(view, ~s(#play-0[aria-current="true"]))
+    end
+  end
+
   describe "favourites" do
     test "a person makes a station a favourite, and removes that mark", %{conn: conn} do
       station(%{title: "RNZ National", country_code: "NZ"})
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       open(view, "Countries")
       open(view, "NZ")
 
       html = view |> element("#favourite-0") |> render_click()
 
-      assert html =~ "★"
+      assert html =~ "hero-star-solid"
       assert [%{favourite?: true}] = Radio.favourite_stations!()
 
       html = view |> element("#favourite-0") |> render_click()
 
-      assert html =~ "☆"
+      refute html =~ "hero-star-solid"
       assert [] == Radio.favourite_stations!()
     end
 
@@ -252,9 +296,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       created = station(%{title: "RNZ Concert"})
       Radio.set_favourite!(created)
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       html = open(view, "Favourites")
 
       assert html =~ "RNZ Concert"
@@ -263,9 +305,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "the control goes away for a source with no favourites", %{conn: conn} do
       use_source(PlainSource)
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/plain-source")
 
       assert has_element?(view, "#play-0")
       refute has_element?(view, "#favourite-0")
@@ -276,9 +316,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "a track that the source cannot resolve shows the reason", %{conn: conn} do
       use_source(PlainSource)
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/plain-source")
       html = view |> element("#play-0") |> render_click()
 
       assert html =~ "Could not play that"
@@ -292,9 +330,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
         station(%{title: "Station #{String.pad_leading(to_string(index), 3, "0")}"})
       end
 
-      {:ok, view, _html} = live(conn, ~p"/browse")
-
-      view |> element("#source-0") |> render_click()
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
       open(view, "Countries")
       html = open(view, "NZ")
 

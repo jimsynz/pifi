@@ -28,8 +28,8 @@ defmodule MyHiFiWeb.Router do
   scope "/", MyHiFiWeb do
     pipe_through(:browser)
 
-    live("/", NowPlayingLive)
-    live("/browse", BrowseLive)
+    live("/", BrowseLive)
+    live("/browse/:source", BrowseLive)
     live("/settings", SettingsLive)
     get("/artwork/:name", ArtworkController, :show)
   end

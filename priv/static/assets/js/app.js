@@ -9551,12 +9551,103 @@ removing illegal node: "${("outerHTML" in childNode && childNode.outerHTML || ch
 
   // js/app.js
   var import_topbar = __toESM(require_topbar());
+
+  // js/accent.js
+  var SAMPLE_SIZE = 32;
+  var HUE_BUCKETS = 24;
+  var MIN_WEIGHT = 0.35;
+  var LIGHTNESS = [0.72, 0.84];
+  var CHROMA = [0.08, 0.19];
+  var DEFAULT_ACCENT = "oklch(0.78 0.15 74)";
+  var toLinear = (value) => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+  };
+  var toOklab = (red, green, blue) => {
+    const r = toLinear(red);
+    const g = toLinear(green);
+    const b = toLinear(blue);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return {
+      lightness: 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+      a: 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+      b: 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+    };
+  };
+  var clamp = ([low, high], value) => Math.min(high, Math.max(low, value));
+  var pixelsOf = (image) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = SAMPLE_SIZE;
+    canvas.height = SAMPLE_SIZE;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
+    return context.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE).data;
+  };
+  var accentOf = (image) => {
+    let pixels;
+    try {
+      pixels = pixelsOf(image);
+    } catch (_error) {
+      return null;
+    }
+    if (!pixels) return null;
+    const buckets = new Array(HUE_BUCKETS).fill(null).map(() => ({ weight: 0, a: 0, b: 0, lightness: 0 }));
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index + 3] < 128) continue;
+      const colour = toOklab(pixels[index], pixels[index + 1], pixels[index + 2]);
+      if (colour.lightness < 0.12 || colour.lightness > 0.95) continue;
+      const chroma2 = Math.hypot(colour.a, colour.b);
+      const hue2 = Math.atan2(colour.b, colour.a) * 180 / Math.PI;
+      const bucket = buckets[Math.floor((hue2 % 360 + 360) % 360 / (360 / HUE_BUCKETS))];
+      const weight = chroma2 * chroma2;
+      bucket.weight += weight;
+      bucket.a += colour.a * weight;
+      bucket.b += colour.b * weight;
+      bucket.lightness += colour.lightness * weight;
+    }
+    const best = buckets.reduce((winner, bucket) => bucket.weight > winner.weight ? bucket : winner);
+    if (best.weight < MIN_WEIGHT) return null;
+    const a = best.a / best.weight;
+    const b = best.b / best.weight;
+    const hue = (Math.atan2(b, a) * 180 / Math.PI % 360 + 360) % 360;
+    const lightness = clamp(LIGHTNESS, best.lightness / best.weight);
+    const chroma = clamp(CHROMA, Math.hypot(a, b));
+    return `oklch(${lightness.toFixed(3)} ${chroma.toFixed(3)} ${hue.toFixed(1)})`;
+  };
+  var apply = (image) => {
+    const accent = accentOf(image);
+    if (accent) document.documentElement.style.setProperty("--color-accent", accent);
+  };
+  var read = (image) => {
+    if (image.complete && image.naturalWidth > 0) {
+      apply(image);
+    } else {
+      image.addEventListener("load", () => apply(image), { once: true });
+    }
+  };
+  var Accent = {
+    mounted() {
+      read(this.el);
+    },
+    updated() {
+      read(this.el);
+    },
+    destroyed() {
+      document.documentElement.style.setProperty("--color-accent", DEFAULT_ACCENT);
+    }
+  };
+
+  // js/app.js
   var csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
   var liveSocket = new LiveSocket("/live", Socket, {
     longPollFallbackMs: 2500,
-    params: { _csrf_token: csrfToken }
+    params: { _csrf_token: csrfToken },
+    hooks: { Accent }
   });
-  import_topbar.default.config({ barColors: { 0: "#29d" }, shadowColor: "rgba(0, 0, 0, .3)" });
+  import_topbar.default.config({ barColors: { 0: "#e2a854" }, shadowColor: "rgba(0, 0, 0, .3)" });
   window.addEventListener("phx:page-loading-start", (_info) => import_topbar.default.show(300));
   window.addEventListener("phx:page-loading-stop", (_info) => import_topbar.default.hide());
   liveSocket.connect();

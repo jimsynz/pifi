@@ -202,7 +202,7 @@ defmodule MyHiFi.MixProject do
   end
 
   # Uncomment the following line if using Phoenix > 1.8.
-  # defp listeners(:host, :dev), do: [Phoenix.CodeReloader]
+  defp listeners(:host, :dev), do: [Phoenix.CodeReloader]
   defp listeners(_, _), do: []
 
   defp aliases() do

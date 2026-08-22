@@ -48,6 +48,8 @@ defmodule MyHiFiWeb do
     quote do
       use Phoenix.LiveView, layout: {MyHiFiWeb.Layouts, :app}
 
+      on_mount(MyHiFiWeb.Shell)
+
       unquote(html_helpers())
     end
   end

@@ -5,6 +5,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   alias MyHiFi.Radio
   alias MyHiFi.Radio.Station.SyncFromRemote
   alias MyHiFi.Settings
+  alias MyHiFi.Test.NoCardOutput
 
   defp station(overrides) do
     defaults = %{
@@ -62,7 +63,9 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       assert has_element?(view, "#no-network")
     end
 
-    test "says when no USB DAC is present", %{conn: conn} do
+    test "says when no sound card is present", %{conn: conn} do
+      NoCardOutput.use_it()
+
       {:ok, view, _html} = live(conn, ~p"/settings")
 
       assert has_element?(view, "#no-output")
@@ -144,8 +147,8 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
   describe "the output device" do
     test "the player keeps the choice, and it gives it back", _context do
-      # No USB DAC is present on a host, so the page shows no control. The player
-      # holds the choice all the same, and it is the part that a device needs.
+      # The name of a card that no machine holds is enough here: the player keeps
+      # what a person chose, and that is the part that a device needs.
       assert :ok = MyHiFi.Player.select_output("Audio")
       assert %{selected: "Audio"} = MyHiFi.Player.output()
     end

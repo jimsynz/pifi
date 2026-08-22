@@ -165,6 +165,7 @@ defmodule MyHiFi.Source do
                       live?: boolean()}
 
   @callback title() :: String.t()
+  @callback icon() :: atom()
   @callback root() :: ref()
   @callback browse(ref(), keyword()) :: {:ok, page()} | {:error, term()}
   @callback search(String.t(), keyword()) :: {:ok, page()} | {:error, term()}
@@ -176,6 +177,12 @@ defmodule MyHiFi.Source do
 
   @spec all() :: [module()]
   def all
+
+  @spec slug(module()) :: String.t()
+  def slug(module)
+
+  @spec from_slug(String.t()) :: {:ok, module()} | {:error, :not_a_source}
+  def from_slug(name)
 end
 ```
 
@@ -205,8 +212,19 @@ Notes on the behaviour:
   A source gives `{:error, :cannot_name}` for a `ref` that it does not name: the
   player needs the tracks, and internet radio therefore names a station and no
   container. See section 9 for why the player stores a name and not a term.
+- `icon/0` names the icon of the source, and each user interface draws that name
+  in its own way. The web interface draws a heroicon, and the device screen draws a
+  Vivid shape. The interfaces draw `:radio`, `:library`, `:podcast` and `:cloud`
+  today, and any other name gives the default icon. A source therefore reaches the
+  top row of the web interface without a change there. This callback holds the
+  same rule as `title/0`: the source names what it is, and no interface holds a
+  list of the sources.
 - `all/0` gives every source. A new source joins that list, and each user
   interface then shows it without a change.
+- `slug/1` and `from_slug/1` name a source in an address, and they read that name
+  back. The name comes from the module, such as `internet-radio`, so a new source
+  needs no registration. `from_slug/1` compares the name of a request with the
+  name of each source of `all/0`. It turns no text into an atom.
 - A source keeps its own configuration in an Ash resource.
 
 ### 5.2 Output behaviour
@@ -219,12 +237,40 @@ defmodule MyHiFi.Output do
 
   @callback devices() :: [device()]
   @callback sink_spec(device_id :: String.t()) :: Membrane.ChildrenSpec.child_definition()
+
+  @spec module() :: module()
+  def module
 end
 ```
 
-Version 1 has one module: `MyHiFi.Output.UsbDac`. It reads the ALSA card list and
-gives a sink. A later version adds `MyHiFi.Output.I2s` for a HAT such as the
-PirateAudio.
+Version 1 has one module: `MyHiFi.Output.Alsa`. It reads the ALSA card list and
+gives a sink. A later version adds a module for hardware that ALSA does not reach.
+
+It lists every card, and not the USB cards alone. Three reasons ask for that. A
+USB DAC is what this device plays through. An I2S DAC on the GPIO header is an
+ALSA card as well, so it needs no module of its own. The host of a developer holds
+a card, and a person can now choose it and hear the audio while they work.
+
+It lists a playback device of a card, and not the card. A card holds none, one, or
+several, and `aplay` opens a device. One HD-Audio card of a laptop holds the
+devices 3, 7, 8 and 9 for HDMI and holds no device 0, so `plughw:CARD=Generic,DEV=0`
+gives `audio open error: No such file or directory`. The `id` of a device is
+therefore its ALSA hardware name, such as `hw:CARD=Generic_1,DEV=0`, and
+`sink_spec/1` adds the `plug` layer to it. The title names the card and the
+device, such as `HD-Audio Generic, ALC255 Analog`.
+
+It reads `/proc/asound/cards` and `/proc/asound/card*/pcm*p/info`, so it runs no
+command and it needs no new binary.
+
+A device of a USB card comes first in the list. `MyHiFi.Player` uses the first
+device when the chosen one is absent, so a target with HDMI audio still uses the
+DAC.
+
+`MyHiFi.Output.module/0` gives the output that the firmware uses, and
+`MyHiFi.Player` reads it each time that it needs a sink. A test sets `:output` to
+give an output of its own, in the same way that it sets `:sources`. A test that
+needs a play to fail therefore depends on no hardware: the host of a developer
+holds a card, and the host of a build server may hold none.
 
 The Nerves system already holds `alsa-lib`, `aplay`, and `amixer`. The sink sends
 raw samples to `aplay` through an Erlang port. This needs no new binary and no
@@ -316,7 +362,7 @@ Topic `:player`, from `MyHiFi.Player`:
 
 | Event | Fields |
 |---|---|
-| `Player.Started` | `source`, `track`, `artwork_path` |
+| `Player.Started` | `source`, `track`, `artwork_path`, `live?` |
 | `Player.Stopped` | `reason` |
 | `Player.Buffering` | `percent` |
 | `Player.Progress` | `position_ms`, `duration_ms` |
@@ -438,7 +484,7 @@ and stops with "Error opening" on a FLAC stream.
 | Parse AAC | `Membrane.AAC.Parser` | No |
 | Decode AAC and HE-AAC | `Membrane.AAC.FDK.Decoder` | libfdk-aac |
 | Decode MP3 | `Membrane.MP3.MAD.Decoder` | libmad |
-| Send to the DAC | `MyHiFi.Output.UsbDac` | No |
+| Send to the DAC | `MyHiFi.Output.Alsa` | No |
 
 The player holds a ring buffer between the source and the decoder. The buffer
 holds the compressed bytes, not the samples. Compressed audio is small: a 128
@@ -675,16 +721,51 @@ removes leaves the device with nothing selected.
 The web interface uses Phoenix LiveView. Any person on the local network can open
 it. There is no sign-in. The home network is the boundary.
 
-The web interface has these pages:
+The interface draws one dark faceplate, in the way that a stereo component holds
+one. `assets/css/app.css` holds the tokens and the surfaces of it.
 
-- **Now playing.** It shows the artwork, the title, the station, and the state.
-  It gives a stop control and a standby control.
-- **Browse.** It shows the source list. It then shows the tree of the source. It
-  gives a search field, and it hides that field for a source with no search. It
-  gives a control that marks a track as a favourite. The favourites are a
-  container in the tree of the source, so they need no page of their own.
+The faceplate stays on the screen all the time, and it holds two rows:
+
+- **The fascia.** It holds one control for each source, and the settings control at
+  the far right. A source gives its own title and its own icon, so a new source
+  needs no change here. See section 5.1. The control of the page that a person
+  reads holds the accent colour.
+- **The display.** It holds the power control at the left, the artwork, the state,
+  the title, the second line, the time, and the stop control. The power control
+  enters standby, and it leaves standby. See section 9. A stream with no end holds
+  a `Live` badge beside the title. That fact comes from `live?` of
+  `Player.Started`, which comes from the playable, and not from `duration_ms`: a
+  track of a known length holds no duration until the first progress event.
+
+`MyHiFiWeb.PlayerLive` draws the display, and `MyHiFiWeb.Layouts` renders it with
+`sticky: true`. One process therefore holds the display for a browser tab, and a
+move to another page keeps it. That is why the controls stay on the screen.
+
+A touch on the artwork opens the large view. It fills the screen, and it shows the
+artwork, the title, the station, the second line, the time, and the two controls.
+
+Under the faceplate the interface shows one of two pages:
+
+- **Browse.** The address names the source, such as `/browse/internet-radio`, and
+  the page then shows the tree of that source. It gives a search field, and it
+  hides that field for a source with no search. It gives a control that marks a
+  track as a favourite. The favourites are a container in the tree of the source,
+  so they need no page of their own. The entry that plays holds a marker: the page
+  follows the `:player` topic, and it compares the `ref` of the track of the player
+  with the `ref` of each entry. A station that a start selected plays nothing yet,
+  so it holds no marker. See section 9.
 - **Settings.** It shows the output device, the station countries, the network
   state, and the storage state.
+
+**The accent colour comes from the artwork.** `assets/js/accent.js` is a LiveView
+hook. The browser already holds the logo, so the browser reads it: the hook draws
+the logo to a canvas, it groups the pixels by hue in OKLCH, and it takes the group
+with the most colour. It then clamps the lightness and the chroma, because the
+colour must stay readable on a near-black faceplate, and it writes
+`--color-accent`. The device decodes no image for this, and it needs no image
+library. A logo of one colour only gives no accent, and the interface then keeps
+the one that it holds. The logo comes from this device, so the canvas stays
+readable. See section 13.
 
 ## 11. Device interface (later version)
 

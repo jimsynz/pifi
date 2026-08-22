@@ -81,6 +81,19 @@ defmodule MyHiFi.Source do
   @doc "The name of this source, for a person to read."
   @callback title() :: String.t()
 
+  @doc """
+  The icon of this source.
+
+  A source names its own icon, and each user interface draws that name in its own
+  way. The web interface draws a heroicon, and the device screen draws a Vivid
+  shape. Neither one holds a list of the sources.
+
+  The interfaces draw `:radio`, `:library`, `:podcast` and `:cloud` today. Any
+  other name gives the default icon, so a new source works before an interface
+  learns its icon.
+  """
+  @callback icon() :: atom()
+
   @doc "The entry at the top of the tree."
   @callback root() :: ref()
 
@@ -154,4 +167,36 @@ defmodule MyHiFi.Source do
   """
   @spec all() :: [module()]
   def all, do: Application.get_env(:my_hi_fi, :sources, [MyHiFi.Source.InternetRadio])
+
+  @doc """
+  Read a source back from its name.
+
+  The name comes from a request, so this compares it with the name of each source
+  of `all/0`. It turns no text into an atom, and an unknown name gives an error.
+  """
+  @spec from_slug(String.t()) :: {:ok, module()} | {:error, :not_a_source}
+  def from_slug(name) do
+    case Enum.find(all(), &(slug(&1) == name)) do
+      nil -> {:error, :not_a_source}
+      module -> {:ok, module}
+    end
+  end
+
+  @doc """
+  The name of a source in an address.
+
+  The web interface holds one address for each source, and a person can keep that
+  address. The name comes from the module, so a new source needs no registration.
+
+      iex> MyHiFi.Source.slug(MyHiFi.Source.InternetRadio)
+      "internet-radio"
+  """
+  @spec slug(module()) :: String.t()
+  def slug(module) do
+    module
+    |> Module.split()
+    |> List.last()
+    |> Macro.underscore()
+    |> String.replace("_", "-")
+  end
 end

@@ -28,6 +28,9 @@ defmodule MyHiFi.Source.InternetRadio do
   def title, do: "Internet radio"
 
   @impl MyHiFi.Source
+  def icon, do: :radio
+
+  @impl MyHiFi.Source
   def root, do: :root
 
   @impl MyHiFi.Source

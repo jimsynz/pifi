@@ -4,6 +4,7 @@ defmodule MyHiFi.PlayerTest do
   alias MyHiFi.Radio
   alias MyHiFi.Settings
   alias MyHiFi.Source.InternetRadio
+  alias MyHiFi.Test.NoCardOutput
 
   @keys ["last_source", "last_ref", "standby", "output_device"]
 
@@ -69,7 +70,11 @@ defmodule MyHiFi.PlayerTest do
 
   describe "the last station" do
     test "a play that fails stores nothing" do
-      # No USB DAC is present on a host, so a play cannot succeed here.
+      # The play must fail on any machine, so this test holds an output that finds
+      # no card. `MyHiFi.Output.Alsa` lists the cards of the machine, and a host
+      # holds one.
+      NoCardOutput.use_it()
+
       created = station(%{})
 
       assert {:error, _reason} = MyHiFi.Player.play(InternetRadio, {:station, created.id})

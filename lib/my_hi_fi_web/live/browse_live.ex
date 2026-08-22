@@ -2,48 +2,88 @@ defmodule MyHiFiWeb.BrowseLive do
   @moduledoc """
   Find something to play.
 
-  The page shows the source list, and then it moves through the tree of one
-  source. It holds no knowledge of any particular service: it reads `title`,
-  `artwork` and `favourite?` from each entry, and it gives the `ref` back
-  untouched. See `MyHiFi.Source`.
+  The address names the source, and the top row of the faceplate holds one control
+  for each source. The page then moves through the tree of that source. It holds
+  no knowledge of any particular service: it reads `title`, `artwork` and
+  `favourite?` from each entry, and it gives the `ref` back untouched. See
+  `MyHiFi.Source`.
 
   The page keeps the `ref` of each entry in its own state, and each control names
   an entry by its place in the list. A `ref` is a term of the source, so a page
   that put one in an address would have to turn text back into a term, and no
-  page reads a term from a person.
+  page reads a term from a person. The name of a source is not a `ref`, and
+  `MyHiFi.Source.from_slug/1` compares it with the sources that this firmware
+  holds.
   """
 
   use MyHiFiWeb, :live_view
 
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Player, as: Events
+  alias MyHiFi.Playback
   alias MyHiFi.Source
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    sources = Enum.map(Source.all(), &%{module: &1, title: &1.title()})
+    if connected?(socket), do: Event.subscribe(:player)
 
     {:ok,
      socket
      |> assign(:page_title, "Browse")
-     |> assign(:sources, sources)
-     |> show_sources()}
+     |> assign(:playing, playing(Playback.state!()))}
   end
 
   @impl Phoenix.LiveView
-  def handle_event("sources", _params, socket) do
-    {:noreply, show_sources(socket)}
+  def handle_params(%{"source" => slug}, _uri, socket) do
+    case Source.from_slug(slug) do
+      {:ok, module} -> {:noreply, socket |> start_at(module) |> load()}
+      {:error, :not_a_source} -> {:noreply, first_source(socket)}
+    end
   end
 
   @impl Phoenix.LiveView
-  def handle_event("choose_source", %{"index" => index}, socket) do
-    %{module: module, title: title} = Enum.at(socket.assigns.sources, to_index(index))
+  def handle_params(_params, _uri, socket), do: {:noreply, first_source(socket)}
 
+  @impl Phoenix.LiveView
+  def handle_info(%Events.Started{source: source, track: %{ref: ref}}, socket) do
+    {:noreply, assign(socket, :playing, {source, ref})}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_info(%event{}, socket) when event in [Events.Stopped, Events.Failed] do
+    {:noreply, assign(socket, :playing, nil)}
+  end
+
+  # The page ignores every other event of the player. A progress event arrives
+  # once a second, and the marker of the list does not change with it.
+  @impl Phoenix.LiveView
+  def handle_info(_message, socket), do: {:noreply, socket}
+
+  @impl Phoenix.LiveView
+  def handle_event("clear_search", _params, socket) do
+    {:noreply, socket |> assign(:query, nil) |> load()}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("crumb", %{"index" => index}, socket) do
     {:noreply,
      socket
-     |> assign(:source, module)
-     |> assign(:path, [%{ref: module.root(), title: title}])
-     |> assign(:search?, true)
+     |> assign(:path, Enum.take(socket.assigns.path, to_index(index) + 1))
      |> assign(:query, nil)
      |> load()}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("favourite", %{"index" => index}, socket) do
+    case entry_at(socket, index) do
+      {:track, track} -> {:noreply, mark(socket, to_index(index), track)}
+      _other -> {:noreply, socket}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("more", _params, socket) do
+    {:noreply, load_more(socket)}
   end
 
   @impl Phoenix.LiveView
@@ -62,12 +102,11 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   @impl Phoenix.LiveView
-  def handle_event("crumb", %{"index" => index}, socket) do
-    {:noreply,
-     socket
-     |> assign(:path, Enum.take(socket.assigns.path, to_index(index) + 1))
-     |> assign(:query, nil)
-     |> load()}
+  def handle_event("play", %{"index" => index}, socket) do
+    case entry_at(socket, index) do
+      {:track, track} -> {:noreply, play(socket, track)}
+      _other -> {:noreply, socket}
+    end
   end
 
   @impl Phoenix.LiveView
@@ -79,89 +118,91 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   @impl Phoenix.LiveView
-  def handle_event("clear_search", _params, socket) do
-    {:noreply, socket |> assign(:query, nil) |> load()}
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("more", _params, socket) do
-    {:noreply, load_more(socket)}
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("play", %{"index" => index}, socket) do
-    case entry_at(socket, index) do
-      {:track, track} -> {:noreply, play(socket, track)}
-      _other -> {:noreply, socket}
-    end
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("favourite", %{"index" => index}, socket) do
-    case entry_at(socket, index) do
-      {:track, track} -> {:noreply, mark(socket, to_index(index), track)}
-      _other -> {:noreply, socket}
-    end
-  end
-
-  @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <div id="browse" class="mx-auto max-w-xl p-6">
-      <div class="flex items-baseline justify-between mb-6">
-        <h1 class="text-2xl font-semibold">Browse</h1>
-        <nav class="flex gap-4 text-sm">
-          <.link navigate={~p"/"} class="underline">Now playing</.link>
-          <.link navigate={~p"/settings"} class="underline">Settings</.link>
-        </nav>
-      </div>
+    <div id="browse">
+      <p :if={is_nil(@source)} id="no-source" class="text-ink-dim">
+        This firmware holds no source.
+      </p>
 
-      <%= if @source do %>
-        <nav id="crumbs" class="text-sm text-zinc-600 mb-4">
-          <button type="button" phx-click="sources" class="underline">Sources</button>
-          <span :for={{crumb, index} <- Enum.with_index(@path)}>
-            <span class="text-zinc-400">/</span>
-            <button
-              type="button"
-              id={"crumb-#{index}"}
-              phx-click="crumb"
-              phx-value-index={index}
-              class="underline"
-            >
-              {crumb.title}
-            </button>
-          </span>
-          <span :if={@query}>
-            <span class="text-zinc-400">/</span>
-            <span>Search for {@query}</span>
-          </span>
-        </nav>
+      <div :if={@source}>
+        <div class="mb-4 flex flex-wrap items-center gap-3">
+          <nav id="crumbs" aria-label="Where you are" class="flex flex-wrap items-center gap-1 text-sm">
+            <span :for={{crumb, index} <- Enum.with_index(@path)} class="flex items-center gap-1">
+              <.icon
+                :if={index > 0}
+                name="hero-chevron-right-micro"
+                class="size-3 text-ink-faint"
+              />
+              <button
+                type="button"
+                id={"crumb-#{index}"}
+                phx-click="crumb"
+                phx-value-index={index}
+                disabled={index == length(@path) - 1 and is_nil(@query)}
+                class={[
+                  "rounded px-1 py-0.5",
+                  if(index == length(@path) - 1 and is_nil(@query),
+                    do: "text-ink",
+                    else: "text-ink-dim hover:text-accent"
+                  )
+                ]}
+              >
+                {crumb.title}
+              </button>
+            </span>
 
-        <.form :if={@search?} for={@search_form} id="search-form" phx-submit="search" class="mb-4">
-          <div class="flex gap-2">
-            <.input field={@search_form[:query]} type="search" placeholder="Search" />
-            <button type="submit" id="do-search" class="rounded px-4 py-2 bg-zinc-800 text-white">
-              Search
-            </button>
-            <button
-              :if={@query}
-              type="button"
-              id="clear-search"
-              phx-click="clear_search"
-              class="rounded px-4 py-2 border border-zinc-400"
-            >
-              Clear
-            </button>
-          </div>
-        </.form>
+            <span :if={@query} class="flex items-center gap-1 text-ink">
+              <.icon name="hero-chevron-right-micro" class="size-3 text-ink-faint" />
+              <span>Search for {@query}</span>
+            </span>
+          </nav>
 
-        <p :if={@entries == []} id="empty" class="text-zinc-500">Nothing here.</p>
+          <.form
+            :if={@search?}
+            for={@search_form}
+            id="search-form"
+            phx-submit="search"
+            class="w-full sm:ml-auto sm:w-auto"
+          >
+            <div class="flex items-center gap-2">
+              <.input
+                field={@search_form[:query]}
+                type="search"
+                placeholder="Search"
+                class="grow sm:w-56"
+              />
+              <button
+                type="submit"
+                id="do-search"
+                aria-label="Search"
+                class="control flex size-10 shrink-0 items-center justify-center rounded-lg"
+              >
+                <.icon name="hero-magnifying-glass" class="size-4" />
+              </button>
+              <button
+                :if={@query}
+                type="button"
+                id="clear-search"
+                phx-click="clear_search"
+                aria-label="Clear the search"
+                class="control flex size-10 shrink-0 items-center justify-center rounded-lg"
+              >
+                <.icon name="hero-x-mark" class="size-4" />
+              </button>
+            </div>
+          </.form>
+        </div>
 
-        <ul id="entries" class="divide-y divide-zinc-200">
+        <p :if={@entries == []} id="empty" class="glass rounded-xl px-4 py-8 text-center text-ink-faint">
+          Nothing here.
+        </p>
+
+        <ul :if={@entries != []} id="entries" class="glass overflow-hidden rounded-xl">
           <li
             :for={{entry, index} <- Enum.with_index(@entries)}
             id={"entry-#{index}"}
-            class="py-2 flex items-center gap-3"
+            class="flex items-center gap-2 border-b border-edge px-2 last:border-0"
           >
             <%= case entry do %>
               <% {:container, container} -> %>
@@ -170,22 +211,51 @@ defmodule MyHiFiWeb.BrowseLive do
                   id={"open-#{index}"}
                   phx-click="open"
                   phx-value-index={index}
-                  class="grow text-left"
+                  class="group flex grow items-center gap-3 py-3 text-left"
                 >
-                  {container.title}
+                  <.icon name="hero-folder" class="size-4 shrink-0 text-ink-faint" />
+                  <span class="grow truncate text-ink group-hover:text-accent">
+                    {container.title}
+                  </span>
+                  <.icon
+                    name="hero-chevron-right-mini"
+                    class="size-4 shrink-0 text-ink-faint group-hover:text-accent"
+                  />
                 </button>
-                <span class="text-zinc-400">&rsaquo;</span>
               <% {:track, track} -> %>
                 <button
                   type="button"
                   id={"play-#{index}"}
                   phx-click="play"
                   phx-value-index={index}
-                  class="grow text-left"
+                  aria-current={playing?(assigns, track) && "true"}
+                  class="group flex grow items-center gap-3 py-3 text-left"
                 >
-                  <span class="block">{track.title}</span>
-                  <span :if={track.subtitle} class="block text-sm text-zinc-500">
-                    {track.subtitle}
+                  <span class={[
+                    "control flex size-8 shrink-0 items-center justify-center rounded-full",
+                    if(playing?(assigns, track),
+                      do: "control-on",
+                      else: "group-hover:text-accent"
+                    )
+                  ]}>
+                    <.icon
+                      name={if playing?(assigns, track), do: "hero-speaker-wave", else: "hero-play-mini"}
+                      class="size-4"
+                    />
+                  </span>
+                  <span class="min-w-0 grow">
+                    <span class={[
+                      "block truncate",
+                      if(playing?(assigns, track),
+                        do: "text-accent",
+                        else: "text-ink group-hover:text-accent"
+                      )
+                    ]}>
+                      {track.title}
+                    </span>
+                    <span :if={track.subtitle} class="block truncate text-xs text-ink-faint">
+                      {track.subtitle}
+                    </span>
                   </span>
                 </button>
                 <button
@@ -195,9 +265,19 @@ defmodule MyHiFiWeb.BrowseLive do
                   phx-click="favourite"
                   phx-value-index={index}
                   aria-pressed={to_string(track.favourite? == true)}
-                  class="px-2 text-xl"
+                  aria-label="Favourite"
+                  class={[
+                    "flex size-9 shrink-0 items-center justify-center rounded-full",
+                    if(track.favourite?,
+                      do: "text-accent",
+                      else: "text-ink-faint hover:text-ink"
+                    )
+                  ]}
                 >
-                  {if track.favourite?, do: "★", else: "☆"}
+                  <.icon
+                    name={if track.favourite?, do: "hero-star-solid", else: "hero-star"}
+                    class="size-5"
+                  />
                 </button>
             <% end %>
           </li>
@@ -208,37 +288,54 @@ defmodule MyHiFiWeb.BrowseLive do
           type="button"
           id="more"
           phx-click="more"
-          class="mt-4 rounded px-4 py-2 border border-zinc-400"
+          class="control mt-4 w-full rounded-xl py-3 text-sm"
         >
           Show more
         </button>
-      <% else %>
-        <ul id="sources" class="divide-y divide-zinc-200">
-          <li :for={{source, index} <- Enum.with_index(@sources)} class="py-2">
-            <button
-              type="button"
-              id={"source-#{index}"}
-              phx-click="choose_source"
-              phx-value-index={index}
-              class="w-full text-left"
-            >
-              {source.title}
-            </button>
-          </li>
-        </ul>
-      <% end %>
+      </div>
     </div>
     """
   end
 
-  defp show_sources(socket) do
+  # The player holds the track, and the track holds its `ref`, so the list needs no
+  # knowledge of the source to find the entry that plays. A station that a start
+  # selected plays nothing yet, and it therefore holds no marker. See section 9 of
+  # the specification.
+  defp playing(%{playing?: true, source: source, track: %{ref: ref}}), do: {source, ref}
+  defp playing(_state), do: nil
+
+  defp playing?(%{playing: {source, ref}, source: source}, %{ref: ref}), do: true
+  defp playing?(_assigns, _track), do: false
+
+  defp first_source(socket) do
+    case Source.all() do
+      [module | _rest] -> push_navigate(socket, to: ~p"/browse/#{Source.slug(module)}")
+      [] -> start_at(socket, nil)
+    end
+  end
+
+  defp start_at(socket, nil) do
     socket
     |> assign(:source, nil)
+    |> assign(:current_source, nil)
     |> assign(:path, [])
     |> assign(:entries, [])
     |> assign(:cursor, nil)
     |> assign(:query, nil)
     |> assign(:search?, false)
+    |> assign(:search_form, to_form(%{"query" => ""}, as: :search))
+  end
+
+  defp start_at(socket, module) do
+    socket
+    |> assign(:source, module)
+    |> assign(:current_source, Source.slug(module))
+    |> assign(:page_title, module.title())
+    |> assign(:path, [%{ref: module.root(), title: module.title()}])
+    |> assign(:entries, [])
+    |> assign(:cursor, nil)
+    |> assign(:query, nil)
+    |> assign(:search?, true)
     |> assign(:search_form, to_form(%{"query" => ""}, as: :search))
   end
 
@@ -293,9 +390,14 @@ defmodule MyHiFiWeb.BrowseLive do
   defp options(_socket, cursor), do: [cursor: cursor]
 
   defp play(socket, track) do
-    case MyHiFi.Playback.play(socket.assigns.source, track.ref) do
-      :ok -> put_flash(socket, :info, "Playing #{track.title}.")
-      {:error, reason} -> put_flash(socket, :error, "Could not play that: #{inspect(reason)}")
+    case Playback.play(socket.assigns.source, track.ref) do
+      :ok ->
+        socket
+        |> assign(:playing, {socket.assigns.source, track.ref})
+        |> put_flash(:info, "Playing #{track.title}.")
+
+      {:error, reason} ->
+        put_flash(socket, :error, "Could not play that: #{inspect(reason)}")
     end
   end
 

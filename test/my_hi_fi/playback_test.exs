@@ -4,6 +4,7 @@ defmodule MyHiFi.PlaybackTest do
   alias MyHiFi.Playback
   alias MyHiFi.Radio
   alias MyHiFi.Settings
+  alias MyHiFi.Test.NoCardOutput
 
   defp station(overrides) do
     defaults = %{
@@ -82,7 +83,10 @@ defmodule MyHiFi.PlaybackTest do
 
   describe "play/2" do
     test "gives the reason when a track cannot play" do
-      # A host holds no USB DAC, so a play cannot succeed here.
+      # An output that finds no card makes this fail on any machine. See
+      # `MyHiFi.Test.NoCardOutput`.
+      NoCardOutput.use_it()
+
       created = station(%{})
 
       assert {:error, _reason} =

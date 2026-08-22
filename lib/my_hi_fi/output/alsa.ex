@@ -1,0 +1,145 @@
+defmodule MyHiFi.Output.Alsa do
+  @moduledoc """
+  A sound card, through ALSA.
+
+  The Nerves system holds `alsa-lib`, `aplay` and `amixer`, and no other audio
+  software. `membrane_alsa_plugin` does not exist. `MyHiFi.Output.APlaySink`
+  therefore writes the samples to an `aplay` port, and this module finds the
+  hardware and names it.
+
+  It lists every card, and not the USB cards alone. A USB DAC is what this device
+  plays through, and an I2S DAC on the GPIO header is an ALSA card as well. The
+  host of a developer holds a card, and a person can now choose it and hear the
+  audio while they work.
+
+  It lists a playback device of a card, and not the card. A card holds none, one,
+  or several, and `aplay` opens a device. One HD-Audio card of a laptop holds the
+  devices 3, 7, 8 and 9 for HDMI and holds no device 0, so a name that ends in
+  `DEV=0` cannot open on it.
+
+  A device of a USB card comes first in the list. `MyHiFi.Player` uses the first
+  device when the chosen one is absent, so a target with HDMI audio still uses the
+  DAC.
+
+  The target needs a custom Nerves system, because the stock `rpi0_2` system holds
+  no USB host stack and no USB audio class driver.
+  """
+
+  @behaviour MyHiFi.Output
+
+  # Sobelow reads `@sobelow_skip` from the source. This registration stops the
+  # compiler warning that no Elixir code reads the attribute.
+  Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
+
+  @cards_path "/proc/asound/cards"
+  @card_path "/proc/asound/card"
+  @usb_driver "USB-Audio"
+
+  @doc """
+  List each playback device that ALSA knows about.
+
+  It reads `/proc/asound`, so it runs no command. It gives an empty list when that
+  directory is absent, so a machine with no sound card gives no error.
+  """
+  @impl MyHiFi.Output
+  def devices do
+    case File.read(@cards_path) do
+      {:ok, contents} -> contents |> parse_cards() |> Enum.flat_map(&playback_devices/1)
+      {:error, _reason} -> []
+    end
+  end
+
+  @doc """
+  Give a sink that plays to one device.
+
+  The `id` of a device is its ALSA hardware name, so this adds the `plug` layer
+  and nothing else. ALSA then converts the sample format and the sample rate when
+  the card accepts neither. A DAC at full speed on USB often accepts fewer rates
+  than a decoder gives.
+  """
+  @impl MyHiFi.Output
+  def sink_spec(device_id) do
+    %MyHiFi.Output.APlaySink{device: "plug" <> device_id}
+  end
+
+  @doc """
+  Read the cards from the text of `/proc/asound/cards`.
+
+  Each card takes two lines. The first holds the number, the identifier, the
+  driver and a short name. The second holds a longer description.
+
+      ` 0 [Audio          ]: USB-Audio - SA9023 USB Audio`
+      `                      HiFimeDIY Audio SA9023 USB Audio at usb-1, full speed`
+
+  A card of a USB DAC comes first, and the order of ALSA holds inside each group.
+  """
+  @spec parse_cards(String.t()) :: [
+          %{number: integer(), id: String.t(), title: String.t(), usb?: boolean()}
+        ]
+  def parse_cards(contents) do
+    ~r/^\s*(?<number>\d+)\s+\[(?<id>\S+)\s*\]:\s*(?<driver>\S+)\s+-\s+(?<title>.+)$/m
+    |> Regex.scan(contents, capture: :all_names)
+    |> Enum.map(fn [driver, id, number, title] ->
+      %{
+        number: String.to_integer(number),
+        id: id,
+        title: String.trim(title),
+        usb?: driver == @usb_driver
+      }
+    end)
+    |> Enum.sort_by(&(not &1.usb?))
+  end
+
+  @doc """
+  Read the number of a playback device from the text of one `pcm` info file.
+
+  It gives `nil` for a device that records, because a person cannot play to a
+  microphone.
+
+      `card: 1`
+      `device: 0`
+      `stream: PLAYBACK`
+      `name: ALC255 Analog`
+  """
+  @spec parse_pcm(String.t()) :: %{device: integer(), name: String.t()} | nil
+  def parse_pcm(contents) do
+    fields =
+      ~r/^(?<key>\w+):\s*(?<value>.*)$/m
+      |> Regex.scan(contents, capture: :all_names)
+      |> Map.new(fn [key, value] -> {key, String.trim(value)} end)
+
+    with %{"stream" => "PLAYBACK", "device" => device, "name" => name} <- fields,
+         {device, ""} <- Integer.parse(device) do
+      %{device: device, name: name}
+    else
+      _other -> nil
+    end
+  end
+
+  # The name of a device is what `aplay` opens, and it is what the settings hold.
+  # The title names the card and the device, because one card holds more than one.
+  #
+  # No path here comes from a person. `Path.wildcard/1` gives each name, and the
+  # pattern holds the number of a card that `/proc/asound/cards` gave.
+  @sobelow_skip ["Traversal.FileModule"]
+  defp playback_devices(card) do
+    "#{@card_path}#{card.number}/pcm*p/info"
+    |> Path.wildcard()
+    |> Enum.map(&File.read/1)
+    |> Enum.flat_map(fn
+      {:ok, contents} -> List.wrap(parse_pcm(contents))
+      {:error, _reason} -> []
+    end)
+    |> Enum.sort_by(& &1.device)
+    |> Enum.map(fn pcm ->
+      %{
+        id: "hw:CARD=#{card.id},DEV=#{pcm.device}",
+        title: title(card, pcm)
+      }
+    end)
+  end
+
+  defp title(%{title: card_title}, %{name: name}) do
+    if String.contains?(card_title, name), do: card_title, else: "#{card_title}, #{name}"
+  end
+end
