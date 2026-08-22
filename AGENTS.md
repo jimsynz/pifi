@@ -68,6 +68,15 @@ Licence: Apache-2.0.
 - **If a later version needs another binary, use NBPR**, not a Nerves system
   fork. See <https://github.com/jimsynz/nbpr>. NBPR ships binaries and shared
   libraries, and no header files.
+- **NBPR publishes no artefact for this system, so every build makes one.** NBPR
+  publishes for the stock Nerves systems, and the cache key of an artefact holds
+  the name and the version of the system, so `mix nbpr.fetch` on
+  `myhifi_rpi0_2` always builds from source. A source build needs a Buildroot
+  backend. A laptop with `docker` gets one by itself. The CI container holds no
+  `docker` and no `podman`, so `ci.yml` names `nbpr_source_build: true`, and the
+  shared workflow then sets `NBPR_BUILD_BACKEND=shell` and installs the four
+  Buildroot packages that the image lacks. A new version of the system starts a
+  new build of every `nbpr_*` package, and that build takes 10 minutes.
 - **A peripheral renders itself.** Do not build a central renderer and do not
   send pixels or frames to a screen. Send it typed events. A 128 by 64
   monochrome screen and a 320 by 240 colour screen need different layouts, and

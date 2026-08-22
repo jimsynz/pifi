@@ -20,4 +20,11 @@ jobs:
       # therefore belongs here, where a reader can see it, and not in a secret.
       hex_organization: "nbpr"
       hex_organization_key: "15da04a2330d881e1301a73c5d39f591"
+      # NBPR publishes an artefact for each stock Nerves system, and
+      # `myhifi_rpi0_2` is a custom system, so no artefact for it exists and none
+      # ever will. The firmware job therefore builds each package from source
+      # with Buildroot, and it needs 10 minutes for the 6 packages. The cache of
+      # the job then holds the result, so only a new package version or a new
+      # version of the system pays that cost again.
+      nbpr_source_build: true
     secrets: inherit

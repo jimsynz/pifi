@@ -980,3 +980,17 @@ The two packages add 4.4 MB to the firmware, and it goes from 53.9 MB to 58.3 MB
 target list. That system uses musl, and libvorbis does not build against musl.
 `nbpr_vorbis_tools` says so itself with `unsupported_libc: [:musl]`, and `nbpr`
 0.3.0 added the option that carries it.
+
+NBPR publishes an artefact for each stock Nerves system, and it publishes none
+for `nerves_system_myhifi_rpi0_2`. The cache key of an artefact holds the name
+and the version of the system, so `mix nbpr.fetch` on this firmware never finds
+one, and it builds each package from source instead. A source build needs a
+Buildroot backend, and the CI container holds no `docker` and no `podman`. CI
+therefore sets `NBPR_BUILD_BACKEND=shell`, which NBPR documents for a native
+build outside the canonical Nerves environment, and `ci.yml` names
+`nbpr_source_build: true` to get it. The firmware job installs `bc`, `cpio`,
+`rsync` and `wget` for Buildroot, and it removes the Buildroot tree before its
+cache saves, because that tree is 1.5 GB and the 6 artefacts are 14 MB. A
+measurement in the CI image on 2026-08-22 gave 10 minutes for the 6 packages,
+and each later run reads the cache and builds nothing. A new package version, or
+a new version of the system, starts one more build.
