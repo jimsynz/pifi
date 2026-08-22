@@ -946,3 +946,27 @@ cannot reach them either.
 | MPEG-TS, AAC | 12 |
 | MPEG-TS, MP3 | 7 |
 | No answer from the station | 2 |
+
+Ogg ran on the board on 2026-08-22, with the programs from NBPR. `flac` sits at
+`/srv/erlang/lib/nbpr_flac-1.5.0/priv/usr/bin/flac`, and `NBPR.Application` puts
+that directory on the PATH at each start, so `System.find_executable/1` finds it.
+
+| Measurement | Ogg Vorbis | Ogg FLAC |
+|---|---|---|
+| CPU of the four cores | 2.1% to 3.4% | 3.4% |
+| Programs | `oggdec` 1.4.3 | `flac` 1.5.0 |
+
+All 6 Ogg stations play. Two of them name the same address, so 5 addresses serve
+the 6: 3 hold Vorbis and 2 hold FLAC.
+
+A port costs no more CPU than a library. Ogg Vorbis needs about the same as MP3
+through libmad, and Ogg FLAC needs a little more.
+
+The two packages add 4.4 MB to the firmware, and it goes from 53.9 MB to 58.3 MB.
+`nbpr_flac` brings `nbpr_libogg`, and `nbpr_vorbis_tools` brings `nbpr_libao`,
+`nbpr_libcurl` and `nbpr_libvorbis`.
+
+`nerves_system_x86_64` is gone from `mix.exs`, and `:x86_64` is gone from the
+target list. That system uses musl, and libvorbis does not build against musl.
+`nbpr_vorbis_tools` says so itself with `unsupported_libc: [:musl]`, and `nbpr`
+0.3.0 added the option that carries it.

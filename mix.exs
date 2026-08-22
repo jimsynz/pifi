@@ -28,6 +28,10 @@ defmodule MyHiFi.MixProject do
   @app :my_hi_fi
   @version "0.1.0"
   @all_targets [
+    # `x86_64` is absent, and its Nerves system is gone with it. That system uses
+    # musl, and libvorbis does not build against musl, so `nbpr_vorbis_tools`
+    # cannot serve that target. This firmware runs on `myhifi_rpi0_2`, and no
+    # x86_64 build ever ran.
     :bbb,
     :mangopi_mq_pro,
     :qemu_aarch64,
@@ -38,8 +42,7 @@ defmodule MyHiFi.MixProject do
     :rpi3,
     :rpi4,
     :rpi5,
-    :trellis,
-    :x86_64
+    :trellis
   ]
 
   def project do
@@ -74,7 +77,23 @@ defmodule MyHiFi.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:nbpr, "~> 0.2"},
+      # 0.3.0 adds `:unsupported_libc` to the schema of `NBPR.BrPackage`, and
+      # `nbpr_vorbis_tools` needs that option. 0.2.1 refused it and stopped the
+      # build.
+      {:nbpr, "~> 0.3"},
+      # Membrane holds no decoder for Vorbis or for FLAC, so
+      # `MyHiFi.Player.PortDecoder` drives a program instead. NBPR gives the
+      # program for the target, and it ships a binary and no header file, which is
+      # all that a port needs. See section 6.1 of the specification.
+      #
+      # These are target only. A host holds its own `flac` and `oggdec`, and that
+      # is how the pipeline was read end to end before the packages existed.
+      #
+      # `nbpr_flac` brings `nbpr_libogg`, and that is what makes `flac --ogg` work.
+      # Every FLAC station of New Zealand sends FLAC inside an Ogg container, so
+      # this firmware needs that option and nothing else would serve.
+      {:nbpr_flac, "~> 1.5", organization: "nbpr", targets: @all_targets},
+      {:nbpr_vorbis_tools, "~> 1.4", organization: "nbpr", targets: @all_targets},
       # Dependencies for all targets
       {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.8"},
@@ -156,7 +175,6 @@ defmodule MyHiFi.MixProject do
       {:nerves_system_rpi4, "~> 2.0", runtime: false, targets: :rpi4},
       {:nerves_system_rpi5, "~> 2.0", runtime: false, targets: :rpi5},
       {:nerves_system_trellis, "~> 0.4", runtime: false, targets: :trellis},
-      {:nerves_system_x86_64, "~> 1.24", runtime: false, targets: :x86_64},
 
       # Dev/test deps.
       {:credo, "~> 1.7", runtime: false, only: [:dev, :test], target: :host},
