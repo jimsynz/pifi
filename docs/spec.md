@@ -108,15 +108,25 @@ A firmware without SSH also holds no `ssh_subsystem_fwup`, and that is how a
 device takes new firmware today. Two answers follow.
 
 - **Now.** A person writes an SD card. `mix burn` does that.
-- **Later.** The web interface takes a `.fw` file and gives it to `fwup`. The
-  device already answers on port 80, and a person already needs no shell for
-  anything else.
+- **Later.** The device reads the release list of its own repository from time to
+  time, and it takes a newer release itself.
 
-The later answer needs a decision about who may do it. Section 10 says that the
-home network is the boundary, and that answer suits a station change. A firmware
-upload is the most powerful action on the device, and an unauthenticated one lets
-any person on the network replace the software. A shared secret, or a press of the
-knob to confirm, is the way to hold that. The knob arrives in a later version.
+The device pulls, and no person pushes. That decides the hard question. A page
+that takes a `.fw` file needs an answer about who may use it: section 10 gives the
+home network as the only boundary, and that answer suits a station change and not
+a replacement of the software. A device that pulls holds no such endpoint at all.
+It chooses what it trusts, and a person on the network cannot give it anything.
+
+Three things that a pull needs, and none of them needs the knob:
+
+- **The address of the release list, and a channel.** A device must know which
+  releases are for it.
+- **A check on what arrives.** `fwup` verifies a signature, and a public key in
+  the firmware is the place for it. Without that check a device trusts whatever
+  answers the address.
+- **A way back from a release that does not start.** The two partitions already
+  give that: `fwup` writes to the one that does not run, and `nerves_heart`
+  reverts to the other when the new one fails to say that it started.
 
 ## 5. Software structure
 
