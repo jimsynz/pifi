@@ -2,9 +2,13 @@ defmodule MyHiFiWeb.SettingsLive do
   @moduledoc """
   What the device holds, and what a person can change.
 
-  Two settings change here: the output device, and the countries of the station
-  list. Both stay in the database, because a device holds no environment to read a
-  value from. See `MyHiFi.Settings`.
+  Three settings change here: the output device, the countries of the station list,
+  and the key of the Podcast Index. Each one stays in the database, because a
+  device holds no environment to read a value from. See `MyHiFi.Settings`.
+
+  The page never sends the secret of the index back to a browser. It says whether
+  the device holds one, and a person who wants to change it writes both values
+  again.
 
   The network state and the storage state are reports, and a person changes
   neither one here. The Wi-Fi details belong to the setup wizard. See
@@ -14,6 +18,7 @@ defmodule MyHiFiWeb.SettingsLive do
   use MyHiFiWeb, :live_view
 
   alias MyHiFi.Device
+  alias MyHiFi.Podcast.Index
   alias MyHiFi.Radio.Station
   alias MyHiFi.Radio.Station.SyncFromRemote
 
@@ -59,6 +64,35 @@ defmodule MyHiFiWeb.SettingsLive do
          |> put_flash(:info, "The station list covers #{Enum.join(codes, ", ")}.")
          |> load()}
     end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("save_index_key", %{"index" => %{"key" => key, "secret" => secret}}, socket) do
+    with {:ok, key} <- present(key),
+         {:ok, secret} <- present(secret) do
+      MyHiFi.Settings.put!(Index.key_setting(), key)
+      MyHiFi.Settings.put!(Index.secret_setting(), secret)
+
+      {:noreply, socket |> assign(:index_form, blank_index_form()) |> confirm_key() |> load()}
+    else
+      :error ->
+        {:noreply, put_flash(socket, :error, "Give both the key and the secret.")}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("remove_index_key", _params, socket) do
+    for key <- [Index.key_setting(), Index.secret_setting()] do
+      case MyHiFi.Settings.fetch(key) do
+        {:ok, setting} -> MyHiFi.Settings.delete!(setting)
+        {:error, _reason} -> :ok
+      end
+    end
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "The device holds no key. Your subscriptions stay.")
+     |> load()}
   end
 
   @impl Phoenix.LiveView
@@ -145,6 +179,52 @@ defmodule MyHiFiWeb.SettingsLive do
         </button>
       </section>
 
+      <section id="podcast-index" class="glass sheen rounded-xl p-4">
+        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Podcast Index</h2>
+
+        <p class="mb-3 text-sm text-ink-dim">
+          Podcasts need a key, and
+          <a
+            href="https://api.podcastindex.org/signup"
+            class="text-accent underline"
+            rel="noopener"
+          >api.podcastindex.org/signup</a>
+          gives one for no money. The device keeps it, and no other device shares it.
+          Your subscriptions play without it.
+        </p>
+
+        <p :if={@index_configured?} id="index-present" class="mb-3 flex items-center gap-2 text-sm text-accent">
+          <.icon name="hero-check-circle" class="size-4" />
+          The device holds a key.
+        </p>
+
+        <.form for={@index_form} id="index-form" phx-submit="save_index_key">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-start">
+            <.input field={@index_form[:key]} type="text" placeholder="Key" class="grow" />
+            <.input
+              field={@index_form[:secret]}
+              type="password"
+              placeholder="Secret"
+              class="grow"
+            />
+            <button type="submit" id="save-index-key" class="control rounded-lg px-4 py-2 text-sm">
+              Save
+            </button>
+          </div>
+        </.form>
+
+        <button
+          :if={@index_configured?}
+          type="button"
+          id="remove-index-key"
+          phx-click="remove_index_key"
+          class="control mt-3 flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
+        >
+          <.icon name="hero-trash" class="size-4" />
+          Remove the key
+        </button>
+      </section>
+
       <section id="network" class="glass sheen rounded-xl p-4">
         <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Network</h2>
 
@@ -203,6 +283,38 @@ defmodule MyHiFiWeb.SettingsLive do
     socket
     |> refresh()
     |> assign(:countries_form, to_form(%{"codes" => codes}, as: :countries))
+    |> assign_new(:index_form, fn -> blank_index_form() end)
+  end
+
+  # The fields start empty and stay empty. A page that held the secret would send
+  # it to the browser at each render, and a person who changes it writes both
+  # values again.
+  defp blank_index_form, do: to_form(%{"key" => "", "secret" => ""}, as: :index)
+
+  # A person learns now whether the key works, and not when a search fails. The
+  # category list is the smallest read of the index.
+  defp confirm_key(socket) do
+    case Index.categories() do
+      {:ok, _categories} ->
+        put_flash(socket, :info, "The key works. Podcasts are ready.")
+
+      {:error, :key_refused} ->
+        put_flash(socket, :error, "The index refused that key. Check both values.")
+
+      {:error, :clock_not_synchronised} ->
+        put_flash(
+          socket,
+          :info,
+          "The key is stored. The clock of the device is not right yet, so podcasts start working in a moment."
+        )
+
+      {:error, reason} ->
+        put_flash(
+          socket,
+          :error,
+          "The key is stored, and the index did not answer: #{inspect(reason)}"
+        )
+    end
   end
 
   # The form stays out of this, because a person may be in the middle of typing a
@@ -213,9 +325,17 @@ defmodule MyHiFiWeb.SettingsLive do
     |> assign(:interfaces, Device.network!())
     |> assign(:storage, Device.storage!())
     |> assign(:station_count, Ash.count!(Station))
+    |> assign(:index_configured?, Index.configured?())
   end
 
   defp schedule_refresh, do: Process.send_after(self(), :refresh, @refresh_interval)
+
+  defp present(text) do
+    case String.trim(text) do
+      "" -> :error
+      trimmed -> {:ok, trimmed}
+    end
+  end
 
   defp codes(text) do
     text

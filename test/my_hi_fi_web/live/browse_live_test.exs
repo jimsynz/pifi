@@ -42,6 +42,12 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     def favourite(_ref, _true?), do: {:error, :not_supported}
 
     @impl MyHiFi.Source
+    def store_position(_ref, _position_ms), do: :ok
+
+    @impl MyHiFi.Source
+    def finished(_ref), do: :ok
+
+    @impl MyHiFi.Source
     def ref_to_string(:only), do: {:ok, "only"}
 
     @impl MyHiFi.Source
@@ -58,6 +64,72 @@ defmodule MyHiFiWeb.BrowseLiveTest do
         favourite?: nil
       }
     end
+  end
+
+  defmodule ShowSource do
+    @moduledoc """
+    A source that marks a container and not a track.
+
+    Podcasts subscribe to a show, and a show is a container. Internet radio marks
+    a station, and a station is a track. This source reaches the container half of
+    the control, and it keeps the mark in the process dictionary of the test.
+    """
+
+    @behaviour MyHiFi.Source
+
+    @impl MyHiFi.Source
+    def title, do: "Show source"
+
+    @impl MyHiFi.Source
+    def icon, do: :podcast
+
+    @impl MyHiFi.Source
+    def root, do: :root
+
+    @impl MyHiFi.Source
+    def browse(:root, _options) do
+      {:ok,
+       %{
+         entries: [
+           {:container, %{ref: :show, title: "A show", artwork: nil, favourite?: marked?()}},
+           {:container, %{ref: :plain, title: "No mark here", artwork: nil, favourite?: nil}}
+         ],
+         cursor: nil
+       }}
+    end
+
+    def browse(:show, _options), do: {:ok, %{entries: [], cursor: nil}}
+
+    @impl MyHiFi.Source
+    def search(_query, _options), do: {:error, :not_supported}
+
+    @impl MyHiFi.Source
+    def track(ref), do: {:error, {:not_a_track, ref}}
+
+    @impl MyHiFi.Source
+    def resolve(ref), do: {:error, {:not_a_track, ref}}
+
+    @impl MyHiFi.Source
+    def favourite(:show, true?) do
+      Application.put_env(:my_hi_fi, __MODULE__, true?)
+      :ok
+    end
+
+    def favourite(ref, _true?), do: {:error, {:not_a_track, ref}}
+
+    @impl MyHiFi.Source
+    def store_position(_ref, _position_ms), do: :ok
+
+    @impl MyHiFi.Source
+    def finished(_ref), do: :ok
+
+    @impl MyHiFi.Source
+    def ref_to_string(_ref), do: {:error, :cannot_name}
+
+    @impl MyHiFi.Source
+    def ref_from_string(_name), do: {:error, :not_a_name}
+
+    def marked?, do: Application.get_env(:my_hi_fi, __MODULE__, false)
   end
 
   defp station(overrides) do
@@ -78,7 +150,13 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   defp use_source(module) do
     Application.put_env(:my_hi_fi, :sources, [module])
-    on_exit(fn -> Application.delete_env(:my_hi_fi, :sources) end)
+
+    on_exit(fn ->
+      Application.delete_env(:my_hi_fi, :sources)
+      # A test source that keeps state keeps it here, and one test must not reach
+      # the next one.
+      Application.delete_env(:my_hi_fi, module)
+    end)
   end
 
   setup do
@@ -309,6 +387,47 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       assert has_element?(view, "#play-0")
       refute has_element?(view, "#favourite-0")
+    end
+
+    test "a person marks a container, and removes that mark", %{conn: conn} do
+      use_source(ShowSource)
+
+      {:ok, view, html} = live(conn, ~p"/browse/show-source")
+
+      assert html =~ "A show"
+      refute html =~ "hero-star-solid"
+
+      html = view |> element("#favourite-0") |> render_click()
+
+      assert html =~ "hero-star-solid"
+      assert ShowSource.marked?()
+
+      html = view |> element("#favourite-0") |> render_click()
+
+      refute html =~ "hero-star-solid"
+      refute ShowSource.marked?()
+    end
+
+    test "a container with no mark draws no control", %{conn: conn} do
+      use_source(ShowSource)
+
+      {:ok, view, _html} = live(conn, ~p"/browse/show-source")
+
+      # The first container carries the mark, and the second carries none.
+      assert has_element?(view, "#favourite-0")
+      refute has_element?(view, "#favourite-1")
+      assert has_element?(view, "#open-1")
+    end
+
+    test "a marked container still opens", %{conn: conn} do
+      use_source(ShowSource)
+
+      {:ok, view, _html} = live(conn, ~p"/browse/show-source")
+      view |> element("#favourite-0") |> render_click()
+
+      html = view |> element("#open-0") |> render_click()
+
+      assert html =~ "Nothing here."
     end
   end
 

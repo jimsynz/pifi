@@ -1,41 +1,35 @@
 defmodule MyHiFi.Artwork do
   @moduledoc """
-  The local copy of a station logo.
+  The local copy of a picture that a service names with an address.
 
-  A station names its logo with an address on the internet. The web interface
-  serves the copy instead, for two reasons. A page then shows a logo when the
-  internet is not there, and the content security policy of the device holds
-  `'self'` alone, so no page asks another server for anything.
+  A station names its logo, and a podcast names the cover of a show and the picture
+  of an episode. The web interface serves the copy instead, for two reasons. A page
+  then shows a picture when the internet is not there, and the content security
+  policy of the device holds `'self'` alone, so no page asks another server for
+  anything.
 
-  A file lives under the application data partition, and its name is a hash of the
-  address. The same address therefore gives the same file, and no name from a
-  station reaches the file system.
+  `MyHiFi.Cache` holds the file and the row, in the namespace `"artwork"`. This module
+  holds what a cache cannot know:
 
-  The cache holds a limit, and the limit comes from the free space of the
-  partition. The oldest file goes first when the cache is at that limit. A logo is
-  small: 247 New Zealand stations need about 5 MB.
+  - The four types that this firmware serves, and the reason that SVG is absent. An
+    SVG file holds a script, and the device serves each file from its own address, so
+    such a script would run with the rights of the web interface.
+  - The read of the first bytes, because a `content-type` header is often wrong.
+  - The 4 MB limit for one picture.
+
+  The name of an entry is a hash of the address, and it carries no extension. The
+  type lives on the row, so serving one picture reads one row and the name needs no
+  guess about which of four files exists.
   """
 
-  # A path here comes from a hash of this module, or from the module attribute
-  # below. It never comes from a request. Sobelow reads `@sobelow_skip` from the
-  # source, and this registration stops the compiler warning that no Elixir code
-  # reads the attribute.
-  Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
+  alias MyHiFi.Cache
 
-  require Logger
-
-  @directory "artwork"
-  @max_bytes 64 * 1024 * 1024
-  @free_space_share 20
-  @byte_limit 4 * 1024 * 1024
+  @namespace "artwork"
 
   # This firmware stores one of these, and it serves what it stored. A type that is
   # absent here never reaches the disk.
   #
-  # SVG is absent on purpose. An SVG file can hold a script, and this device serves
-  # each logo from its own address, so such a script would run with the rights of
-  # the web interface. A logo of a station is a raster image in each case that this
-  # project has seen.
+  # SVG is absent on purpose. See the module documentation.
   @content_types %{
     "png" => "image/png",
     "jpg" => "image/jpeg",
@@ -43,60 +37,63 @@ defmodule MyHiFi.Artwork do
     "webp" => "image/webp"
   }
 
-  @extensions Map.keys(@content_types)
+  @served_types Map.values(@content_types)
+
+  # A logo of a station is small, and a cover of a podcast is 1.2 MB. 4 MB holds
+  # either one and refuses a photograph that a service named by mistake.
+  @byte_limit 4 * 1024 * 1024
 
   @doc """
-  The name of the file for one address, if the cache holds it.
+  The name of the entry for one address, if the cache holds it.
 
-  It gives `nil` for an address that the cache does not hold, and for an address
-  that is absent. A caller then shows no logo and asks for a copy.
+  It gives `nil` for an address that the cache does not hold, and for an address that
+  is absent. A caller then shows no picture and asks for a copy.
   """
   @spec name(String.t() | nil) :: String.t() | nil
   def name(url) when is_binary(url) and url != "" do
-    hash = hash(url)
+    key = hash(url)
 
-    Enum.find_value(@extensions, fn extension ->
-      candidate = "#{hash}.#{extension}"
-
-      if File.exists?(path(candidate)), do: candidate
-    end)
+    case Cache.fetch(@namespace, key) do
+      {:ok, _entry} -> key
+      {:error, _reason} -> nil
+    end
   end
 
   def name(_url), do: nil
 
   @doc """
-  The path of one file of the cache.
+  Everything that the web interface needs to send one picture.
 
-  `name` comes from `name/1` or from a request. A name that is not a hash and an
-  extension of this module gives `nil`, so no request reads another file.
+  It gives the path and the type in one read, and it notes that something used the
+  entry, which is what orders the eviction. See `MyHiFi.Cache`.
+
+  `name` comes from a request, so a name that is not a hash gives `:error` and no
+  request reads another file of the partition. A type that this module does not serve
+  gives `:error` as well, because the cache holds any bytes and this route must send
+  an image alone.
   """
-  @spec path(String.t()) :: Path.t() | nil
-  def path(name) do
-    if valid_name?(name), do: Path.join(directory(), name)
-  end
-
-  @doc "Where the cache lives."
-  @spec directory() :: Path.t()
-  def directory, do: Path.join(MyHiFi.Device.storage!().path, @directory)
-
-  @doc """
-  The content type of one file of the cache.
-
-  Each answer is an image that holds no script, so a browser cannot run anything
-  from this address. It gives `nil` for a name that this module does not serve.
-  """
-  @spec content_type(String.t()) :: String.t() | nil
-  def content_type(name) do
-    if valid_name?(name) do
-      Map.get(@content_types, name |> Path.extname() |> String.trim_leading("."))
+  @spec serve(String.t()) :: {:ok, Path.t(), String.t()} | :error
+  def serve(name) do
+    with true <- hash?(name),
+         {:ok, entry} <- Cache.fetch(@namespace, name),
+         true <- entry.content_type in @served_types,
+         path = path(entry),
+         true <- File.exists?(path) do
+      Cache.touch(entry)
+      {:ok, path, entry.content_type}
+    else
+      _other -> :error
     end
   end
 
   @doc """
   Read one address and store the answer.
 
-  It gives the name of the file. It refuses an answer that is not an image of a
-  type that this module serves, and it refuses one that is too large for a logo.
+  It gives the name of the entry. It refuses an answer that is not an image of a type
+  that this module serves, and it refuses one that is too large for a picture.
+
+  The bytes decide the type, and the header of the answer does not. Of the 11 New
+  Zealand stations that answer `image/x-icon`, 5 send a JPEG and 3 send a PNG.
   """
   @spec fetch(String.t()) :: {:ok, String.t()} | {:error, term()}
   def fetch(url) when is_binary(url) and url != "" do
@@ -109,78 +106,41 @@ defmodule MyHiFi.Artwork do
   def fetch(_url), do: {:error, :no_address}
 
   @doc """
-  Remove the oldest files until the cache is inside its limit.
+  Where the pictures live.
 
-  It gives the count of the files that it removed.
+  A test removes this directory. The cache holds each namespace in a directory of its
+  own.
   """
-  @spec prune() :: non_neg_integer()
-  def prune do
-    files = files()
-    total = files |> Enum.map(& &1.size) |> Enum.sum()
-    limit = limit()
-
-    if total <= limit do
-      0
-    else
-      removed = remove_oldest(files, total, limit)
-      Logger.info("The artwork cache held #{total} bytes. Removed #{removed} files.")
-      removed
-    end
-  end
+  @spec directory() :: Path.t()
+  def directory, do: Path.join(Cache.directory(), @namespace)
 
   @doc """
-  How many bytes the cache may hold.
+  The path of one entry.
 
-  A logo needs little, so the limit is a small part of the free space, and it stops
-  at 64 MB. A partition that is almost full gives a small limit, and the device
-  keeps the room for the database.
-
-  A test sets `:artwork_max_bytes` to a small number, so it can fill the cache and
-  watch the oldest file go.
+  Nothing outside this module builds a path, because the cache names the file.
   """
-  @spec limit() :: non_neg_integer()
-  def limit do
-    storage = MyHiFi.Device.storage!()
-    max_bytes = Application.get_env(:my_hi_fi, :artwork_max_bytes, @max_bytes)
+  @spec path(MyHiFi.Cache.Entry.t()) :: Path.t()
+  def path(entry), do: Path.join(Cache.directory(), entry.key)
 
-    min(max_bytes, div(storage.free_bytes, @free_space_share))
-  end
-
-  # Each path comes from `files/0`, and that function reads the cache directory
-  # only. No name from a request reaches this.
-  @sobelow_skip ["Traversal.FileModule"]
-  defp remove_oldest(files, total, limit) do
-    files
-    |> Enum.sort_by(& &1.written_at)
-    |> Enum.reduce_while({total, 0}, fn file, {held, removed} ->
-      if held <= limit do
-        {:halt, {held, removed}}
-      else
-        File.rm(file.path)
-        {:cont, {held - file.size, removed + 1}}
-      end
-    end)
-    |> elem(1)
-  end
-
-  @sobelow_skip ["Traversal.FileModule"]
   defp download(url) do
     with {:ok, response} <- get(url),
          {:ok, body} <- body(response),
          {:ok, extension} <- extension(body, declared_type(response)) do
-      name = "#{hash(url)}.#{extension}"
-      path = Path.join(directory(), name)
+      store(url, body, Map.fetch!(@content_types, extension))
+    end
+  end
 
-      File.mkdir_p(directory())
+  defp store(url, body, content_type) do
+    case Cache.put(@namespace, hash(url), %{bytes: body, content_type: content_type}) do
+      {:ok, entry} ->
+        # A picture of a podcast is 1.2 MB, so one arrival can put the cache over its
+        # limit. The eviction runs here and not on a schedule, because that is the
+        # moment when the cache grew.
+        Cache.prune()
+        {:ok, entry.entry_key}
 
-      case File.write(path, body) do
-        :ok ->
-          prune()
-          {:ok, name}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -192,15 +152,12 @@ defmodule MyHiFi.Artwork do
     end
   end
 
-  # The first bytes give the type, and the `content-type` header does not. A
-  # station server often names the wrong type: of the 11 New Zealand stations that
-  # answer `image/x-icon`, 5 send a JPEG and 3 send a PNG. The header alone
-  # therefore threw away a logo of 600 by 600 pixels, and 2 stations hold a true
-  # icon of 32 by 32 pixels. Each format below starts with bytes of its own, so
-  # these clauses name the type of any logo that this firmware serves.
+  # The first bytes give the type, and the `content-type` header does not. A station
+  # server often names the wrong type, and the header alone therefore threw away a
+  # logo of 600 by 600 pixels. Each format below starts with bytes of its own.
   #
-  # The header stays for the message alone, because a person who reads the log
-  # wants to know what the server said.
+  # The header stays for the message alone, because a person who reads the log wants
+  # to know what the server said.
   defp extension(<<0x89, "PNG\r\n", 0x1A, "\n", _rest::binary>>, _declared), do: {:ok, "png"}
 
   defp extension(<<0xFF, 0xD8, 0xFF, _rest::binary>>, _declared), do: {:ok, "jpg"}
@@ -236,44 +193,21 @@ defmodule MyHiFi.Artwork do
 
   defp body(_response), do: {:error, :empty}
 
-  defp files do
-    directory()
-    |> Path.join("*")
-    |> Path.wildcard()
-    |> Enum.flat_map(fn path ->
-      case File.stat(path, time: :posix) do
-        {:ok, %{type: :regular, size: size, mtime: written_at}} ->
-          [%{path: path, size: size, written_at: written_at}]
-
-        _other ->
-          []
-      end
-    end)
+  # A name comes from a request, so it holds 64 hexadecimal characters or nothing at
+  # all reads a file.
+  defp hash?(name) when is_binary(name) and byte_size(name) == 64 do
+    String.match?(name, ~r/^[0-9a-f]{64}$/)
   end
 
-  # A name holds 64 hexadecimal characters, a dot, and one of the extensions
-  # above. Nothing else reaches the file system.
-  defp valid_name?(name) when is_binary(name) do
-    case String.split(name, ".") do
-      [hash, extension] ->
-        extension in @extensions and String.length(hash) == 64 and
-          String.match?(hash, ~r/\A[0-9a-f]{64}\z/)
-
-      _other ->
-        false
-    end
-  end
-
-  defp valid_name?(_name), do: false
+  defp hash?(_name), do: false
 
   defp hash(url), do: :crypto.hash(:sha256, url) |> Base.encode16(case: :lower)
 
+  # A test gives a stub with `config :my_hi_fi, MyHiFi.Artwork, plug: ...`. Nothing
+  # sets this in production.
   defp request do
-    :my_hi_fi
-    |> Application.get_env(__MODULE__, [])
-    |> Keyword.put_new(:receive_timeout, :timer.seconds(15))
-    |> Keyword.put_new(:retry, false)
-    |> Keyword.put_new(:max_redirects, 3)
+    [receive_timeout: :timer.seconds(15), retry: :transient]
+    |> Keyword.merge(Application.get_env(:my_hi_fi, __MODULE__, []))
     |> Req.new()
   end
 end

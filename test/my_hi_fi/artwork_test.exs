@@ -2,6 +2,7 @@ defmodule MyHiFi.ArtworkTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Artwork
+  alias MyHiFi.Cache
 
   @png <<0x89, "PNG\r\n", 0x1A, "\n", "the rest of a small image">>
   @jpeg <<0xFF, 0xD8, 0xFF, "the rest of a small image">>
@@ -14,11 +15,17 @@ defmodule MyHiFi.ArtworkTest do
 
     on_exit(fn ->
       Application.delete_env(:my_hi_fi, Artwork)
+      Application.delete_env(:my_hi_fi, :cache_limit)
       File.rm_rf(Artwork.directory())
     end)
 
     :ok
   end
+
+  # A name carries no extension now, because the type lives on the row of the cache.
+  defp on_disk(name), do: Path.join(Artwork.directory(), name)
+
+  defp held, do: Path.wildcard(Path.join(Artwork.directory(), "*")) |> Enum.map(&Path.basename/1)
 
   defp stub(type, body) do
     Req.Test.stub(Artwork, fn conn ->
@@ -33,8 +40,8 @@ defmodule MyHiFi.ArtworkTest do
       stub("image/png", @png)
 
       assert {:ok, name} = Artwork.fetch("https://station.test/logo.png")
-      assert String.match?(name, ~r/\A[0-9a-f]{64}\.png\z/)
-      assert File.read!(Artwork.path(name)) == @png
+      assert String.match?(name, ~r/\A[0-9a-f]{64}\z/)
+      assert File.read!(on_disk(name)) == @png
     end
 
     test "the same address gives the same name" do
@@ -58,7 +65,7 @@ defmodule MyHiFi.ArtworkTest do
       stub("image/jpeg", @jpeg)
 
       assert {:ok, name} = Artwork.fetch("https://station.test/logo.png")
-      assert String.ends_with?(name, ".jpg")
+      assert {:ok, _path, "image/jpeg"} = Artwork.serve(name)
     end
 
     # 11 New Zealand stations answer `image/x-icon`, and 8 of those send a PNG or a
@@ -67,18 +74,17 @@ defmodule MyHiFi.ArtworkTest do
       stub("image/x-icon", @png)
 
       assert {:ok, name} = Artwork.fetch("https://station.test/favicon.ico")
-      assert String.ends_with?(name, ".png")
-      assert Artwork.content_type(name) == "image/png"
+      assert {:ok, _path, "image/png"} = Artwork.serve(name)
     end
 
     test "reads a GIF and a WebP from their bytes" do
       stub("application/octet-stream", @gif)
       assert {:ok, gif} = Artwork.fetch("https://station.test/one")
-      assert String.ends_with?(gif, ".gif")
+      assert {:ok, _path, "image/gif"} = Artwork.serve(gif)
 
       stub("application/octet-stream", @webp)
       assert {:ok, webp} = Artwork.fetch("https://station.test/two")
-      assert String.ends_with?(webp, ".webp")
+      assert {:ok, _path, "image/webp"} = Artwork.serve(webp)
     end
 
     test "refuses an answer that is not an image" do
@@ -151,94 +157,112 @@ defmodule MyHiFi.ArtworkTest do
     end
   end
 
-  describe "path/1" do
-    test "gives a path for a hash and a known extension" do
-      name = String.duplicate("a", 64) <> ".png"
+  describe "serve/1" do
+    test "it gives the path and the type of an entry that the cache holds" do
+      stub("image/png", @png)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.png")
 
-      assert Artwork.path(name) == Path.join(Artwork.directory(), name)
+      assert {:ok, path, "image/png"} = Artwork.serve(name)
+      assert path == on_disk(name)
+      assert File.read!(path) == @png
     end
 
-    test "gives nothing for a name that could reach another file" do
+    test "it notes that something used the entry, so the eviction can order them" do
+      stub("image/png", @png)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.png")
+      {:ok, before} = Cache.fetch("artwork", name)
+
+      Process.sleep(5)
+      assert {:ok, _path, _type} = Artwork.serve(name)
+
+      {:ok, after_serving} = Cache.fetch("artwork", name)
+      assert DateTime.compare(after_serving.last_accessed_at, before.last_accessed_at) == :gt
+    end
+
+    test "a name that could reach another file gives nothing" do
       for name <- [
             "../secret_key_base",
             "../../etc/passwd",
             "/etc/passwd",
             "my_hi_fi.db",
             String.duplicate("a", 64) <> ".exs",
-            String.duplicate("a", 63) <> ".png",
-            String.duplicate("z", 64) <> ".png",
-            String.duplicate("a", 64),
+            String.duplicate("a", 63),
+            String.duplicate("z", 64),
             "",
             nil
           ] do
-        assert Artwork.path(name) == nil, "#{inspect(name)} gave a path"
+        assert Artwork.serve(name) == :error, "#{inspect(name)} was served"
       end
     end
-  end
 
-  describe "prune/0" do
-    test "removes nothing while the cache is inside its limit" do
-      stub("image/png", @png)
-      {:ok, _name} = Artwork.fetch("https://station.test/logo.png")
-
-      assert Artwork.prune() == 0
-      assert length(Path.wildcard(Path.join(Artwork.directory(), "*"))) == 1
+    test "a name that no entry holds gives nothing" do
+      assert Artwork.serve(String.duplicate("a", 64)) == :error
     end
 
-    test "removes the oldest file first" do
-      File.mkdir_p!(Artwork.directory())
+    test "an entry of a type that this route does not serve gives nothing" do
+      # The cache holds any bytes, and this route sends an image alone.
+      {:ok, entry} =
+        Cache.put("artwork", String.duplicate("b", 64), %{
+          bytes: "a script",
+          content_type: "text/html"
+        })
 
-      # Each file holds 400 bytes, and the limit allows two of them.
-      names =
-        for index <- 1..4 do
-          name = String.duplicate(Integer.to_string(index), 64) <> ".png"
-          path = Path.join(Artwork.directory(), name)
-          File.write!(path, String.duplicate("x", 400))
-          # `prune/0` sorts by the write time, and that time holds whole seconds.
-          File.touch!(path, 1_700_000_000 + index)
-          name
-        end
-
-      Application.put_env(:my_hi_fi, :artwork_max_bytes, 900)
-      on_exit(fn -> Application.delete_env(:my_hi_fi, :artwork_max_bytes) end)
-
-      assert Artwork.prune() == 2
-
-      held = Path.wildcard(Path.join(Artwork.directory(), "*")) |> Enum.map(&Path.basename/1)
-
-      # The two oldest went, and the two newest stayed.
-      refute Enum.at(names, 0) in held
-      refute Enum.at(names, 1) in held
-      assert Enum.at(names, 2) in held
-      assert Enum.at(names, 3) in held
+      assert Artwork.serve(entry.entry_key) == :error
     end
 
-    test "a read of a new logo removes an old one when the cache is full" do
-      File.mkdir_p!(Artwork.directory())
-      old = String.duplicate("f", 64) <> ".png"
-      File.write!(Path.join(Artwork.directory(), old), String.duplicate("x", 800))
-      File.touch!(Path.join(Artwork.directory(), old), 1_700_000_000)
-
-      Application.put_env(:my_hi_fi, :artwork_max_bytes, 500)
-      on_exit(fn -> Application.delete_env(:my_hi_fi, :artwork_max_bytes) end)
-
+    test "a row with no file gives nothing" do
       stub("image/png", @png)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.png")
+      File.rm!(on_disk(name))
 
-      assert {:ok, name} = Artwork.fetch("https://station.test/new.png")
-
-      held = Path.wildcard(Path.join(Artwork.directory(), "*")) |> Enum.map(&Path.basename/1)
-
-      assert name in held
-      refute old in held
+      assert Artwork.serve(name) == :error
     end
   end
 
-  describe "limit/0" do
-    test "is a part of the free space, and it stops at 64 MB" do
-      limit = Artwork.limit()
+  describe "the eviction" do
+    test "a read of a new picture removes a colder one when the cache is full" do
+      stub("image/png", @png)
+      {:ok, old} = Artwork.fetch("https://station.test/old.png")
 
-      assert limit > 0
-      assert limit <= 64 * 1024 * 1024
+      # The limit holds one picture of this size and not two.
+      Application.put_env(:my_hi_fi, :cache_limit, byte_size(@png) + 1)
+
+      Process.sleep(5)
+      stub("image/jpeg", @jpeg)
+      assert {:ok, new} = Artwork.fetch("https://station.test/new.jpg")
+
+      assert new in held()
+      refute old in held()
+    end
+
+    test "it removes nothing while the cache is inside its limit" do
+      stub("image/png", @png)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.png")
+
+      assert length(held()) == 1
+      assert name in held()
+    end
+
+    test "the picture that a person looked at lately stays" do
+      stub("image/png", @png)
+      {:ok, first} = Artwork.fetch("https://station.test/one.png")
+      stub("image/gif", @gif)
+      {:ok, second} = Artwork.fetch("https://station.test/two.gif")
+
+      # Serving the first one makes the second the colder of the two.
+      Process.sleep(5)
+      {:ok, _path, _type} = Artwork.serve(first)
+
+      # The limit holds two pictures of this size, so one of the three goes.
+      Application.put_env(:my_hi_fi, :cache_limit, byte_size(@png) * 2 + 10)
+      Process.sleep(5)
+      stub("image/jpeg", @jpeg)
+      assert {:ok, third} = Artwork.fetch("https://station.test/three.jpg")
+
+      # The one that nothing looked at lately is the one that went.
+      assert first in held()
+      assert third in held()
+      refute second in held()
     end
   end
 end

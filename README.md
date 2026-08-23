@@ -29,7 +29,7 @@ the Nerves, Phoenix, and Ash skeleton, and the specification.
 | Data | Ash with SQLite, on the application data partition at `/root` |
 | Background work | Oban |
 | Web interface | Phoenix LiveView |
-| Device screen | [Vivid](https://harton.dev/james/vivid) behind a `MyHiFi.Peripheral` behaviour, in a later version |
+| Device screen | A renderer behind a `MyHiFi.Peripheral` behaviour, in a later version. Not chosen yet. |
 | Knob | SimpleFOC motor, RP2040-Zero, I2C link, also a `MyHiFi.Peripheral`, in a later version |
 
 Sources, outputs and peripherals are behaviours. A peripheral owns one piece of

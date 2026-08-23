@@ -76,8 +76,8 @@ defmodule MyHiFiWeb.BrowseLive do
   @impl Phoenix.LiveView
   def handle_event("favourite", %{"index" => index}, socket) do
     case entry_at(socket, index) do
-      {:track, track} -> {:noreply, mark(socket, to_index(index), track)}
-      _other -> {:noreply, socket}
+      nil -> {:noreply, socket}
+      entry -> {:noreply, mark(socket, to_index(index), entry)}
     end
   end
 
@@ -211,10 +211,13 @@ defmodule MyHiFiWeb.BrowseLive do
                   id={"open-#{index}"}
                   phx-click="open"
                   phx-value-index={index}
-                  class="group flex grow items-center gap-3 py-3 text-left"
+                  class="group flex min-w-0 grow items-center gap-3 py-3 text-left"
                 >
                   <.icon name="hero-folder" class="size-4 shrink-0 text-ink-faint" />
-                  <span class="grow truncate text-ink group-hover:text-accent">
+                  <%!-- `min-w-0` is what makes `truncate` work. A flex item keeps its
+                  content width without it, so a long title pushed the chevron and the
+                  star of a podcast show off the row. --%>
+                  <span class="min-w-0 grow truncate text-ink group-hover:text-accent">
                     {container.title}
                   </span>
                   <.icon
@@ -258,28 +261,8 @@ defmodule MyHiFiWeb.BrowseLive do
                     </span>
                   </span>
                 </button>
-                <button
-                  :if={is_boolean(track.favourite?)}
-                  type="button"
-                  id={"favourite-#{index}"}
-                  phx-click="favourite"
-                  phx-value-index={index}
-                  aria-pressed={to_string(track.favourite? == true)}
-                  aria-label="Favourite"
-                  class={[
-                    "flex size-9 shrink-0 items-center justify-center rounded-full",
-                    if(track.favourite?,
-                      do: "text-accent",
-                      else: "text-ink-faint hover:text-ink"
-                    )
-                  ]}
-                >
-                  <.icon
-                    name={if track.favourite?, do: "hero-star-solid", else: "hero-star"}
-                    class="size-5"
-                  />
-                </button>
             <% end %>
+            <.favourite entry={entry} index={index} />
           </li>
         </ul>
 
@@ -294,6 +277,34 @@ defmodule MyHiFiWeb.BrowseLive do
         </button>
       </div>
     </div>
+    """
+  end
+
+  # One control for a track and for a container. A station is a track and a podcast
+  # show is a container, and each one carries `favourite?`, so this needs no
+  # knowledge of which source it draws. A `nil` mark draws nothing.
+  attr :entry, :any, required: true
+  attr :index, :integer, required: true
+
+  defp favourite(assigns) do
+    assigns = assign(assigns, :marked, elem(assigns.entry, 1).favourite?)
+
+    ~H"""
+    <button
+      :if={is_boolean(@marked)}
+      type="button"
+      id={"favourite-#{@index}"}
+      phx-click="favourite"
+      phx-value-index={@index}
+      aria-pressed={to_string(@marked == true)}
+      aria-label="Favourite"
+      class={[
+        "flex size-9 shrink-0 items-center justify-center rounded-full",
+        if(@marked, do: "text-accent", else: "text-ink-faint hover:text-ink")
+      ]}
+    >
+      <.icon name={if @marked, do: "hero-star-solid", else: "hero-star"} class="size-5" />
+    </button>
     """
   end
 
@@ -401,20 +412,33 @@ defmodule MyHiFiWeb.BrowseLive do
     end
   end
 
-  defp mark(socket, index, track) do
-    case socket.assigns.source.favourite(track.ref, not track.favourite?) do
-      :ok -> assign(socket, :entries, refresh(socket, index, track))
+  defp mark(socket, _index, {_kind, %{favourite?: nil}}), do: socket
+
+  defp mark(socket, index, {_kind, entry} = whole) do
+    case socket.assigns.source.favourite(entry.ref, not entry.favourite?) do
+      :ok -> assign(socket, :entries, refresh(socket, index, whole))
       {:error, reason} -> put_flash(socket, :error, "Could not do that: #{inspect(reason)}")
     end
   end
 
-  # The source holds the mark, so the page reads the entry again instead of
-  # writing what it thinks the new state is.
-  defp refresh(socket, index, track) do
+  # The source holds the mark, so the page reads a track again instead of writing
+  # what it thinks the new state is.
+  defp refresh(socket, index, {:track, track}) do
     case socket.assigns.source.track(track.ref) do
       {:ok, track} -> List.replace_at(socket.assigns.entries, index, {:track, track})
       {:error, _reason} -> socket.assigns.entries
     end
+  end
+
+  # A container has no such read. The behaviour names `track/1` and no
+  # `container/1`, and one page refreshing one star does not earn a callback that
+  # every source must then implement. `favourite/2` gave `:ok`, so the new state is
+  # the state that this page asked for. Reading the list again is the other answer,
+  # and for a search of a service that would be a request to it for each star.
+  defp refresh(socket, index, {:container, container}) do
+    container = %{container | favourite?: not container.favourite?}
+
+    List.replace_at(socket.assigns.entries, index, {:container, container})
   end
 
   defp entry_at(socket, index), do: Enum.at(socket.assigns.entries, to_index(index))

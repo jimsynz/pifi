@@ -48,6 +48,7 @@ defmodule MyHiFi.Player do
             stream_title: String.t() | nil,
             artwork_path: String.t() | nil,
             started_at: integer() | nil,
+            offset_ms: non_neg_integer(),
             restarts: non_neg_integer(),
             standby?: boolean()
           }
@@ -61,6 +62,7 @@ defmodule MyHiFi.Player do
               stream_title: nil,
               artwork_path: nil,
               started_at: nil,
+              offset_ms: 0,
               restarts: 0,
               standby?: false
   end
@@ -153,6 +155,7 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_call(:stop, _from, %State{} = state) do
+    store_position(state)
     state = stop_pipeline(state)
     Event.publish(:player, %Events.Stopped{reason: :requested})
 
@@ -164,12 +167,14 @@ defmodule MyHiFi.Player do
          track: nil,
          playable: nil,
          stream_title: nil,
-         artwork_path: nil
+         artwork_path: nil,
+         offset_ms: 0
      }}
   end
 
   @impl GenServer
   def handle_call({:standby, true}, _from, %State{} = state) do
+    store_position(state)
     state = stop_pipeline(state)
     Settings.put(@standby_key, "true")
     Event.publish(:player, %Events.Standby{entered?: true})
@@ -277,8 +282,13 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_info({:pipeline_finished, pipeline}, %State{pipeline: pipeline} = state) do
-    Logger.info("The stream ended. Starting it again.")
-    {:noreply, restart(state)}
+    if live?(state) do
+      Logger.info("The stream ended. Starting it again.")
+      {:noreply, restart(state)}
+    else
+      Logger.info("The track ended.")
+      {:noreply, finish(state)}
+    end
   end
 
   @impl GenServer
@@ -330,7 +340,8 @@ defmodule MyHiFi.Player do
                monitor: monitor,
                stream_title: nil,
                artwork_path: nil,
-               started_at: nil
+               started_at: nil,
+               offset_ms: playable.position_ms
            }}
 
         {:error, reason} ->
@@ -345,8 +356,15 @@ defmodule MyHiFi.Player do
   # the pipeline, and a lost connection would then kill the player instead of
   # letting it start the stream again. The monitor below gives the notice that
   # this process needs, and it survives the pipeline.
+  # A test names its own pipeline with `config :my_hi_fi, :pipeline, ...`, in the
+  # same way that it names its own source and its own output. The pipeline of this
+  # firmware holds `aplay`, and `aplay` holds a sound card, so a test of what the
+  # player does at the end of a track cannot use it: the host of a build server
+  # holds no card. Nothing sets this in production.
   defp start_pipeline(playable, sink, _state) do
-    case Membrane.Pipeline.start(Pipeline, %{
+    module = Application.get_env(:my_hi_fi, :pipeline, Pipeline)
+
+    case Membrane.Pipeline.start(module, %{
            # The whole playable goes through. A copy of each field here would need
            # a change in two places for each new field, and the first one that
            # nobody changed reached the board.
@@ -452,6 +470,7 @@ defmodule MyHiFi.Player do
   defp restart_for_output(%State{pipeline: nil} = state), do: state
 
   defp restart_for_output(%State{} = state) do
+    store_position(state)
     state = stop_pipeline(state)
 
     case start(state.source, state.ref, state) do
@@ -486,12 +505,14 @@ defmodule MyHiFi.Player do
   end
 
   defp restart(%State{restarts: restarts} = state) when restarts >= @max_restarts do
+    store_position(state)
     Logger.error("The stream failed #{restarts} times. Giving up.")
     Event.publish(:player, %Events.Failed{reason: :too_many_restarts})
     %State{stop_pipeline(state) | restarts: 0, source: nil, ref: nil}
   end
 
   defp restart(%State{} = state) do
+    store_position(state)
     state = stop_pipeline(state)
     Event.publish(:player, %Events.Buffering{percent: 0})
     Process.send_after(self(), :restart, @restart_delay)
@@ -504,8 +525,45 @@ defmodule MyHiFi.Player do
     {:error, reason, %State{state | pipeline: nil}}
   end
 
-  defp position_ms(%State{started_at: nil}), do: 0
-  defp position_ms(%State{started_at: at}), do: System.monotonic_time(:millisecond) - at
+  # A resume asks the server for the bytes from a point, so the audio that arrives
+  # begins there. The count therefore adds where the stream began, and a progress
+  # bar shows the place in the whole track.
+  defp position_ms(%State{started_at: nil, offset_ms: offset}), do: offset
+
+  defp position_ms(%State{started_at: at, offset_ms: offset}) do
+    offset + System.monotonic_time(:millisecond) - at
+  end
+
+  # A track ended by itself. The source holds what that means: a podcast marks the
+  # episode played, and a station never reaches this.
+  defp finish(%State{source: source, ref: ref} = state) do
+    state = stop_pipeline(state)
+    source.finished(ref)
+    Event.publish(:player, %Events.Stopped{reason: :finished})
+
+    %State{
+      state
+      | track: nil,
+        playable: nil,
+        stream_title: nil,
+        artwork_path: nil,
+        offset_ms: 0
+    }
+  end
+
+  # The source decides what a place means, and this process holds no knowledge of
+  # that. It gives the number and moves on, and a source that keeps no place gives
+  # `:ok`. Nothing waits on the answer, because a stop must be quick.
+  #
+  # A track that never began has no place to keep, and writing 0 would lose the
+  # place that a person already had.
+  defp store_position(%State{started_at: nil}), do: :ok
+  defp store_position(%State{source: nil}), do: :ok
+
+  defp store_position(%State{source: source, ref: ref} = state) do
+    source.store_position(ref, position_ms(state))
+    :ok
+  end
 
   defp schedule_progress, do: Process.send_after(self(), :progress, @progress_interval)
 end

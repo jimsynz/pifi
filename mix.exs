@@ -98,6 +98,11 @@ defmodule MyHiFi.MixProject do
       {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.8"},
       {:ash_sqlite, "~> 0.2"},
+      # `MyHiFi.Cache` models the cache on disk with this. It is not on Hex, and its
+      # author says that the API iterates, so this names a reference and pins it in
+      # the way that `vintage_net_wizard` is pinned. See section 8 of
+      # `docs/cache-plan.md` for what that risk is.
+      {:ash_storage, github: "ash-project/ash_storage", ref: "fb919d33fcbd", override: true},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
       # `membrane_core` needs `ratio`, and `ratio` names
@@ -140,6 +145,12 @@ defmodule MyHiFi.MixProject do
       # change there cannot take it away.
       {:req, "~> 0.5"},
       {:ring_logger, "~> 0.11.0"},
+      # `MyHiFi.Podcast.Feed.Parser` reads a podcast feed with this. It is pure
+      # Elixir and it holds no dependency of its own, so it needs nothing from the
+      # Nerves system. `Saxy.Partial` takes one chunk at a time, so a 13 MB feed
+      # never arrives in memory as one binary. See section 3 of
+      # `docs/podcasts-plan.md` for the packages that this replaces.
+      {:saxy, "~> 1.6"},
       {:shoehorn, "~> 0.9.1"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:telemetry_metrics, "~> 1.0"},
@@ -148,6 +159,16 @@ defmodule MyHiFi.MixProject do
       {:usage_rules, "~> 1.0", only: [:dev]},
       {:nerves_runtime, "~> 0.13.12"},
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
+      # These two arrive through `nerves_pack`, and this firmware calls each one
+      # itself, so naming them here means that a change there cannot take them
+      # away. `req` is named for the same reason.
+      #
+      # `MyHiFi.Podcast.Index` asks `nerves_time` whether the clock is right,
+      # because the Podcast Index holds a window of 3 minutes and a board with no
+      # battery starts in 1970. `MyHiFi.Device.Network.Report` and
+      # `MyHiFi.Setup.Monitor` read `vintage_net`.
+      {:nerves_time, "~> 0.4", targets: @all_targets},
+      {:vintage_net, "~> 0.13", targets: @all_targets},
       # Release 0.4.17 is from 2024-06-05, and it needs plug_cowboy. Each cowlib
       # release from 2.9.0 to 2.19.0 holds two advisories, and no release fixes
       # them. The main branch uses Bandit instead, and Phoenix already gives us

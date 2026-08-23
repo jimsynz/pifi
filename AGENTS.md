@@ -84,11 +84,10 @@ Licence: Apache-2.0.
 - **Screens and controls share one behaviour.** Do not split them. On the PiTFT
   the ILI9341 screen and the STMPE610 touch controller share SPI0, so one process
   must own the bus. `MyHiFi.Peripheral.PiTft` draws and publishes touch events.
-- **The device screen uses Vivid**, not Scenic. See
-  <https://harton.dev/james/vivid>. Vivid is a pure Elixir 2D renderer. From
-  v1.0.0 it reads OpenType, TrueType, WOFF, and BDF fonts. It draws no colour
-  raster yet, so cover art waits on upstream Vivid work. `Vivid.Bitmap` holds one
-  bit for each cell and serves the fonts. It is not an image.
+- **No renderer is chosen for the device screen.** Do not name one in the code or
+  in the documentation until this is decided. The choice must draw a colour raster,
+  because the now playing screen shows cover art, and it must draw text from a
+  font. It must also be small enough for this board.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `MyHiFi.Application` calls

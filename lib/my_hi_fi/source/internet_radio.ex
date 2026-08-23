@@ -39,9 +39,9 @@ defmodule MyHiFi.Source.InternetRadio do
   def browse(:root, _options) do
     {:ok,
      page([
-       {:container, %{ref: :favourites, title: "Favourites", artwork: nil}},
-       {:container, %{ref: :countries, title: "Countries", artwork: nil}},
-       {:container, %{ref: :tags, title: "Tags", artwork: nil}}
+       {:container, %{ref: :favourites, title: "Favourites", artwork: nil, favourite?: nil}},
+       {:container, %{ref: :countries, title: "Countries", artwork: nil, favourite?: nil}},
+       {:container, %{ref: :tags, title: "Tags", artwork: nil, favourite?: nil}}
      ])}
   end
 
@@ -56,7 +56,7 @@ defmodule MyHiFi.Source.InternetRadio do
       |> Enum.reject(&(&1 in [nil, ""]))
       |> Enum.uniq()
       |> Enum.sort()
-      |> Enum.map(&{:container, %{ref: {:country, &1}, title: &1, artwork: nil}})
+      |> Enum.map(&{:container, %{ref: {:country, &1}, title: &1, artwork: nil, favourite?: nil}})
 
     {:ok, paginate(containers, options)}
   end
@@ -72,7 +72,7 @@ defmodule MyHiFi.Source.InternetRadio do
       |> Enum.reject(&(&1 in [nil, ""]))
       |> Enum.uniq()
       |> Enum.sort()
-      |> Enum.map(&{:container, %{ref: {:tag, &1}, title: &1, artwork: nil}})
+      |> Enum.map(&{:container, %{ref: {:tag, &1}, title: &1, artwork: nil, favourite?: nil}})
 
     {:ok, paginate(containers, options)}
   end
@@ -118,7 +118,8 @@ defmodule MyHiFi.Source.InternetRadio do
            transport: :hls,
            container: hls.container,
            format: hls.format,
-           live?: true
+           live?: true,
+           position_ms: 0
          }}
 
       {:error, reason} ->
@@ -149,7 +150,9 @@ defmodule MyHiFi.Source.InternetRadio do
       transport: :http,
       container: container,
       format: format,
-      live?: true
+      live?: true,
+      # A live stream holds no place, so it always begins where it begins.
+      position_ms: 0
     }
   end
 
@@ -191,6 +194,18 @@ defmodule MyHiFi.Source.InternetRadio do
   end
 
   def favourite(ref, _true?), do: {:error, {:not_a_track, ref}}
+
+  # A radio stream is live, so it holds no position and there is nothing to keep.
+  # This is why the behaviour asks for `:ok` here and not for an error: the player
+  # tells every source where a person stopped, and a source that cannot use that
+  # says nothing about it.
+  @impl MyHiFi.Source
+  def store_position(_ref, _position_ms), do: :ok
+
+  # A station never ends by itself. The player starts a stream that stops again, so
+  # this never runs, and it exists because the behaviour asks every source for it.
+  @impl MyHiFi.Source
+  def finished(_ref), do: :ok
 
   @doc """
   The codec that a station names.

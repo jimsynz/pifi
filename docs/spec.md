@@ -29,7 +29,7 @@ also gives a web interface for setup and for control.
 Version 1 includes these items:
 
 - Nerves firmware for the Raspberry Pi Zero 2 W.
-- One audio source: internet radio, with Shoutcast and HLS streams.
+- Two audio sources: internet radio, with Shoutcast and HLS streams, and podcasts.
 - One audio output: a USB DAC.
 - A Membrane pipeline that plays the stream.
 - A Phoenix LiveView web interface for setup and for control.
@@ -43,7 +43,7 @@ Version 1 excludes these items. Later versions add them.
 
 - The PiTFT screen and the on-device user interface.
 - The RP2040 knob.
-- Spotify, Plex, Squeezecast, and podcasts.
+- Spotify, Plex, and Squeezecast.
 - Volume control.
 - More than one device.
 
@@ -153,7 +153,8 @@ tree of items. A container holds more items. A track plays.
 ```elixir
 defmodule MyHiFi.Source do
   @type ref :: term()
-  @type container :: %{ref: ref(), title: String.t(), artwork: String.t() | nil}
+  @type container :: %{ref: ref(), title: String.t(), artwork: String.t() | nil,
+                       favourite?: boolean() | nil}
   @type track :: %{ref: ref(), title: String.t(), subtitle: String.t() | nil,
                    artwork: String.t() | nil, duration_ms: pos_integer() | nil,
                    favourite?: boolean() | nil}
@@ -162,7 +163,7 @@ defmodule MyHiFi.Source do
   @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
                       transport: :http | :hls, container: :none | :mpeg_ts | :ogg,
                       format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :unknown,
-                      live?: boolean()}
+                      live?: boolean(), position_ms: non_neg_integer()}
 
   @callback title() :: String.t()
   @callback icon() :: atom()
@@ -172,6 +173,8 @@ defmodule MyHiFi.Source do
   @callback track(ref()) :: {:ok, track()} | {:error, term()}
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
   @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
+  @callback store_position(ref(), non_neg_integer()) :: :ok | {:error, term()}
+  @callback finished(ref()) :: :ok | {:error, term()}
   @callback ref_to_string(ref()) :: {:ok, String.t()} | {:error, term()}
   @callback ref_from_string(String.t()) :: {:ok, ref()} | {:error, term()}
 
@@ -199,9 +202,37 @@ Notes on the behaviour:
   does. Each service holds its own idea of this mark: a station list holds a
   column, and another service holds a list of its own. A user interface therefore
   never reads or writes the mark itself.
-- `favourite?` on a track is `nil` for a source with no favourites. A user
-  interface shows the control for `true` and for `false` only, so it needs no
-  knowledge of which source it shows.
+- `favourite?` is on a track and on a container, and it is `nil` for a source that
+  does not mark that kind. A user interface shows the control for `true` and for
+  `false` only, so it needs no knowledge of which source it shows, and it draws one
+  control for both kinds. Both kinds carry the mark because each service holds it
+  on a different thing: internet radio marks a station, which is a track, and
+  podcasts subscribe to a show, which is a container. A later source marks an album
+  or a playlist.
+- `store_position/2` notes where a person stopped inside a track. The player calls
+  it when it stops, when it enters standby, and when a track reaches its end. It is
+  a notice and not a question, so a source that keeps no position returns `:ok` and
+  not an error, and internet radio does nothing with it because a live stream has
+  no position. `search/2` and `favourite/2` return `{:error, :not_supported}`
+  instead, and the reason for the difference is the user interface: it must know
+  whether to draw a search field and a star, and it draws no control for a
+  position.
+- `finished/1` says that a track reached its end. The player calls it in place of
+  `store_position/2` when a track ends by itself, and a source that holds a played
+  mark writes it there. The player starts a live stream again when it ends, because
+  a person expects the music to come back, so this never reaches a source of live
+  streams.
+- `position_ms` of a playable is where that stream begins, and it is 0 for one that
+  begins at the start. A source that resumes a track sets it to the point that its
+  own `headers` ask for, and the player adds it to the time that it counts. A
+  progress bar then shows the place in the whole track. A source that asks for no
+  bytes gives 0, even when it holds a place: a podcast episode whose feed gives no
+  length is one of those.
+- The behaviour names `track/1` and no `container/1`. The web page therefore reads
+  a track again after a change of its mark, and it writes the confirmed value on a
+  container. One page refreshing one star does not earn a callback that every
+  source must implement, and reading the list again would ask a service for a whole
+  page each time a person marks something.
 - `transport`, `container` and `format` decide the pipeline, and they are separate
   because they vary separately. Of the 44 New Zealand HLS stations, 14 give AAC
   with no container and 8 give MP3 inside MPEG-TS. Of the 6 Ogg stations, 3 hold
@@ -214,7 +245,7 @@ Notes on the behaviour:
   container. See section 9 for why the player stores a name and not a term.
 - `icon/0` names the icon of the source, and each user interface draws that name
   in its own way. The web interface draws a heroicon, and the device screen draws a
-  Vivid shape. The interfaces draw `:radio`, `:library`, `:podcast` and `:cloud`
+  shape of its own. The interfaces draw `:radio`, `:library`, `:podcast` and `:cloud`
   today, and any other name gives the default icon. A source therefore reaches the
   top row of the web interface without a change there. This callback holds the
   same rule as `title/0`: the source names what it is, and no interface holds a
@@ -311,7 +342,7 @@ Version 1 has no peripheral. These come later:
 
 | Module | Hardware | Draws | Publishes |
 |---|---|---|---|
-| `MyHiFi.Peripheral.PiTft` | ILI9341 screen and STMPE610 touch controller, both on SPI0 | Yes, with Vivid | `Input.Touched` |
+| `MyHiFi.Peripheral.PiTft` | ILI9341 screen and STMPE610 touch controller, both on SPI0 | Yes | `Input.Touched` |
 | `MyHiFi.Peripheral.Knob` | RP2040-Zero on I2C | No | `Input.Rotated`, `Input.Pressed`, `Input.LongPressed` |
 | `MyHiFi.Peripheral.Ssd1306` | 128 by 64 monochrome OLED screen on I2C | Yes, text only | Nothing |
 
@@ -637,6 +668,26 @@ Domain `MyHiFi.Radio`:
 - Actions: `read`, `search` (by title and by tag), `favourites`,
   `upsert_from_remote`, `set_favourite`, `clear_favourite`.
 
+Domain `MyHiFi.Podcast`:
+
+- `Show` holds one podcast. Attributes: `id`, `feed_url`, `index_id`, `title`,
+  `author`, `description`, `artwork_url`, `subscribed?`, `last_fetched_at`,
+  `last_error`. `feed_url` is the identity, so the index and a feed read never make
+  two rows for one podcast.
+- `Episode` holds one recording. Attributes: `id`, `show_id`, `guid`, `title`,
+  `subtitle`, `description`, `audio_url`, `mime_type`, `byte_length`,
+  `duration_ms`, `published_at`, `artwork_url`, `position_ms`, `played?`.
+  `show_id` with `guid` is the identity, because a `guid` is unique inside its feed
+  and not between feeds.
+- Actions on `Show`: `read`, `destroy`, `subscriptions`, `upsert_from_feed`,
+  `upsert_from_index`, `subscribe`, `unsubscribe`, `record_error`.
+- Actions on `Episode`: `read`, `destroy`, `by_show`, `upsert_from_feed`,
+  `store_position`, `mark_played`.
+- `upsert_from_index` uses `upsert_fields [:index_id]`, so a row that exists takes
+  the identifier of the index and nothing else. The publisher owns the title and
+  the description, and this is that rule in one line of the DSL.
+- SQLite holds the foreign key, so the episodes of a show go before the show.
+
 Domain `MyHiFi.Settings`:
 
 - `Setting` holds one configuration value. It uses a key and a value.
@@ -675,7 +726,22 @@ Oban does the background work:
 - A job copies the Radio Browser station list into `Station`. It reads the
   country list from the settings, and it does one country at a time.
 - The job runs after the first boot, and then one time each week.
+- A job reads the feed of each subscribed show, each six hours. A publisher writes
+  an episode and no publisher writes one each hour, so four reads in a day is
+  often enough. It reads the subscribed shows only, so a search that a person made
+  once costs the device nothing later. See `MyHiFi.Podcast.Show.RefreshAll`.
+- The same job removes a show that no person subscribed to and that nothing has
+  touched for a week. A search and the trending list write a row for each answer,
+  and two visits to the trending list wrote 201 rows on 2026-08-23. Those rows are
+  worth keeping for a while and not for ever.
+- A device keeps the newest 200 episodes of a show. One feed of the measurement
+  holds 2955, and no person moves through that with a knob. A read asks for 200,
+  and the job removes what an earlier read left behind when a feed grows.
 - A job fetches artwork and writes it to the cache.
+
+`MyHiFi.Podcast.Refresh` holds the read of one feed, and both the job and
+`MyHiFi.Source.Podcasts` call it. A person opening a show and a schedule reading a
+feed must not disagree about what a feed means.
 
 ## 8. Station data
 
@@ -688,6 +754,98 @@ Zealand. The sync job then copies only those countries.
 
 The New Zealand list is small. The Radio Browser answer is 280 KB of JSON for 242
 stations. A country filter therefore keeps the database small.
+
+## 8.1 Podcast data
+
+A podcast needs two services, and they answer different questions.
+
+The **Podcast Index** finds a show. See <https://podcastindex.org>. It gives a
+title, an author, artwork, and the address of the feed. It gives no episode.
+`MyHiFi.Podcast.Index` reads it.
+
+The **feed of the publisher** gives the episodes. `MyHiFi.Podcast.Feed` reads it
+with `MyHiFi.Podcast.Feed.Parser`, one chunk at a time, and it stops when it holds
+200 episodes. A feed writes the newest episode first, so those are the newest 200.
+Across the 49 feeds of the measurement this reads 44 MB of 149 MB.
+
+The feed decides, and not the index. Three reasons:
+
+- A private feed is never in the index. A Patreon feed or a members feed carries a
+  token in its address, and no person can search for it. Such a feed is exactly the
+  one that a person names by its address.
+- The publisher owns the title, the description and the enclosure.
+- A feed holds a new episode before the index reads it.
+
+The index asks each caller for a key and a secret, and it gives both for no money.
+Each device holds its own in `MyHiFi.Settings`, so no firmware image holds a
+secret and no two devices share a rate limit. A device with no key still plays
+every show that a person subscribed to, because `Subscriptions` reads the local
+rows.
+
+A person writes the key on the settings page. That page never sends the secret back
+to a browser: it says whether the device holds one, and a person who changes it
+writes both values again. A save asks the index for its category list, so a person
+learns then whether the key works and not when a search fails. A fault of the
+network says so, and it does not blame the key.
+
+`X-Auth-Date` of the index holds a window of 3 minutes, so a request before the
+first NTP synchronisation fails. `MyHiFi.Podcast.Index` asks `nerves_time` first
+and gives `:clock_not_synchronised`, because a 401 names no cause.
+
+The source writes a `Show` for each answer of a search and of the trending list, so
+a `ref` is `{:show, id}` in every branch. Opening a show reads its feed when the
+local copy is older than one hour. A read that fails keeps the episodes that the
+device holds, and `last_error` says why there is nothing newer.
+
+An episode plays over HTTP with no container. 8771 of the 8773 episodes of the
+measurement hold `audio/mpeg` and 2 hold `audio/x-m4a`, so MP4 waits for a reason
+and an m4a episode names why it cannot play. See section 6.
+
+A resume asks for the bytes from a point with a `range` header, and the point in
+time becomes a byte offset through the bitrate. `MyHiFi.Player.Mp3` reads that
+bitrate out of the audio itself, from the header of its first frame. It follows
+`MyHiFi.Player.Ogg`, which reads the first page of a stream to name the codec.
+
+**The metadata of a feed decides nothing here**, and a measurement of 5 real
+episodes on 2026-08-23 says why. The `length` of an enclosure is often not the
+length of the file: one of the five named 14,165,913 bytes and sent 7,270,145, and
+another named 11,339,285 and sent 14,320,536. A publisher who adds an advertisement
+at the time of the request changes the size, and the feed keeps the old number.
+
+| Where the numbers come from | Worst error of the five, seeking to the middle |
+|---|---|
+| The length and the duration of the feed | 227 s |
+| The real length with the duration of the feed | 119 s |
+| The bitrate of the audio | **0.03 s** |
+
+All 5 episodes hold one bitrate for the whole file, so one frame header answers the
+question. The reader asks for 10 bytes to find the length of the ID3v2 tag, which
+holds a picture and is often tens of kilobytes, and then for 4 KB at the start of
+the audio. It runs only when a person resumes, and an episode with no place has
+never played, so a first play asks for nothing.
+
+A resume that cannot read the bitrate starts at the beginning. That repeats some
+audio, and a wrong offset would step over some instead.
+
+### 5.6.1 The end of a stream
+
+`live?` of the playable decides what the player does when a stream ends.
+
+- `live?: true` starts it again. A live stream that ends is a fault of the network,
+  and a person expects the music to come back.
+- `live?: false` stops, publishes `Stopped{reason: :finished}`, and calls
+  `finished/1` of the source. Nothing starts again, because the track is over.
+
+The player writes the place of a track through `store_position/2` when a person
+stops it, when the device enters standby, when a fault of the network ends the
+audio, and when a person chooses another output. It writes none for a track that
+never began, because 0 would lose the place that the person already had. It writes
+none at the end of a track either: `finished/1` runs there, and a source that marks
+an episode played returns the place to the start itself.
+
+`MyHiFi.Player.Pipeline` holds `aplay`, and `aplay` holds a sound card, so a test
+of this cannot use it. `config :my_hi_fi, :pipeline` names another pipeline, in the
+same way that `:sources` and `:output` name another source and another output.
 
 ## 9. Standby and resume
 
@@ -771,14 +929,17 @@ readable. See section 13.
 
 The device interface draws on a screen. It does not use a browser.
 
-Vivid does the rendering. Vivid is a pure Elixir 2D renderer with no
-dependencies. See <https://harton.dev/james/vivid>. Scenic is heavy for this
-board, and Vivid is small. Vivid 1.0.0 reads OpenType, TrueType, WOFF, and BDF
-fonts. It antialiases, it draws Bezier curves, and it fills shapes with holes.
+**No renderer is chosen.** Three things decide the choice, and the third one rules
+a candidate out most often.
+
+1. It draws text from a font, because each screen shows the name of a track.
+2. It draws a colour raster, because the now playing screen shows cover art.
+3. It is small enough for this board, and it needs no binary that the Nerves
+   system does not hold. Scenic is heavy for a Raspberry Pi Zero 2 W.
 
 A peripheral draws itself. See section 5.3. `MyHiFi.DeviceUi` holds the
 navigation state, and it publishes the view events. `MyHiFi.Peripheral.PiTft`
-receives those events and renders them with Vivid. It also publishes the touch
+receives those events and renders them. It also publishes the touch
 events, because it owns the same SPI bus as the touch controller. Another person
 can add an SSD1306 OLED screen without a change to `MyHiFi.DeviceUi`.
 
@@ -791,11 +952,15 @@ can add an SSD1306 OLED screen without a change to `MyHiFi.DeviceUi`.
 
 Open items for the device interface:
 
-- Cover art needs a colour raster. Vivid 1.0.0 draws shapes and font glyphs
-  only, because `Vivid.Bitmap` holds one bit for each cell and serves the BDF
-  fonts. Vivid gets colour raster support upstream. Decide then whether Vivid
-  reads JPEG and PNG, or whether this firmware decodes the bytes first.
-- The link from a Vivid frame to the SPI framebuffer needs a driver.
+- The renderer is not chosen. See above for what it must do.
+- Cover art needs the bytes of a JPEG or a PNG as pixels. Decide whether the
+  renderer reads those formats, or whether this firmware decodes them first. A
+  decoder for either one is native code, and section 6.1 holds what that costs.
+- Cover art also needs a size that suits the screen. A podcast writes artwork of
+  3000 by 3000, which is 1.2 MB, and this screen holds 320 by 240. Nothing on the
+  device resizes an image today, and `vix` cannot cross-compile, because it loads
+  its own NIF while it compiles and a build machine is x86_64.
+- The link from a frame to the SPI framebuffer needs a driver.
 
 If a later version needs a binary or a shared library that the Nerves system
 does not hold, then NBPR gives it. NBPR is a Hex repository of Buildroot-built
@@ -820,17 +985,44 @@ gives the reason.
 
 ## 13. Cache and buffer
 
-The cache lives on the application data partition, at `/root/artwork`. It holds
-two types of data:
+The cache lives on the application data partition, at `/root/cache`. **Any part of
+the firmware may use it.** `MyHiFi.Cache` is the domain, and `MyHiFi.Cache.Entry`
+holds the data about one thing on the disk. `AshStorage` writes the file, with its
+disk service.
 
-1. **Artwork.** The device stores station logos. The name of a file is a hash of
-   the address and the extension of the type, such as
-   `553451c0…144e.png`. `MyHiFi.Artwork` holds it.
-2. **Downloads.** A later version stores podcast files and Plex files.
+A namespace says which part of the firmware holds an entry, and a key says which
+thing. The caller chooses what each one means, and each namespace holds a directory
+of its own. Two callers may therefore choose one key and hold different things.
 
-The cache has a size limit, and the limit is a twentieth of the free space, up to
-64 MB. The device removes the oldest file first. A logo is small: 247 New Zealand
-stations need about 5 MB.
+1. **Artwork.** `MyHiFi.Artwork` holds `:artwork` and keys by the hash of an address,
+   so one address is one file however many records name it. It keeps what a cache
+   cannot know: the four types that this device serves, the read of the first bytes
+   because a `content-type` header is often wrong, and the 4 MB limit for one
+   picture.
+2. **Downloads.** A later version holds `:download` and keys by the identifier of an
+   episode.
+
+The limit is the free space of the partition, less a fixed reserve of 1 GB. A share of
+the free space would give a reserve that grows for no reason on a card of 14.2 GB, and
+one too small to matter on a small card. The reserve protects the database and the room
+for a download.
+
+**The entry that a person used least recently goes first.** The file system cannot
+answer that question: Nerves mounts ext4 with `relatime`, so `atime` moves only when
+it is a day old and an entry that a person used an hour ago would look cold. The time
+therefore lives on the row, and the web interface writes it each time that it serves a
+picture.
+
+An entry that a caller marks with `keep?` goes never. Without that mark one download
+of 60 MB would remove 50 covers, and moving through a list of shows would remove the
+episode that a person is in the middle of. A cache of nothing but such entries stays
+above its limit and reports that, because the caller that marked them is the one that
+can release them.
+
+The old rule stopped at 64 MB, and it removed the file that was written longest ago. It
+was chosen when a station logo was 3.7 KB to 46 KB and 247 of them needed 5 MB. A
+podcast cover is 1.2 MB and a picture of an episode is 1.8 MB, so the podcast work is
+what made both rules wrong.
 
 The web interface serves each logo from this device and never from the station, so
 the content security policy holds `'self'` for an image. A page that holds no logo
@@ -934,8 +1126,10 @@ I found these results on 2026-08-20. They support the decisions above.
 | What architecture is `rpi0_2`? | `aarch64`, glibc, `aarch64-nerves-linux-gnu`. |
 | Does the HLS plugin hold native code? | No. It has no `bundlex.exs` and no `c_src`. |
 | Does Nerves set the Bundlex target variables? | No. This breaks the precompiled download. See section 6.4. |
-| Does Vivid render text? | Yes, from v1.0.0 of 2026-08-14. It reads OpenType, TrueType, WOFF, and BDF fonts. |
-| Does Vivid draw a colour image? | No. `Vivid.Bitmap` holds one bit for each cell, and it serves the BDF fonts. |
+| How large is a podcast picture? | A cover is 1.2 MB and a picture of an episode is 1.8 MB. A station logo is 3.7 KB to 46 KB. Measured on the board on 2026-08-23. |
+| How much memory does a feed read need on the board? | 1.7 MB, and 1.7 s, for the newest 200 episodes of an 18 MB feed. A small feed of 29 episodes needs 2.8 MB, and that includes the search of the index. |
+| How much memory does the board hold with podcasts in place? | `MemAvailable` 190 MB, and the BEAM held 100 MB. Measured after a search, a subscription and two feed reads. |
+| How large is the data partition? | 14.2 GB, with 13.5 GB free. The old cache limit of 64 MB was therefore 0.5% of it. |
 | How many New Zealand stations use HLS? | 46 of 242 (19%). All of the commercial networks use it. |
 | How large is the New Zealand station list? | 280 KB of JSON. |
 

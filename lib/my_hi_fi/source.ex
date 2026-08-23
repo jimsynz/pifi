@@ -6,9 +6,9 @@ defmodule MyHiFi.Source do
   player and each user interface walk that tree, so neither one holds knowledge of
   any particular service.
 
-  `MyHiFi.Source.InternetRadio` is the only source today. Spotify, Plex,
-  Squeezecast and podcasts come later, and each one is a module that implements
-  this behaviour and changes nothing else.
+  `MyHiFi.Source.InternetRadio` and `MyHiFi.Source.Podcasts` are the sources today.
+  Spotify, Plex and Squeezecast come later, and each one is a module that
+  implements this behaviour and changes nothing else.
   """
 
   @typedoc """
@@ -19,8 +19,24 @@ defmodule MyHiFi.Source do
   """
   @type ref :: term()
 
-  @typedoc "An entry that holds more entries."
-  @type container :: %{ref: ref(), title: String.t(), artwork: String.t() | nil}
+  @typedoc """
+  An entry that holds more entries.
+
+  `favourite?` works in the same way as it does on a track, and it is `nil` for a
+  container that a person cannot mark.
+
+  Both kinds carry the mark, because each service holds it on a different kind of
+  thing. Internet radio marks a station, and a station is a track. Podcasts mark a
+  show, and a show is a container. A later source marks an album or a playlist. A
+  user interface therefore draws one control for both kinds, and it holds no
+  knowledge of which source it shows.
+  """
+  @type container :: %{
+          ref: ref(),
+          title: String.t(),
+          artwork: String.t() | nil,
+          favourite?: boolean() | nil
+        }
 
   @typedoc """
   An entry that plays.
@@ -68,6 +84,16 @@ defmodule MyHiFi.Source do
   them. One field cannot say any of that.
 
   `live?` is true for a stream with no end, such as a radio station.
+
+  `position_ms` is where this stream begins, and it is 0 for one that begins at the
+  start of the track. A source that resumes a track sets it to the point that its
+  own `headers` ask for, and the player adds it to the time that it counts. A
+  progress bar then shows the place in the whole track, and not the place in this
+  request.
+
+  A source that asks for no bytes gives 0 here, even when it holds a place for that
+  track. A podcast episode whose feed gives no length is one of those: it has a
+  place and no way to turn it into a byte offset, so it begins again at the start.
   """
   @type playable :: %{
           uri: String.t(),
@@ -75,7 +101,8 @@ defmodule MyHiFi.Source do
           transport: :http | :hls,
           container: :none | :mpeg_ts | :ogg,
           format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :unknown,
-          live?: boolean()
+          live?: boolean(),
+          position_ms: non_neg_integer()
         }
 
   @doc "The name of this source, for a person to read."
@@ -85,8 +112,8 @@ defmodule MyHiFi.Source do
   The icon of this source.
 
   A source names its own icon, and each user interface draws that name in its own
-  way. The web interface draws a heroicon, and the device screen draws a Vivid
-  shape. Neither one holds a list of the sources.
+  way. The web interface draws a heroicon, and the device screen draws a shape of
+  its own. Neither one holds a list of the sources.
 
   The interfaces draw `:radio`, `:library`, `:podcast` and `:cloud` today. Any
   other name gives the default icon, so a new source works before an interface
@@ -155,18 +182,59 @@ defmodule MyHiFi.Source do
   A source with no favourites gives `{:error, :not_supported}`, in the same way
   that `search/2` does. Each service holds its own idea of this mark, and a user
   interface therefore never reads or writes the mark itself.
+
+  The entry is a track or a container. Internet radio marks a station, and
+  podcasts subscribe to a show. A source that marks one kind gives
+  `{:error, :not_supported}` for the other.
   """
   @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
 
   @doc """
+  Note where a person stopped inside a track.
+
+  The player calls this when it stops, when it enters standby, and when a track
+  reaches its end. A live stream has no position, so internet radio does nothing.
+
+  This is a notice and not a question, so a source that keeps no position gives
+  `:ok` and not an error. `search/2` and `favourite/2` give
+  `{:error, :not_supported}` instead, and the reason for the difference is the user
+  interface: it must know whether to draw a search field and a star, and it draws
+  no control at all for a position.
+
+  The player holds no knowledge of what a position means to a service. It gives the
+  number of milliseconds from the start of the track, and the source decides
+  whether to keep it.
+  """
+  @callback store_position(ref(), non_neg_integer()) :: :ok | {:error, term()}
+
+  @doc """
+  Note that a track reached its end.
+
+  The player calls this in place of `store_position/2` when a track ends by itself.
+  A source that holds a played mark writes it here.
+
+  The player starts a live stream again when it ends, because a person expects the
+  music to come back. This therefore never reaches a source of live streams, and
+  internet radio implements it and does nothing.
+  """
+  @callback finished(ref()) :: :ok | {:error, term()}
+
+  @doc """
   Every source that this firmware holds.
 
-  Internet radio is the only one today. A new source joins this list, and the web
-  interface and the device interface then show it without a change. A test sets
-  `:sources` to give a source of its own.
+  A new source joins this list, and the web interface and the device interface then
+  show it without a change. A test sets `:sources` to give a source of its own.
+
+  The order decides the order of the controls in the top row of the web interface,
+  and the first one is what a person sees at an address that names no source.
   """
   @spec all() :: [module()]
-  def all, do: Application.get_env(:my_hi_fi, :sources, [MyHiFi.Source.InternetRadio])
+  def all do
+    Application.get_env(:my_hi_fi, :sources, [
+      MyHiFi.Source.InternetRadio,
+      MyHiFi.Source.Podcasts
+    ])
+  end
 
   @doc """
   Read a source back from its name.
