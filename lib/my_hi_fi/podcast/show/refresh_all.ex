@@ -29,6 +29,7 @@ defmodule MyHiFi.Podcast.Show.RefreshAll do
 
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Refresh
+  alias MyHiFi.Source
 
   @stale_after_days 7
 
@@ -36,8 +37,18 @@ defmodule MyHiFi.Podcast.Show.RefreshAll do
   @spec stale_after_days() :: pos_integer()
   def stale_after_days, do: @stale_after_days
 
+  # A person who takes the podcast source out of use expects the device to stop
+  # reading feeds. See `MyHiFi.Source.enabled?/1`.
   @impl true
   def run(_input, _options, _context) do
+    if Source.enabled?(Source.Podcasts) do
+      refresh_each_feed()
+    else
+      {:ok, %{read: 0, failed: 0, removed: 0, skipped?: true}}
+    end
+  end
+
+  defp refresh_each_feed do
     subscribed = Podcast.subscribed_shows!()
 
     read =
@@ -54,7 +65,7 @@ defmodule MyHiFi.Podcast.Show.RefreshAll do
       "Podcast refresh read #{read.ok} feeds, #{read.failed} failed, and removed #{removed} shows."
     )
 
-    {:ok, %{read: read.ok, failed: read.failed, removed: removed}}
+    {:ok, %{read: read.ok, failed: read.failed, removed: removed, skipped?: false}}
   end
 
   defp remove_forgotten do

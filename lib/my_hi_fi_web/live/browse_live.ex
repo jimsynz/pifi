@@ -35,9 +35,11 @@ defmodule MyHiFiWeb.BrowseLive do
 
   @impl Phoenix.LiveView
   def handle_params(%{"source" => slug}, _uri, socket) do
-    case Source.from_slug(slug) do
-      {:ok, module} -> {:noreply, socket |> start_at(module) |> load()}
-      {:error, :not_a_source} -> {:noreply, first_source(socket)}
+    with {:ok, module} <- Source.from_slug(slug),
+         true <- Source.enabled?(module) do
+      {:noreply, socket |> start_at(module) |> load()}
+    else
+      _other -> {:noreply, first_source(socket)}
     end
   end
 
@@ -319,7 +321,7 @@ defmodule MyHiFiWeb.BrowseLive do
   defp playing?(_assigns, _track), do: false
 
   defp first_source(socket) do
-    case Source.all() do
+    case Source.enabled() do
       [module | _rest] -> push_navigate(socket, to: ~p"/browse/#{Source.slug(module)}")
       [] -> start_at(socket, nil)
     end

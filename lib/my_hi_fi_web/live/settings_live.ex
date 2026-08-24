@@ -2,48 +2,104 @@ defmodule MyHiFiWeb.SettingsLive do
   @moduledoc """
   What the device holds, and what a person can change.
 
-  Three settings change here: the output device, the countries of the station list,
-  and the key of the Podcast Index. Each one stays in the database, because a
-  device holds no environment to read a value from. See `MyHiFi.Settings`.
+  The page is a menu, and each row of it opens one section. The address names the
+  section, so a person can keep the address of one and the back control of the
+  browser moves out of it.
 
-  The page never sends the secret of the index back to a browser. It says whether
-  the device holds one, and a person who wants to change it writes both values
-  again.
+      /settings                        the menu
+      /settings/output                 the sound card
+      /settings/sources                the sources, and which ones are in use
+      /settings/sources/internet-radio one source
+      /settings/network                a report
+      /settings/storage                a report
 
-  The network state and the storage state are reports, and a person changes
-  neither one here. The Wi-Fi details belong to the setup wizard. See
-  `MyHiFi.Setup`.
+  **This page holds no knowledge of any source.** A source names its own settings
+  with `c:MyHiFi.Source.settings/0`, and its own controls with
+  `c:MyHiFi.Source.settings_actions/0`. The countries of the station list belong to
+  internet radio, and the key of the Podcast Index belongs to podcasts. A new
+  source therefore reaches this page without a change here.
+
+  The page never sends the secret of an index back to a browser. A source marks
+  such a field `write_only?`, and it then gives no value for it.
+
+  The network state and the storage state are reports, and a person changes neither
+  one here. The Wi-Fi details belong to the setup wizard. See `MyHiFi.Setup`.
   """
 
   use MyHiFiWeb, :live_view
 
   alias MyHiFi.Device
-  alias MyHiFi.Podcast.Index
-  alias MyHiFi.Radio.Station
-  alias MyHiFi.Radio.Station.SyncFromRemote
+  alias MyHiFi.Source
 
   # The reports change without a person: a DAC arrives, Wi-Fi connects, and the
-  # sync job fills the station table. The page reads them again on this interval.
+  # sync job fills the station table. The sections that show a report read them
+  # again on this interval.
   @refresh_interval :timer.seconds(5)
 
-  @impl Phoenix.LiveView
-  def mount(_params, _session, socket) do
-    if connected?(socket), do: schedule_refresh()
+  # A source page holds a form, and a person may be in the middle of typing in it.
+  # Nothing on that page changes by itself, so it needs no interval.
+  @refreshing_sections [:menu, :output, :network, :storage]
 
-    {:ok, socket |> assign(:page_title, "Settings") |> load()}
+  @impl Phoenix.LiveView
+  def mount(_params, _session, socket), do: {:ok, refresh(socket)}
+
+  @impl Phoenix.LiveView
+  def handle_params(%{"source" => slug}, _uri, socket) do
+    case Source.from_slug(slug) do
+      {:ok, module} -> {:noreply, socket |> enter() |> load_source(module)}
+      {:error, :not_a_source} -> {:noreply, push_navigate(socket, to: ~p"/settings/sources")}
+    end
   end
 
   @impl Phoenix.LiveView
+  def handle_params(_params, _uri, socket), do: {:noreply, enter(socket)}
+
+  @impl Phoenix.LiveView
   def handle_info(:refresh, socket) do
-    schedule_refresh()
-    {:noreply, refresh(socket)}
+    if socket.assigns.live_action in @refreshing_sections do
+      schedule_refresh()
+      {:noreply, refresh(socket)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("enable_source", %{"slug" => slug, "enabled" => enabled}, socket) do
+    with {:ok, module} <- Source.from_slug(slug),
+         {:ok, :ok} <- MyHiFi.Playback.enable_source(module, enabled == "true") do
+      {:noreply, socket |> put_flash(:info, in_use(module)) |> reload(module)}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("run_source_action", %{"name" => name}, socket) do
+    module = socket.assigns.source.module
+
+    case Source.run_settings_action(module, name) do
+      {:ok, message} -> {:noreply, socket |> put_flash(:info, message) |> reload(module)}
+      {:error, message} -> {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("save_source", %{"source" => values}, socket) do
+    module = socket.assigns.source.module
+
+    case Source.put_settings(module, values) do
+      {:ok, message} -> {:noreply, socket |> put_flash(:info, message) |> reload(module)}
+      {:error, message} -> {:noreply, put_flash(socket, :error, message)}
+    end
   end
 
   @impl Phoenix.LiveView
   def handle_event("select_output", %{"id" => id}, socket) do
     case MyHiFi.Playback.select_output(id) do
-      :ok ->
-        {:noreply, socket |> put_flash(:info, "The output device is #{id}.") |> load()}
+      {:ok, :ok} ->
+        {:noreply, socket |> put_flash(:info, "The output device is #{id}.") |> refresh()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
@@ -51,302 +107,424 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
-  def handle_event("save_countries", %{"countries" => %{"codes" => codes}}, socket) do
-    case codes(codes) do
-      [] ->
-        {:noreply, put_flash(socket, :error, "Name at least one country, such as NZ.")}
-
-      codes ->
-        MyHiFi.Settings.put!(SyncFromRemote.countries_key(), Enum.join(codes, ","))
-
-        {:noreply,
-         socket
-         |> put_flash(:info, "The station list covers #{Enum.join(codes, ", ")}.")
-         |> load()}
-    end
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("save_index_key", %{"index" => %{"key" => key, "secret" => secret}}, socket) do
-    with {:ok, key} <- present(key),
-         {:ok, secret} <- present(secret) do
-      MyHiFi.Settings.put!(Index.key_setting(), key)
-      MyHiFi.Settings.put!(Index.secret_setting(), secret)
-
-      {:noreply, socket |> assign(:index_form, blank_index_form()) |> confirm_key() |> load()}
-    else
-      :error ->
-        {:noreply, put_flash(socket, :error, "Give both the key and the secret.")}
-    end
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("remove_index_key", _params, socket) do
-    for key <- [Index.key_setting(), Index.secret_setting()] do
-      case MyHiFi.Settings.fetch(key) do
-        {:ok, setting} -> MyHiFi.Settings.delete!(setting)
-        {:error, _reason} -> :ok
-      end
-    end
-
-    {:noreply,
-     socket
-     |> put_flash(:info, "The device holds no key. Your subscriptions stay.")
-     |> load()}
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("sync", _params, socket) do
-    AshOban.schedule(Station, :sync_from_remote)
-
-    {:noreply,
-     put_flash(socket, :info, "The device asks for the station list of each country now.")}
-  end
-
-  @impl Phoenix.LiveView
-  def render(assigns) do
+  def render(%{live_action: :menu} = assigns) do
     ~H"""
-    <div id="settings" class="space-y-4">
-      <section id="output" class="glass sheen rounded-xl p-4">
-        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Output device</h2>
+    <div id="settings" class="glass sheen divide-y divide-edge rounded-xl">
+      <.row id="output-row" to={~p"/settings/output"} icon="hero-speaker-wave" title="Output device">
+        {output_summary(@output)}
+      </.row>
 
-        <p :if={@output.devices == []} id="no-output" class="text-sm text-ink-dim">
-          No sound card is present.
-        </p>
+      <.row id="sources-row" to={~p"/settings/sources"} icon="hero-queue-list" title="Sources">
+        {sources_summary(@source_list)}
+      </.row>
 
-        <ul class="divide-y divide-edge">
-          <li
-            :for={{device, index} <- Enum.with_index(@output.devices)}
-            class="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
-          >
-            <.icon
-              name="hero-speaker-wave"
-              class={["size-5 shrink-0", if(device.id == @output.selected, do: "text-accent", else: "text-ink-faint")]}
-            />
+      <.row id="network-row" to={~p"/settings/network"} icon="hero-wifi" title="Network">
+        {network_summary(@interfaces)}
+      </.row>
 
-            <span class="min-w-0 grow">
-              <span class="block truncate text-ink">{device.title}</span>
-              <span class="numerals block truncate text-xs text-ink-faint">{device.id}</span>
-            </span>
-
-            <span
-              :if={device.id == @output.selected}
-              id={"selected-#{index}"}
-              class="shrink-0 text-xs uppercase tracking-widest text-accent"
-            >
-              In use
-            </span>
-
-            <button
-              :if={device.id != @output.selected}
-              type="button"
-              id={"select-output-#{index}"}
-              phx-click="select_output"
-              phx-value-id={device.id}
-              class="control shrink-0 rounded-lg px-3 py-1.5 text-xs"
-            >
-              Use this one
-            </button>
-          </li>
-        </ul>
-      </section>
-
-      <section id="countries" class="glass sheen rounded-xl p-4">
-        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Station countries</h2>
-
-        <p class="mb-3 text-sm text-ink-dim">
-          Name each country by its two letter code, and put a comma between them.
-          The station list holds {stations(@station_count)}.
-        </p>
-
-        <.form for={@countries_form} id="countries-form" phx-submit="save_countries">
-          <div class="flex items-start gap-2">
-            <.input field={@countries_form[:codes]} type="text" class="grow" />
-            <button type="submit" id="save-countries" class="control rounded-lg px-4 py-2 text-sm">
-              Save
-            </button>
-          </div>
-        </.form>
-
-        <button
-          type="button"
-          id="sync"
-          phx-click="sync"
-          class="control mt-3 flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
-        >
-          <.icon name="hero-arrow-path" class="size-4" />
-          Ask for the stations now
-        </button>
-      </section>
-
-      <section id="podcast-index" class="glass sheen rounded-xl p-4">
-        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Podcast Index</h2>
-
-        <p class="mb-3 text-sm text-ink-dim">
-          Podcasts need a key, and
-          <a
-            href="https://api.podcastindex.org/signup"
-            class="text-accent underline"
-            rel="noopener"
-          >api.podcastindex.org/signup</a>
-          gives one for no money. The device keeps it, and no other device shares it.
-          Your subscriptions play without it.
-        </p>
-
-        <p :if={@index_configured?} id="index-present" class="mb-3 flex items-center gap-2 text-sm text-accent">
-          <.icon name="hero-check-circle" class="size-4" />
-          The device holds a key.
-        </p>
-
-        <.form for={@index_form} id="index-form" phx-submit="save_index_key">
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-start">
-            <.input field={@index_form[:key]} type="text" placeholder="Key" class="grow" />
-            <.input
-              field={@index_form[:secret]}
-              type="password"
-              placeholder="Secret"
-              class="grow"
-            />
-            <button type="submit" id="save-index-key" class="control rounded-lg px-4 py-2 text-sm">
-              Save
-            </button>
-          </div>
-        </.form>
-
-        <button
-          :if={@index_configured?}
-          type="button"
-          id="remove-index-key"
-          phx-click="remove_index_key"
-          class="control mt-3 flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
-        >
-          <.icon name="hero-trash" class="size-4" />
-          Remove the key
-        </button>
-      </section>
-
-      <section id="network" class="glass sheen rounded-xl p-4">
-        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Network</h2>
-
-        <p :if={@interfaces == []} id="no-network" class="text-sm text-ink-dim">
-          The network state comes from the device.
-        </p>
-
-        <ul class="divide-y divide-edge">
-          <li
-            :for={interface <- @interfaces}
-            id={"interface-#{interface.name}"}
-            class="py-2 first:pt-0 last:pb-0"
-          >
-            <div class="flex items-baseline gap-2">
-              <span class="numerals text-ink">{interface.name}</span>
-              <span class="text-xs uppercase tracking-widest text-ink-faint">{interface.type}</span>
-            </div>
-            <span class="block text-sm text-ink-dim">{connection(interface.connection)}</span>
-            <span :if={interface.ssid} class="block text-sm text-ink-dim">
-              {interface.ssid}, signal {interface.signal_percent}%
-            </span>
-            <span :if={interface.addresses != []} class="numerals block text-xs text-ink-faint">
-              {Enum.join(interface.addresses, ", ")}
-            </span>
-          </li>
-        </ul>
-      </section>
-
-      <section id="storage" class="glass sheen rounded-xl p-4">
-        <h2 class="mb-3 text-xs uppercase tracking-[0.18em] text-ink-faint">Storage</h2>
-
-        <dl class="text-sm">
-          <div class="flex justify-between gap-4 border-b border-edge py-2 first:pt-0">
-            <dt class="text-ink-faint">Partition</dt>
-            <dd class="numerals text-ink-dim">{@storage.path}</dd>
-          </div>
-          <div class="flex justify-between gap-4 border-b border-edge py-2">
-            <dt class="text-ink-faint">Free</dt>
-            <dd id="free-space" class="numerals text-ink-dim">
-              {size(@storage.free_bytes)} of {size(@storage.total_bytes)}
-            </dd>
-          </div>
-          <div class="flex justify-between gap-4 py-2 last:pb-0">
-            <dt class="text-ink-faint">Database</dt>
-            <dd id="database-size" class="numerals text-ink-dim">{size(@storage.database_bytes)}</dd>
-          </div>
-        </dl>
-      </section>
+      <.row
+        id="storage-row"
+        to={~p"/settings/storage"}
+        icon="hero-circle-stack"
+        title="Storage"
+      >
+        {size(@storage.free_bytes)} free of {size(@storage.total_bytes)}
+      </.row>
     </div>
     """
   end
 
-  defp load(socket) do
-    codes = Enum.join(SyncFromRemote.configured_countries(), ", ")
+  @impl Phoenix.LiveView
+  def render(%{live_action: :output} = assigns) do
+    ~H"""
+    <.section id="settings-output" title="Output device" back={~p"/settings"}>
+      <p :if={@output.devices == []} id="no-output" class="text-sm text-ink-dim">
+        No sound card is present.
+      </p>
 
-    socket
-    |> refresh()
-    |> assign(:countries_form, to_form(%{"codes" => codes}, as: :countries))
-    |> assign_new(:index_form, fn -> blank_index_form() end)
+      <p :if={absent_choice?(@output)} id="absent-output" class="mb-3 text-sm text-ink-dim">
+        The card that you chose is not present. The device uses the first one instead.
+      </p>
+
+      <ul class="divide-y divide-edge">
+        <li :for={{device, index} <- Enum.with_index(@output.devices)}>
+          <.output_device
+            device={device}
+            index={index}
+            in_use?={device.id == @output.in_use}
+            by_default?={is_nil(@output.selected)}
+          />
+        </li>
+      </ul>
+    </.section>
+    """
   end
 
-  # The fields start empty and stay empty. A page that held the secret would send
-  # it to the browser at each render, and a person who changes it writes both
-  # values again.
-  defp blank_index_form, do: to_form(%{"key" => "", "secret" => ""}, as: :index)
+  @impl Phoenix.LiveView
+  def render(%{live_action: :sources} = assigns) do
+    ~H"""
+    <.section id="settings-sources" title="Sources" back={~p"/settings"}>
+      <p class="mb-3 text-sm text-ink-dim">
+        A source out of use leaves the top row, and it asks the network for nothing.
+      </p>
 
-  # A person learns now whether the key works, and not when a search fails. The
-  # category list is the smallest read of the index.
-  defp confirm_key(socket) do
-    case Index.categories() do
-      {:ok, _categories} ->
-        put_flash(socket, :info, "The key works. Podcasts are ready.")
+      <ul class="divide-y divide-edge">
+        <li
+          :for={source <- @source_list}
+          id={"source-row-#{source.slug}"}
+          class="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
+        >
+          <.source_icon
+            name={source.icon}
+            class={["size-5 shrink-0", if(source.enabled?, do: "text-accent", else: "text-ink-faint")]}
+          />
 
-      {:error, :key_refused} ->
-        put_flash(socket, :error, "The index refused that key. Check both values.")
+          <.link navigate={~p"/settings/sources/#{source.slug}"} class="min-w-0 grow">
+            <span class="block truncate text-ink">{source.title}</span>
+            <span class="block truncate text-xs text-ink-faint">{state(source.enabled?)}</span>
+          </.link>
 
-      {:error, :clock_not_synchronised} ->
-        put_flash(
-          socket,
-          :info,
-          "The key is stored. The clock of the device is not right yet, so podcasts start working in a moment."
+          <.use_control source={source} />
+
+          <.icon name="hero-chevron-right" class="size-4 shrink-0 text-ink-faint" />
+        </li>
+      </ul>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
+  def render(%{live_action: :source} = assigns) do
+    ~H"""
+    <.section id="settings-source" title={@source.title} back={~p"/settings/sources"}>
+      <div class="mb-4 flex items-center gap-3 border-b border-edge pb-4">
+        <.source_icon
+          name={@source.icon}
+          class={["size-5 shrink-0", if(@source.enabled?, do: "text-accent", else: "text-ink-faint")]}
+        />
+        <span class="grow text-sm text-ink-dim">{state(@source.enabled?)}</span>
+        <.use_control source={@source} />
+      </div>
+
+      <p :if={@source.fields == [] and @source.actions == []} id="no-source-settings" class="text-sm text-ink-dim">
+        {@source.title} holds nothing else to change.
+      </p>
+
+      <.form :if={@source.fields != []} for={@source.form} id="source-form" phx-submit="save_source">
+        <div class="space-y-3">
+          <div :for={field <- @source.fields}>
+            <.input
+              field={@source.form[field.key]}
+              type={to_string(field.type)}
+              label={field.title}
+              placeholder={placeholder(field)}
+            />
+            <p :if={field.description} class="mt-1 text-sm text-ink-dim">
+              {field.description}
+              <a
+                :if={field.link}
+                href={field.link.href}
+                class="text-accent underline"
+                rel="noopener"
+              >{field.link.title}</a>
+            </p>
+          </div>
+        </div>
+
+        <button type="submit" id="save-source" class="control mt-3 rounded-lg px-4 py-2 text-sm">
+          Save
+        </button>
+      </.form>
+
+      <div :if={@source.actions != []} class="mt-4 space-y-3 border-t border-edge pt-4">
+        <div :for={action <- @source.actions}>
+          <button
+            type="button"
+            id={"source-action-#{action.name}"}
+            phx-click="run_source_action"
+            phx-value-name={action.name}
+            class="control flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
+          >
+            <.source_icon name={action.icon} class="size-4" />
+            {action.title}
+          </button>
+          <p :if={action.description} class="mt-1 text-sm text-ink-dim">{action.description}</p>
+        </div>
+      </div>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
+  def render(%{live_action: :network} = assigns) do
+    ~H"""
+    <.section id="settings-network" title="Network" back={~p"/settings"}>
+      <p :if={@interfaces == []} id="no-network" class="text-sm text-ink-dim">
+        The network state comes from the device.
+      </p>
+
+      <ul class="divide-y divide-edge">
+        <li
+          :for={interface <- @interfaces}
+          id={"interface-#{interface.name}"}
+          class="py-2 first:pt-0 last:pb-0"
+        >
+          <div class="flex items-baseline gap-2">
+            <span class="numerals text-ink">{interface.name}</span>
+            <span class="text-xs uppercase tracking-widest text-ink-faint">{interface.type}</span>
+          </div>
+          <span class="block text-sm text-ink-dim">{connection(interface.connection)}</span>
+          <span :if={interface.ssid} class="block text-sm text-ink-dim">
+            {interface.ssid}, signal {interface.signal_percent}%
+          </span>
+          <span :if={interface.addresses != []} class="numerals block text-xs text-ink-faint">
+            {Enum.join(interface.addresses, ", ")}
+          </span>
+        </li>
+      </ul>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
+  def render(%{live_action: :storage} = assigns) do
+    ~H"""
+    <.section id="settings-storage" title="Storage" back={~p"/settings"}>
+      <dl class="text-sm">
+        <div class="flex justify-between gap-4 border-b border-edge py-2 first:pt-0">
+          <dt class="text-ink-faint">Partition</dt>
+          <dd class="numerals text-ink-dim">{@storage.path}</dd>
+        </div>
+        <div class="flex justify-between gap-4 border-b border-edge py-2">
+          <dt class="text-ink-faint">Free</dt>
+          <dd id="free-space" class="numerals text-ink-dim">
+            {size(@storage.free_bytes)} of {size(@storage.total_bytes)}
+          </dd>
+        </div>
+        <div class="flex justify-between gap-4 py-2 last:pb-0">
+          <dt class="text-ink-faint">Database</dt>
+          <dd id="database-size" class="numerals text-ink-dim">{size(@storage.database_bytes)}</dd>
+        </div>
+      </dl>
+    </.section>
+    """
+  end
+
+  attr(:id, :string, required: true)
+  attr(:title, :string, required: true)
+  attr(:back, :string, required: true)
+  slot(:inner_block, required: true)
+
+  defp section(assigns) do
+    ~H"""
+    <div id={@id} class="glass sheen rounded-xl p-4">
+      <div class="mb-3 flex items-center gap-2">
+        <.link navigate={@back} id="back" aria-label="Back" class="control rounded-lg p-1.5">
+          <.icon name="hero-chevron-left" class="size-4" />
+        </.link>
+        <h2 class="text-xs uppercase tracking-[0.18em] text-ink-faint">{@title}</h2>
+      </div>
+
+      {render_slot(@inner_block)}
+    </div>
+    """
+  end
+
+  attr(:id, :string, required: true)
+  attr(:to, :string, required: true)
+  attr(:icon, :string, required: true)
+  attr(:title, :string, required: true)
+  slot(:inner_block, required: true)
+
+  defp row(assigns) do
+    ~H"""
+    <.link navigate={@to} id={@id} class="flex items-center gap-3 p-4">
+      <.icon name={@icon} class="size-5 shrink-0 text-ink-faint" />
+
+      <span class="min-w-0 grow">
+        <span class="block truncate text-ink">{@title}</span>
+        <span class="block truncate text-sm text-ink-dim">{render_slot(@inner_block)}</span>
+      </span>
+
+      <.icon name="hero-chevron-right" class="size-4 shrink-0 text-ink-faint" />
+    </.link>
+    """
+  end
+
+  attr(:device, :map, required: true)
+  attr(:index, :integer, required: true)
+  attr(:in_use?, :boolean, required: true)
+  attr(:by_default?, :boolean, required: true)
+
+  # The whole row is the control, so a person chooses a card by touching its name.
+  # The row of the card in use is dead, because `select_output` starts the stream
+  # again and a person who touches the card that already plays asks for nothing.
+  defp output_device(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"select-output-#{@index}"}
+      phx-click="select_output"
+      phx-value-id={@device.id}
+      disabled={@in_use? and not @by_default?}
+      aria-pressed={to_string(@in_use?)}
+      class={[
+        "flex w-full items-center gap-3 py-3 text-left first:pt-2 last:pb-2",
+        !(@in_use? and not @by_default?) && "cursor-pointer"
+      ]}
+    >
+      <span class={[
+        "flex size-5 shrink-0 items-center justify-center rounded-full",
+        if(@in_use?,
+          do: "bg-accent/15 shadow-[inset_0_0_0_1px_var(--color-accent)]",
+          else: "shadow-[inset_0_0_0_1px_var(--color-edge)]"
         )
+      ]}>
+        <span :if={@in_use?} class="size-2 rounded-full bg-accent" />
+      </span>
 
-      {:error, reason} ->
-        put_flash(
-          socket,
-          :error,
-          "The key is stored, and the index did not answer: #{inspect(reason)}"
-        )
+      <span class="min-w-0 grow">
+        <span class={["block truncate", if(@in_use?, do: "text-accent", else: "text-ink")]}>
+          {@device.title}
+        </span>
+        <span class="numerals block truncate text-xs text-ink-faint">{@device.id}</span>
+      </span>
+
+      <span :if={@in_use?} id={"selected-#{@index}"} class="flex shrink-0 items-center gap-2">
+        <span :if={@by_default?} class="text-xs uppercase tracking-widest text-ink-faint">
+          By default
+        </span>
+        <.icon name="hero-speaker-wave" class="size-5 text-accent" />
+        <span class="sr-only">In use</span>
+      </span>
+    </button>
+    """
+  end
+
+  attr(:source, :map, required: true)
+
+  defp use_control(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"enable-source-#{@source.slug}"}
+      phx-click="enable_source"
+      phx-value-slug={@source.slug}
+      phx-value-enabled={to_string(not @source.enabled?)}
+      class={[
+        "control shrink-0 rounded-lg px-3 py-1.5 text-xs",
+        @source.enabled? && "control-on"
+      ]}
+    >
+      {if @source.enabled?, do: "Take out of use", else: "Put in use"}
+    </button>
+    """
+  end
+
+  defp enter(socket) do
+    if connected?(socket) and socket.assigns.live_action in @refreshing_sections do
+      schedule_refresh()
+    end
+
+    assign(socket, :page_title, "Settings")
+  end
+
+  # A source reads its own current values, and a description of one holds a count
+  # or a state, so both come again after each change. See `MyHiFi.Source`.
+  defp load_source(socket, module) do
+    fields = Source.settings(module)
+
+    assign(socket, :source, %{
+      module: module,
+      title: module.title(),
+      icon: module.icon(),
+      slug: Source.slug(module),
+      enabled?: Source.enabled?(module),
+      fields: fields,
+      actions: Source.settings_actions(module),
+      form: to_form(Map.new(fields, &{&1.key, &1.value || ""}), as: :source)
+    })
+  end
+
+  # The top row of the faceplate holds the sources in use, and a change here must
+  # reach it at once. See `MyHiFiWeb.Shell`.
+  defp reload(socket, module) do
+    socket = MyHiFiWeb.Shell.assign_sources(socket)
+
+    case socket.assigns.live_action do
+      :source -> socket |> refresh() |> load_source(module)
+      _other -> refresh(socket)
     end
   end
 
-  # The form stays out of this, because a person may be in the middle of typing a
-  # country code when the interval comes round.
   defp refresh(socket) do
     socket
     |> assign(:output, MyHiFi.Playback.output!())
     |> assign(:interfaces, Device.network!())
     |> assign(:storage, Device.storage!())
-    |> assign(:station_count, Ash.count!(Station))
-    |> assign(:index_configured?, Index.configured?())
+    |> assign(:source_list, source_list())
   end
 
   defp schedule_refresh, do: Process.send_after(self(), :refresh, @refresh_interval)
 
-  defp present(text) do
-    case String.trim(text) do
-      "" -> :error
-      trimmed -> {:ok, trimmed}
-    end
+  # `:sources` belongs to `MyHiFiWeb.Shell`, and the top row of the faceplate draws
+  # it. That list holds the sources in use, and this one holds every source and the
+  # state of it, so the two cannot share one name.
+  defp source_list do
+    Enum.map(Source.all(), fn module ->
+      %{
+        module: module,
+        title: module.title(),
+        icon: module.icon(),
+        slug: Source.slug(module),
+        enabled?: Source.enabled?(module)
+      }
+    end)
   end
 
-  defp codes(text) do
-    text
-    |> String.split(",")
-    |> Enum.map(&(&1 |> String.trim() |> String.upcase()))
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
+  defp in_use(module) do
+    if Source.enabled?(module),
+      do: "#{module.title()} is in use.",
+      else: "#{module.title()} is out of use."
   end
 
-  defp stations(1), do: "1 station"
-  defp stations(count), do: "#{count} stations"
+  defp state(true), do: "In use"
+  defp state(false), do: "Out of use"
+
+  # A write-only field shows nothing that the device holds, so the control says
+  # what a person must type instead.
+  defp placeholder(%{write_only?: true, title: title}), do: title
+  defp placeholder(_field), do: nil
+
+  defp output_summary(%{devices: []}), do: "No sound card is present"
+
+  defp output_summary(%{devices: devices, selected: selected, in_use: in_use}) do
+    title =
+      case Enum.find(devices, &(&1.id == in_use)) do
+        nil -> in_use
+        device -> device.title
+      end
+
+    if is_nil(selected), do: "#{title}, by default", else: title
+  end
+
+  # A DAC can leave the machine. The player then uses the first card, so a person
+  # must read why the card that they chose is not the one that plays.
+  defp absent_choice?(%{selected: nil}), do: false
+
+  defp absent_choice?(%{devices: devices, selected: selected}) do
+    not Enum.any?(devices, &(&1.id == selected))
+  end
+
+  defp sources_summary(sources) do
+    "#{Enum.count(sources, & &1.enabled?)} of #{length(sources)} in use"
+  end
+
+  defp network_summary([]), do: "The network state comes from the device"
+
+  defp network_summary(interfaces) do
+    Enum.map_join(interfaces, ", ", &connection(&1.connection))
+  end
 
   defp connection(:internet), do: "Connected to the internet"
   defp connection(:lan), do: "Connected to the local network"

@@ -120,6 +120,21 @@ defmodule MyHiFi.Radio.Station.SyncFromRemoteTest do
                Radio.sync_stations_from_remote!(%{countries: ["GB"]})
     end
 
+    test "it asks for nothing when the internet radio source is out of use" do
+      stub_country(%{"NZ" => [station(%{})]})
+      MyHiFi.Source.enable(MyHiFi.Source.InternetRadio, false)
+
+      on_exit(fn ->
+        {:ok, setting} =
+          Settings.fetch(MyHiFi.Source.enabled_key(MyHiFi.Source.InternetRadio))
+
+        Settings.delete!(setting)
+      end)
+
+      assert %{written: 0, skipped?: true} = Radio.sync_stations_from_remote!()
+      assert Radio.list_stations!() == []
+    end
+
     test "the stations it wrote are findable by title and by tag" do
       stub_country(%{
         "NZ" => [station(%{"name" => "The Rock", "tags" => "classic rock,music"})]

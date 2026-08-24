@@ -18,6 +18,7 @@ defmodule MyHiFi.Radio.Station.SyncFromRemote do
   alias MyHiFi.Radio
   alias MyHiFi.Radio.RadioBrowser
   alias MyHiFi.Settings
+  alias MyHiFi.Source
 
   @countries_key "station_countries"
   @default_countries "NZ"
@@ -34,10 +35,18 @@ defmodule MyHiFi.Radio.Station.SyncFromRemote do
   @spec default_countries() :: String.t()
   def default_countries, do: @default_countries
 
+  # A person who takes the internet radio source out of use expects the device to
+  # ask the service for nothing. See `MyHiFi.Source.enabled?/1`.
   @impl true
   def run(input, _options, _context) do
-    countries = input.arguments[:countries] || configured_countries()
+    if Source.enabled?(Source.InternetRadio) do
+      sync(input.arguments[:countries] || configured_countries())
+    else
+      {:ok, %{written: 0, failed: [], countries: [], skipped?: true}}
+    end
+  end
 
+  defp sync(countries) do
     result =
       Enum.reduce(countries, %{written: 0, failed: []}, fn country, acc ->
         case sync_country(country) do
@@ -51,7 +60,13 @@ defmodule MyHiFi.Radio.Station.SyncFromRemote do
         "#{length(result.failed)} countries failed."
     )
 
-    {:ok, %{written: result.written, failed: Enum.reverse(result.failed), countries: countries}}
+    {:ok,
+     %{
+       written: result.written,
+       failed: Enum.reverse(result.failed),
+       countries: countries,
+       skipped?: false
+     }}
   end
 
   @doc """

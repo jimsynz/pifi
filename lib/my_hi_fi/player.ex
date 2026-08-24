@@ -39,6 +39,7 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Output
   alias MyHiFi.Player.Pipeline
   alias MyHiFi.Settings
+  alias MyHiFi.Source
 
   @progress_interval :timer.seconds(1)
   @restart_delay :timer.seconds(2)
@@ -176,8 +177,18 @@ defmodule MyHiFi.Player do
 
   The settings page shows this, so that page needs no knowledge of which output
   module the player holds.
+
+  `selected` is the card that a person chose, and it is nil for a device that no
+  person has changed. `in_use` is the card that the sound comes out of, and it is
+  nil only when the machine holds no card at all. The two are different when a
+  person chose nothing, and when the card that they chose has left the machine. A
+  page must mark `in_use`, because that is the one that plays.
   """
-  @spec output() :: %{devices: [map()], selected: String.t() | nil}
+  @spec output() :: %{
+          devices: [map()],
+          selected: String.t() | nil,
+          in_use: String.t() | nil
+        }
   def output, do: GenServer.call(__MODULE__, :output)
 
   @doc """
@@ -189,6 +200,18 @@ defmodule MyHiFi.Player do
   @spec select_output(String.t()) :: :ok | {:error, term()}
   def select_output(id),
     do: GenServer.call(__MODULE__, {:select_output, id}, :timer.seconds(30))
+
+  @doc """
+  Put a source in use, or take it out of use.
+
+  A source out of use leaves each user interface, its background jobs do nothing,
+  and a restart does not select it again. The player therefore stops when the
+  source that plays goes out of use: a person who takes a source away expects the
+  sound of it to go as well.
+  """
+  @spec enable_source(module(), boolean()) :: :ok
+  def enable_source(source, enabled?),
+    do: GenServer.call(__MODULE__, {:enable_source, source, enabled?}, :timer.seconds(30))
 
   @doc """
   The settings key that holds the chosen output device.
@@ -225,40 +248,16 @@ defmodule MyHiFi.Player do
   # another episode, or the next one, must find this one where they left it.
   @impl GenServer
   def handle_call({:play, source, ref}, _from, %State{} = state) do
-    store_position(state)
-    state = stop_pipeline(state)
-
-    case start(source, ref, state) do
-      {:ok, state} ->
-        # Only a new choice goes to the settings. Leaving standby and starting the
-        # stream again both use the choice that is already there.
-        store_station(source, ref)
-        {:reply, :ok, state}
-
-      {:error, reason, state} ->
-        {:reply, {:error, reason}, state}
+    if Source.enabled?(source) do
+      play_now(source, ref, state)
+    else
+      {:reply, {:error, :source_not_in_use}, state}
     end
   end
 
   @impl GenServer
   def handle_call(:stop, _from, %State{} = state) do
-    store_position(state)
-    silence(state)
-    Event.publish(:player, %Events.Stopped{reason: :requested})
-
-    {:reply, :ok,
-     %State{
-       state
-       | source: nil,
-         ref: nil,
-         track: nil,
-         playable: nil,
-         stream_title: nil,
-         artwork_path: nil,
-         offset_ms: 0,
-         position_bytes: nil,
-         paused?: false
-     }, {:continue, {:terminate, state.pipeline, state.monitor}}}
+    {:reply, :ok, cleared(state), {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
   # A pause holds a track for a person, so a device with nothing selected has nothing
@@ -390,9 +389,29 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_call(:output, _from, %State{} = state) do
-    output = Output.module()
+    devices = Output.module().devices()
 
-    {:reply, %{devices: output.devices(), selected: chosen_device()}, state}
+    in_use =
+      case device_in_use(devices) do
+        %{id: id} -> id
+        nil -> nil
+      end
+
+    {:reply, %{devices: devices, selected: chosen_device(), in_use: in_use}, state}
+  end
+
+  # A person who takes a source away expects the sound of it to go as well, and they
+  # expect the device not to select it again after a restart.
+  @impl GenServer
+  def handle_call({:enable_source, source, enabled?}, _from, %State{} = state) do
+    Source.enable(source, enabled?)
+
+    if enabled? or state.source != source do
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, state |> cleared() |> forget_station(),
+       {:continue, {:terminate, state.pipeline, state.monitor}}}
+    end
   end
 
   @impl GenServer
@@ -586,18 +605,24 @@ defmodule MyHiFi.Player do
     end
   end
 
-  # A person chooses a device, and that choice stays in the settings. A DAC can
-  # leave the device, so a choice that names an absent card gives way to the first
-  # card that is present. Silence is worse than the wrong socket.
   defp sink(%State{}) do
     output = Output.module()
-    devices = output.devices()
-    chosen = chosen_device()
 
-    case Enum.find(devices, List.first(devices), &(&1.id == chosen)) do
+    case device_in_use(output.devices()) do
       %{id: id} -> {:ok, output.sink_spec(id)}
       nil -> {:error, :no_output_device}
     end
+  end
+
+  # A person chooses a device, and that choice stays in the settings. A DAC can
+  # leave the device, so a choice that names an absent card gives way to the first
+  # card that is present. Silence is worse than the wrong socket.
+  #
+  # `sink/1` and the report of `output/0` both read this, because a settings page
+  # must mark the card that the sound comes out of, and the rule is here and not
+  # there.
+  defp device_in_use(devices) do
+    Enum.find(devices, List.first(devices), &(&1.id == chosen_device()))
   end
 
   # A page shows the local copy of a logo, and never the address of the station.
@@ -668,6 +693,22 @@ defmodule MyHiFi.Player do
     end
   end
 
+  defp play_now(source, ref, %State{} = state) do
+    store_position(state)
+    state = stop_pipeline(state)
+
+    case start(source, ref, state) do
+      {:ok, state} ->
+        # Only a new choice goes to the settings. Leaving standby and starting the
+        # stream again both use the choice that is already there.
+        store_station(source, ref)
+        {:reply, :ok, state}
+
+      {:error, reason, state} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   # A source names its own ref, so nothing here turns stored bytes back into a
   # term. See `MyHiFi.Source.ref_to_string/1`.
   defp store_station(source, ref) do
@@ -696,17 +737,31 @@ defmodule MyHiFi.Player do
     end
   end
 
-  # Only a source that this firmware holds can come back. A name from the
-  # settings therefore never makes an atom, and a source that a later version
-  # removes leaves the device with nothing selected.
+  # Only a source that this firmware holds and that a person left in use can come
+  # back. A name from the settings therefore never makes an atom, a source that a
+  # later version removes leaves the device with nothing selected, and a source
+  # that a person took out of use does the same.
   defp stored_source do
     with {:ok, name} <- stored_value(@last_source_key),
          source when not is_nil(source) <-
-           Enum.find(MyHiFi.Source.all(), &(inspect(&1) == name)) do
+           Enum.find(Source.enabled(), &(inspect(&1) == name)) do
       {:ok, source}
     else
       _other -> :error
     end
+  end
+
+  # A source out of use must not come back after a restart, and the name of the
+  # last track of it is no longer of use to any part.
+  defp forget_station(%State{} = state) do
+    for key <- [@last_source_key, @last_ref_key] do
+      case Settings.fetch(key) do
+        {:ok, setting} -> Settings.delete(setting)
+        {:error, _reason} -> :ok
+      end
+    end
+
+    state
   end
 
   defp stored_standby?, do: stored_value(@standby_key) == {:ok, "true"}
@@ -736,6 +791,27 @@ defmodule MyHiFi.Player do
   # The pipeline may take its time after that. A call that no pipeline answers is a
   # pipeline that is already wedged, and the forced terminate of `stop_pipeline/1`
   # holds that case.
+  # A stop leaves the device with nothing selected. The pipeline goes down in a
+  # `handle_continue`, so each caller of this adds that step itself.
+  defp cleared(%State{} = state) do
+    store_position(state)
+    silence(state)
+    Event.publish(:player, %Events.Stopped{reason: :requested})
+
+    %State{
+      state
+      | source: nil,
+        ref: nil,
+        track: nil,
+        playable: nil,
+        stream_title: nil,
+        artwork_path: nil,
+        offset_ms: 0,
+        position_bytes: nil,
+        paused?: false
+    }
+  end
+
   defp silence(%State{pipeline: nil}), do: :ok
 
   defp silence(%State{pipeline: pipeline}) do

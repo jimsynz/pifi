@@ -177,6 +177,15 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     end)
   end
 
+  defp out_of_use(module) do
+    MyHiFi.Source.enable(module, false)
+
+    on_exit(fn ->
+      {:ok, setting} = MyHiFi.Settings.fetch(MyHiFi.Source.enabled_key(module))
+      MyHiFi.Settings.delete!(setting)
+    end)
+  end
+
   setup do
     # `MyHiFi.Player` is one process for the whole node, so its state outlives a
     # test.
@@ -210,6 +219,22 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     test "a name that no source holds shows the first source", %{conn: conn} do
       assert {:error, {:live_redirect, %{to: "/browse/internet-radio"}}} =
                live(conn, ~p"/browse/gramophone")
+    end
+
+    test "a source out of use leaves the top row", %{conn: conn} do
+      out_of_use(MyHiFi.Source.Podcasts)
+
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+
+      assert has_element?(view, "#source-internet-radio")
+      refute has_element?(view, "#source-podcasts")
+    end
+
+    test "the address of a source out of use shows the first source in use", %{conn: conn} do
+      out_of_use(MyHiFi.Source.InternetRadio)
+
+      assert {:error, {:live_redirect, %{to: "/browse/podcasts"}}} =
+               live(conn, ~p"/browse/internet-radio")
     end
   end
 

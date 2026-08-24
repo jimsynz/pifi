@@ -21,6 +21,8 @@ defmodule MyHiFi.Source.InternetRadio do
   alias MyHiFi.Player.Hls
   alias MyHiFi.Player.Ogg
   alias MyHiFi.Radio
+  alias MyHiFi.Radio.Station
+  alias MyHiFi.Radio.Station.SyncFromRemote
 
   @default_limit 100
 
@@ -223,6 +225,59 @@ defmodule MyHiFi.Source.InternetRadio do
   @impl MyHiFi.Source
   def finished(_ref), do: :ok
 
+  @impl MyHiFi.Source
+  def settings do
+    [
+      %{
+        key: "countries",
+        title: "Station countries",
+        description:
+          "Name each country by its two letter code, and put a comma between them. " <>
+            "The station list holds #{stations(Ash.count!(Station))}.",
+        link: nil,
+        type: :text,
+        value: Enum.join(SyncFromRemote.configured_countries(), ", "),
+        write_only?: false
+      }
+    ]
+  end
+
+  @impl MyHiFi.Source
+  def put_settings(%{"countries" => text}) do
+    case codes(text) do
+      [] ->
+        {:error, "Name at least one country, such as NZ."}
+
+      codes ->
+        MyHiFi.Settings.put!(SyncFromRemote.countries_key(), Enum.join(codes, ","))
+
+        {:ok, "The station list covers #{Enum.join(codes, ", ")}."}
+    end
+  end
+
+  def put_settings(_values), do: {:error, "Name at least one country, such as NZ."}
+
+  @impl MyHiFi.Source
+  def settings_actions do
+    [
+      %{
+        name: "sync",
+        title: "Ask for the stations now",
+        description: "A weekly job also does this by itself.",
+        icon: :refresh
+      }
+    ]
+  end
+
+  @impl MyHiFi.Source
+  def run_settings_action("sync") do
+    AshOban.schedule(Station, :sync_from_remote)
+
+    {:ok, "The device asks for the station list of each country now."}
+  end
+
+  def run_settings_action(_name), do: {:error, "Internet radio holds no such control."}
+
   @doc """
   The codec that a station names.
 
@@ -231,6 +286,17 @@ defmodule MyHiFi.Source.InternetRadio do
   """
   @spec format(MyHiFi.Radio.Station.t()) :: :mp3 | :aac | :flac | :ogg | :unknown
   def format(%{codec: codec}), do: codec_format(codec)
+
+  defp codes(text) do
+    text
+    |> String.split(",")
+    |> Enum.map(&(&1 |> String.trim() |> String.upcase()))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp stations(1), do: "1 station"
+  defp stations(count), do: "#{count} stations"
 
   defp codec_format(nil), do: :unknown
 

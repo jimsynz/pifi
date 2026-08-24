@@ -148,12 +148,37 @@ defmodule MyHiFi.Playback.Player do
       end
     end
 
+    action :enable_source, :atom do
+      description """
+      Put a source in use, or take it out of use.
+
+      The choice stays after a restart. The player stops when the source that plays
+      goes out of use, so a person hears the change at once.
+      """
+
+      argument :source, :atom, allow_nil?: false
+      argument :enabled?, :boolean, allow_nil?: false
+
+      run fn input, _context ->
+        case MyHiFi.Player.enable_source(input.arguments.source, input.arguments.enabled?) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
     action :output, :map do
-      description "The output devices, and the one that the player uses."
+      description """
+      The output devices, the one that a person chose, and the one in use.
+
+      A person who chose nothing still hears one card, so `selected` and `in_use`
+      are different fields. See `MyHiFi.Player.output/0`.
+      """
 
       constraints fields: [
                     devices: [type: {:array, :map}, allow_nil?: false],
-                    selected: [type: :string, allow_nil?: true]
+                    selected: [type: :string, allow_nil?: true],
+                    in_use: [type: :string, allow_nil?: true]
                   ]
 
       run fn _input, _context -> {:ok, MyHiFi.Player.output()} end

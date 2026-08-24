@@ -15,11 +15,16 @@ defmodule MyHiFiWeb.CoreComponents do
   alias Phoenix.HTML.Form
   alias Phoenix.LiveView.JS
 
+  # `MyHiFi.Source` names the icon of a source, and it names the icon of each
+  # settings control of that source. Both names come from the same module, so both
+  # are drawn here.
   @source_icons %{
     cloud: "hero-cloud",
     library: "hero-rectangle-stack",
     podcast: "hero-microphone",
-    radio: "hero-signal"
+    radio: "hero-signal",
+    refresh: "hero-arrow-path",
+    remove: "hero-trash"
   }
 
   @doc """
@@ -162,11 +167,12 @@ defmodule MyHiFiWeb.CoreComponents do
   end
 
   @doc """
-  Renders the icon of a source.
+  Renders an icon that `MyHiFi.Source` names.
 
-  `MyHiFi.Source` gives the name, and this holds the drawing of it. A name that
-  this interface does not know gives a musical note, so a new source shows before
-  this list learns it.
+  A source names its own icon, and each settings control of a source names one as
+  well. `MyHiFi.Source` gives the name, and this holds the drawing of it. A name
+  that this interface does not know gives a musical note, so a new source shows
+  before this list learns it.
   """
   attr(:name, :atom, required: true)
   attr(:class, :any, default: "size-5")

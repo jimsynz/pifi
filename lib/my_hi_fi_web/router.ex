@@ -30,7 +30,12 @@ defmodule MyHiFiWeb.Router do
 
     live("/", BrowseLive)
     live("/browse/:source", BrowseLive)
-    live("/settings", SettingsLive)
+    live("/settings", SettingsLive, :menu)
+    live("/settings/output", SettingsLive, :output)
+    live("/settings/sources", SettingsLive, :sources)
+    live("/settings/sources/:source", SettingsLive, :source)
+    live("/settings/network", SettingsLive, :network)
+    live("/settings/storage", SettingsLive, :storage)
     get("/artwork/:name", ArtworkController, :show)
   end
 

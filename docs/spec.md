@@ -162,6 +162,12 @@ defmodule MyHiFi.Source do
   @type capability :: :next | :previous | :search | :skip
   @type page :: %{entries: [entry()], cursor: term() | nil}
   @type place :: %{ms: non_neg_integer(), bytes: non_neg_integer() | nil}
+  @type field :: %{key: String.t(), title: String.t(), description: String.t() | nil,
+                   link: %{href: String.t(), title: String.t()} | nil,
+                   type: :text | :password, value: String.t() | nil,
+                   write_only?: boolean()}
+  @type action :: %{name: String.t(), title: String.t(),
+                    description: String.t() | nil, icon: atom()}
   @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
                       transport: :http | :hls | :download,
                       container: :none | :mpeg_ts | :ogg,
@@ -186,14 +192,49 @@ defmodule MyHiFi.Source do
   @callback ref_to_string(ref()) :: {:ok, String.t()} | {:error, term()}
   @callback ref_from_string(String.t()) :: {:ok, ref()} | {:error, term()}
 
+  @callback settings() :: [field()]
+  @callback put_settings(%{String.t() => String.t()}) ::
+              {:ok, String.t()} | {:error, String.t()}
+  @callback settings_actions() :: [action()]
+  @callback run_settings_action(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+
+  @optional_callbacks settings: 0, put_settings: 1,
+                      settings_actions: 0, run_settings_action: 1
+
   @spec all() :: [module()]
   def all
+
+  @spec enabled() :: [module()]
+  def enabled
+
+  @spec enabled?(module()) :: boolean()
+  def enabled?(module)
+
+  @spec enable(module(), boolean()) :: :ok
+  def enable(module, enabled?)
+
+  @spec enabled_key(module()) :: String.t()
+  def enabled_key(module)
 
   @spec slug(module()) :: String.t()
   def slug(module)
 
   @spec from_slug(String.t()) :: {:ok, module()} | {:error, :not_a_source}
   def from_slug(name)
+
+  @spec settings(module()) :: [field()]
+  def settings(module)
+
+  @spec put_settings(module(), %{String.t() => String.t()}) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def put_settings(module, values)
+
+  @spec settings_actions(module()) :: [action()]
+  def settings_actions(module)
+
+  @spec run_settings_action(module(), String.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def run_settings_action(module, name)
 end
 ```
 
@@ -279,8 +320,33 @@ Notes on the behaviour:
   top row of the web interface without a change there. This callback holds the
   same rule as `title/0`: the source names what it is, and no interface holds a
   list of the sources.
+- `settings/0` names the values that a person can change for this source, and
+  `put_settings/1` writes them. `settings_actions/0` names the controls that do
+  something and change no value, and `run_settings_action/1` runs one. The four are
+  optional, so a source that needs no configuration implements none of them. **A
+  settings page therefore holds no knowledge of any source.** The countries of the
+  station list belong to internet radio, and the key of the Podcast Index belongs
+  to podcasts. See section 10.
+- A source checks its own values. "Name at least one country" and "the index
+  refused that key" are both facts of one service, so `put_settings/1` gives one
+  sentence for a person to read, and no page holds that sentence.
+- A field with `write_only?` gives no `value`. The page then shows an empty
+  control, and the secret of an index never reaches a browser. A person who changes
+  such a value writes each part of it again.
+- `link` of a field is separate from `description`, because the web interface draws
+  an anchor and the device screen can open nothing.
 - `all/0` gives every source. A new source joins that list, and each user
   interface then shows it without a change.
+- `enabled/0` gives the sources that a person left in use, and `enable/2` puts one
+  in use or takes it out of use. The state stays in the settings under
+  `enabled_key/1`, such as `source.podcasts.enabled`, and a source that no person
+  changed is in use. **A source out of use leaves each user interface, its
+  background jobs do nothing, and a restart does not select it again.**
+  `MyHiFi.Playback.enable_source/2` is what a user interface calls, because the
+  player must also stop the sound of a source that goes out of use.
+- `all/0` and `enabled/0` are two lists for two reasons. A settings page must show
+  a source that is out of use, so that a person can put it back in use. A name in
+  the settings must still name a source that a person took away.
 - `slug/1` and `from_slug/1` name a source in an address, and they read that name
   back. The name comes from the module, such as `internet-radio`, so a new source
   needs no registration. `from_slug/1` compares the name of a request with the
@@ -326,6 +392,15 @@ command and it needs no new binary.
 A device of a USB card comes first in the list. `MyHiFi.Player` uses the first
 device when the chosen one is absent, so a target with HDMI audio still uses the
 DAC.
+
+**A choice and the card in use are two facts.** `MyHiFi.Player.output/0` gives
+`selected`, which is the card that a person chose and is nil for a device that no
+person has changed, and `in_use`, which is the card that the sound comes out of.
+The two are different when a person chose nothing, and when the card that they
+chose has left the machine. One private function holds the rule, and both the
+pipeline and the report read it, so the two cannot become different answers. The
+settings page of section 10 marks `in_use`, and it says "by default" when
+`selected` is nil.
 
 `MyHiFi.Output.module/0` gives the output that the firmware uses, and
 `MyHiFi.Player` reads it each time that it needs a sink. A test sets `:output` to
@@ -486,6 +561,14 @@ commands:
 - `skip(ms)`
 - `standby(entered?)`
 - `state()`
+- `enable_source(source, enabled?)`
+
+`enable_source/2` puts a source in use, or it takes one out of use. The player owns
+this command for the same reason that it owns `select_output/1`: the choice is a
+setting, and the player must act on it at once. A play of a source out of use gives
+`{:error, :source_not_in_use}`, the sound of a source that goes out of use stops,
+and the name of its last track leaves the settings, so a restart selects nothing.
+See section 5.1.
 
 The player state holds the source, the track, the position, the pause, and the
 connexion state. The player publishes an event on each change, and a
@@ -1059,8 +1142,41 @@ Under the faceplate the interface shows one of two pages:
   follows the `:player` topic, and it compares the `ref` of the track of the player
   with the `ref` of each entry. A station that a start selected plays nothing yet,
   so it holds no marker. See section 9.
-- **Settings.** It shows the output device, the station countries, the network
-  state, and the storage state.
+- **Settings.** It is a nested menu. `/settings` holds one row for each section,
+  and each row says what that section holds. A row opens the section at an address
+  of its own, so a person can keep the address of one, and the back control of the
+  browser moves out of it.
+
+      /settings                        the menu
+      /settings/output                 the sound card
+      /settings/sources                the sources, and which ones are in use
+      /settings/sources/internet-radio one source
+      /settings/network                a report
+      /settings/storage                a report
+
+  **Each source holds a page of its own, and the page holds no knowledge of any
+  source.** Every source page draws the control that puts the source in use, and
+  every source has that control. It then draws one control for each field of
+  `settings/0` of that source, and one button for each control of
+  `settings_actions/0`. Internet radio gives the station countries and "Ask for the
+  stations now". Podcasts give the key and the secret of the index, and "Remove the
+  key". A source that needs no configuration shows the first control alone. See
+  section 5.1.
+
+  A source out of use leaves the fascia, its background jobs do nothing, and the
+  player stops if it plays that source. The list of the sources therefore holds
+  every source, and the fascia holds the ones in use.
+
+  **The output section is a single choice, and the whole row is the control.** A
+  mark at the left of each row holds the state, in the way that a radio control
+  does, and no row holds a button. The row of the card in use holds the accent
+  colour and a speaker icon. That row is the one that `in_use` of section 5.2
+  names, so a device that no person has changed still marks one card, and the row
+  then says "by default". A row that a person chose is dead, because
+  `select_output` starts the stream again and a touch on the card that already
+  plays asks for nothing. A row that is in use by default stays live, so a person
+  can make that card their own choice. A choice that names a card which left the
+  machine gets a line of its own, because the player uses the first card instead.
 
 **The accent colour comes from the artwork.** `assets/js/accent.js` is a LiveView
 hook. The browser already holds the logo, so the browser reads it: the hook draws

@@ -29,5 +29,6 @@ test*.db*
 /priv/static/favicon-*.ico
 /priv/static/robots-*.txt
 
-# The artwork cache of a host build and of a test.
-/artwork/
+# The cache of a host build and of a test. `MyHiFi.Cache` writes it beside the
+# database, so a target holds it at `/root/cache` and a host holds it here.
+/cache/

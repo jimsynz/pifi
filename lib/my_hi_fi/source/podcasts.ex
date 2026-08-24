@@ -41,6 +41,7 @@ defmodule MyHiFi.Source.Podcasts do
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Podcast.Refresh
+  alias MyHiFi.Settings
 
   @default_limit 100
 
@@ -182,6 +183,77 @@ defmodule MyHiFi.Source.Podcasts do
   end
 
   def finished(_ref), do: :ok
+
+  @impl MyHiFi.Source
+  def settings do
+    [
+      %{
+        key: "key",
+        title: "Key",
+        description: index_description(),
+        link: %{href: "https://api.podcastindex.org/signup", title: "api.podcastindex.org/signup"},
+        type: :text,
+        value: nil,
+        write_only?: true
+      },
+      %{
+        key: "secret",
+        title: "Secret",
+        description: nil,
+        link: nil,
+        type: :password,
+        value: nil,
+        write_only?: true
+      }
+    ]
+  end
+
+  # A person who changes the key writes both values again, because the page holds
+  # neither one. A key with no secret signs nothing, so a half write is no use.
+  @impl MyHiFi.Source
+  def put_settings(%{"key" => key, "secret" => secret}) do
+    with {:ok, key} <- present(key),
+         {:ok, secret} <- present(secret) do
+      Settings.put!(Index.key_setting(), key)
+      Settings.put!(Index.secret_setting(), secret)
+
+      confirmation()
+    else
+      :error -> {:error, "Give both the key and the secret."}
+    end
+  end
+
+  def put_settings(_values), do: {:error, "Give both the key and the secret."}
+
+  @impl MyHiFi.Source
+  def settings_actions do
+    if Index.configured?() do
+      [
+        %{
+          name: "remove_key",
+          title: "Remove the key",
+          description: "Your subscriptions stay, and the index finds nothing new.",
+          icon: :remove
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  @impl MyHiFi.Source
+  def run_settings_action("remove_key") do
+    for key <- [Index.key_setting(), Index.secret_setting()] do
+      case Settings.fetch(key) do
+        {:ok, setting} -> Settings.delete!(setting)
+        {:error, _reason} -> :ok
+      end
+    end
+
+    {:ok, "The device holds no key. Your subscriptions stay."}
+  end
+
+  def run_settings_action(_name), do: {:error, "Podcasts hold no such control."}
 
   # An episode holds a UUID, and a UUID holds no colon. A container needs no name,
   # because the player stores the tracks only. See `MyHiFi.Source.ref_to_string/1`.
@@ -350,5 +422,41 @@ defmodule MyHiFi.Source.Podcasts do
     next = offset + length(taken)
 
     if next < length(entries), do: page(taken, next), else: page(taken)
+  end
+
+  # A person learns now whether the key works, and not when a search fails. The
+  # category list is the smallest read of the index.
+  defp confirmation do
+    case Index.categories() do
+      {:ok, _categories} ->
+        {:ok, "The key works. Podcasts are ready."}
+
+      {:error, :key_refused} ->
+        {:error, "The index refused that key. Check both values."}
+
+      {:error, :clock_not_synchronised} ->
+        {:ok,
+         "The key is stored. The clock of the device is not right yet, so podcasts start working in a moment."}
+
+      {:error, reason} ->
+        {:error, "The key is stored, and the index did not answer: #{inspect(reason)}"}
+    end
+  end
+
+  defp index_description do
+    held =
+      if Index.configured?(),
+        do: "The device holds a key.",
+        else: "The device holds no key."
+
+    "#{held} Podcasts need a key, and a key costs no money. No other device " <>
+      "shares it, and your subscriptions play without it."
+  end
+
+  defp present(text) do
+    case String.trim(text) do
+      "" -> :error
+      trimmed -> {:ok, trimmed}
+    end
   end
 end

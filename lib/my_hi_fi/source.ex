@@ -19,6 +19,48 @@ defmodule MyHiFi.Source do
   @type capability :: :next | :previous | :search | :skip
 
   @typedoc """
+  One value of a source that a person can change.
+
+  `key` names the field to `put_settings/1`, and it is also the name of the control
+  on a page. `type` decides the control: `:text` shows what it holds, and
+  `:password` hides it.
+
+  `value` is what the source holds now, and it is nil for a field with
+  `write_only?` set. A page then shows an empty control, and it never sends the
+  value of that field to a browser.
+
+  `link` names one page that tells a person more, such as where to ask for a key.
+  It is separate from `description` because the web interface draws an anchor and
+  the device screen can open nothing.
+
+  See `c:settings/0`.
+  """
+  @type field :: %{
+          key: String.t(),
+          title: String.t(),
+          description: String.t() | nil,
+          link: %{href: String.t(), title: String.t()} | nil,
+          type: :text | :password,
+          value: String.t() | nil,
+          write_only?: boolean()
+        }
+
+  @typedoc """
+  One control of a source that does something, and changes no value.
+
+  `name` names the control to `run_settings_action/1`. `icon` works in the way that
+  `c:icon/0` does, and each user interface draws that name itself.
+
+  See `c:settings_actions/0`.
+  """
+  @type action :: %{
+          name: String.t(),
+          title: String.t(),
+          description: String.t() | nil,
+          icon: atom()
+        }
+
+  @typedoc """
   Names one entry to a source.
 
   A source chooses the shape, and no other module reads inside it. A caller passes
@@ -294,6 +336,57 @@ defmodule MyHiFi.Source do
   @callback finished(ref()) :: :ok | {:error, term()}
 
   @doc """
+  The values that a person can change for this source.
+
+  A settings page draws one control for each field, and it holds no knowledge of
+  which source it shows. The countries of the station list and the key of the
+  Podcast Index are both fields of this kind.
+
+  A source reads its own current values here, so `description` can hold a count or
+  a state that changes. `value` is nil for a field that a page must never show
+  again, such as the secret of an index, and `write_only?` then says so.
+
+  A source with nothing to change leaves this out. See `settings/1`.
+  """
+  @callback settings() :: [field()]
+
+  @doc """
+  Write the values that a person typed.
+
+  The map holds the `key` of each field of `settings/0`, and the text of it. The
+  source checks the values, writes what it accepts, and gives one sentence for a
+  person to read.
+
+  The check belongs here and not in a page. "Name at least one country" and "the
+  index refused that key" are both facts of one service, and a settings page holds
+  no knowledge of any service.
+  """
+  @callback put_settings(%{String.t() => String.t()}) ::
+              {:ok, String.t()} | {:error, String.t()}
+
+  @doc """
+  The controls of this source that do something, and change no value.
+
+  "Ask for the stations now" and "Remove the key" are both of this kind. A page
+  draws one button for each one, and `run_settings_action/1` runs it.
+
+  A source with no such control leaves this out. See `settings_actions/1`.
+  """
+  @callback settings_actions() :: [action()]
+
+  @doc """
+  Run one control of `settings_actions/0`.
+
+  The name comes from that list. The answer is one sentence for a person to read.
+  """
+  @callback run_settings_action(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+
+  @optional_callbacks settings: 0,
+                      put_settings: 1,
+                      settings_actions: 0,
+                      run_settings_action: 1
+
+  @doc """
   Every source that this firmware holds.
 
   A new source joins this list, and the web interface and the device interface then
@@ -311,6 +404,54 @@ defmodule MyHiFi.Source do
   end
 
   @doc """
+  Put a source in use, or take it out of use.
+
+  This writes the setting and nothing else. `MyHiFi.Playback.enable_source/2` is
+  what a user interface calls, because it also stops the player when the source
+  that plays goes out of use.
+  """
+  @spec enable(module(), boolean()) :: :ok
+  def enable(module, enabled?) do
+    MyHiFi.Settings.put!(enabled_key(module), to_string(enabled?))
+
+    :ok
+  end
+
+  @doc """
+  Every source that a person has left in use.
+
+  A user interface shows these, and `all/0` holds the rest as well. The two lists
+  are different because a name in the settings must still name a source that a
+  person has taken out of use, and because a settings page must be able to put one
+  back in use.
+  """
+  @spec enabled() :: [module()]
+  def enabled, do: Enum.filter(all(), &enabled?/1)
+
+  @doc """
+  Whether a person has left this source in use.
+
+  A source that no person has changed is in use, so a new source works on the
+  first start.
+  """
+  @spec enabled?(module()) :: boolean()
+  def enabled?(module) do
+    case MyHiFi.Settings.fetch(enabled_key(module)) do
+      {:ok, %{value: "false"}} -> false
+      _other -> true
+    end
+  end
+
+  @doc """
+  The settings key that says whether a source is in use.
+
+      iex> MyHiFi.Source.enabled_key(MyHiFi.Source.InternetRadio)
+      "source.internet-radio.enabled"
+  """
+  @spec enabled_key(module()) :: String.t()
+  def enabled_key(module), do: "source." <> slug(module) <> ".enabled"
+
+  @doc """
   Read a source back from its name.
 
   The name comes from a request, so this compares it with the name of each source
@@ -322,6 +463,57 @@ defmodule MyHiFi.Source do
       nil -> {:error, :not_a_source}
       module -> {:ok, module}
     end
+  end
+
+  @doc """
+  Write the values that a person typed for one source.
+
+  See `c:put_settings/1`. A source that holds no settings gives an error, so a page
+  that draws no control also writes none.
+  """
+  @spec put_settings(module(), %{String.t() => String.t()}) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def put_settings(module, values) do
+    if implements?(module, :put_settings, 1) do
+      module.put_settings(values)
+    else
+      {:error, "#{module.title()} holds nothing to change."}
+    end
+  end
+
+  @doc """
+  Run one control of one source.
+
+  See `c:run_settings_action/1`.
+  """
+  @spec run_settings_action(module(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def run_settings_action(module, name) do
+    if implements?(module, :run_settings_action, 1) do
+      module.run_settings_action(name)
+    else
+      {:error, "#{module.title()} holds no such control."}
+    end
+  end
+
+  @doc """
+  The values that a person can change for one source.
+
+  See `c:settings/0`. A source that implements no settings gives an empty list, so
+  a settings page needs no knowledge of which sources hold settings.
+  """
+  @spec settings(module()) :: [field()]
+  def settings(module) do
+    if implements?(module, :settings, 0), do: module.settings(), else: []
+  end
+
+  @doc """
+  The controls of one source that do something.
+
+  See `c:settings_actions/0`.
+  """
+  @spec settings_actions(module()) :: [action()]
+  def settings_actions(module) do
+    if implements?(module, :settings_actions, 0), do: module.settings_actions(), else: []
   end
 
   @doc """
@@ -340,5 +532,12 @@ defmodule MyHiFi.Source do
     |> List.last()
     |> Macro.underscore()
     |> String.replace("_", "-")
+  end
+
+  # `settings/0` and the three beside it are optional, so a source that holds
+  # nothing to change writes nothing. `function_exported?/3` alone answers false
+  # for a module that no call has loaded yet.
+  defp implements?(module, function, arity) do
+    Code.ensure_loaded?(module) and function_exported?(module, function, arity)
   end
 end

@@ -205,5 +205,22 @@ defmodule MyHiFi.Podcast.RefreshTest do
     test "Oban holds a worker for it" do
       assert Code.ensure_loaded?(MyHiFi.Podcast.Show.Workers.RefreshAll)
     end
+
+    test "it reads no feed when the podcast source is out of use" do
+      stub_feed(item(1))
+      subscribed = show()
+      {:ok, _show} = Podcast.subscribe(subscribed)
+
+      MyHiFi.Source.enable(MyHiFi.Source.Podcasts, false)
+
+      on_exit(fn ->
+        {:ok, setting} =
+          MyHiFi.Settings.fetch(MyHiFi.Source.enabled_key(MyHiFi.Source.Podcasts))
+
+        MyHiFi.Settings.delete!(setting)
+      end)
+
+      assert {:ok, %{read: 0, skipped?: true}} = Podcast.refresh_all_shows()
+    end
   end
 end
