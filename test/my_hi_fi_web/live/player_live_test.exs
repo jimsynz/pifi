@@ -206,4 +206,135 @@ defmodule MyHiFiWeb.PlayerLiveTest do
       assert render(player) =~ "Leave standby"
     end
   end
+
+  describe "the play control" do
+    test "it is not offered while nothing is selected", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      assert player |> element("#play-pause") |> render() =~ "disabled"
+    end
+
+    test "a track that plays offers a pause", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      Event.publish(:player, %Events.Started{track: track(), source: nil, artwork_path: nil})
+
+      html = player |> element("#play-pause") |> render()
+      assert html =~ "hero-pause"
+      assert html =~ "Pause"
+    end
+
+    test "a track that is paused offers a play", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      Event.publish(:player, %Events.Started{track: track(), source: nil, artwork_path: nil})
+      render(player)
+      Event.publish(:player, %Events.Paused{position_ms: 90_000})
+
+      html = render(player)
+      assert html =~ "Paused"
+      assert html =~ "RNZ National"
+      assert html =~ "01:30"
+
+      assert player |> element("#play-pause") |> render() =~ "hero-play"
+    end
+
+    test "a pause asks the player to pause", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      Event.publish(:player, %Events.Started{track: track(), source: nil, artwork_path: nil})
+      render(player)
+
+      assert player |> element("#play-pause") |> render_click()
+    end
+
+    # A resume begins in the middle of an episode, and the first progress event
+    # arrives one second later.
+    test "a start shows the place that the audio began at", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      Event.publish(:player, %Events.Started{
+        track: track(%{duration_ms: 600_000}),
+        source: nil,
+        artwork_path: nil,
+        position_ms: 305_000
+      })
+
+      assert render(player) =~ "05:05"
+    end
+  end
+
+  describe "the transport row of the large view" do
+    defp expanded(conn, event) do
+      {_view, player} = mount_player(conn)
+      Event.publish(:player, event)
+      render(player)
+      player |> element("#artwork-button") |> render_click()
+
+      player
+    end
+
+    test "a podcast episode holds every control", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(%{duration_ms: 600_000}),
+          source: MyHiFi.Source.Podcasts,
+          artwork_path: nil
+        })
+
+      refute player |> element("#next") |> render() =~ "disabled"
+      refute player |> element("#previous") |> render() =~ "disabled"
+      refute player |> element("#back") |> render() =~ "disabled"
+      refute player |> element("#forward") |> render() =~ "disabled"
+    end
+
+    # A radio stream has no place, so the two skip controls are dead. Next and previous
+    # move through the favourite stations.
+    test "a radio station holds no skip", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(),
+          source: MyHiFi.Source.InternetRadio,
+          artwork_path: nil,
+          live?: true
+        })
+
+      assert player |> element("#back") |> render() =~ "disabled"
+      assert player |> element("#forward") |> render() =~ "disabled"
+      refute player |> element("#next") |> render() =~ "disabled"
+      refute player |> element("#previous") |> render() =~ "disabled"
+    end
+
+    test "a source that a start did not name holds nothing", %{conn: conn} do
+      player = expanded(conn, %Events.Started{track: track(), source: nil, artwork_path: nil})
+
+      for control <- ["#next", "#previous", "#back", "#forward"] do
+        assert player |> element(control) |> render() =~ "disabled"
+      end
+    end
+
+    test "a skip control asks the player to move", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(%{duration_ms: 600_000}),
+          source: MyHiFi.Source.Podcasts,
+          artwork_path: nil
+        })
+
+      assert player |> element("#back") |> render_click()
+      assert player |> element("#forward") |> render_click()
+    end
+
+    test "next and previous ask the player to move", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(),
+          source: MyHiFi.Source.InternetRadio,
+          artwork_path: nil
+        })
+
+      assert player |> element("#next") |> render_click()
+      assert player |> element("#previous") |> render_click()
+    end
+  end
 end

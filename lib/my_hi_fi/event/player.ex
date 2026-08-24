@@ -14,16 +14,42 @@ defmodule MyHiFi.Event.Player do
     such as a radio station, gives `true`. A user interface shows that fact, and
     `duration_ms` cannot say it: a track of a known length holds no duration until
     the first progress event.
+
+    `position_ms` is where the audio began, and it is 0 for a track that began at its
+    start. A resume of an episode begins in the middle, and `Progress` arrives one
+    second later, so a user interface that held 0 until then would show the wrong time
+    for that second.
+
+    `source` names the module, so a user interface reads
+    `MyHiFi.Source.capabilities/0` of it and draws the controls that this track holds.
     """
 
     @type t :: %__MODULE__{
             source: module(),
             track: MyHiFi.Source.track(),
             artwork_path: String.t() | nil,
-            live?: boolean()
+            live?: boolean(),
+            position_ms: non_neg_integer()
           }
 
-    defstruct [:source, :track, :artwork_path, live?: false]
+    defstruct [:source, :track, :artwork_path, live?: false, position_ms: 0]
+  end
+
+  defmodule Paused do
+    @moduledoc """
+    The player stopped the audio, and the track stays selected.
+
+    A pause is not a stop. A stop leaves the device with nothing selected, and a pause
+    leaves the track in front of the person, so a user interface keeps the title and it
+    draws a play control.
+
+    `position_ms` is where the audio stopped. The player writes that place through
+    `MyHiFi.Source.store_position/2` as well, so a play begins there.
+    """
+
+    @type t :: %__MODULE__{position_ms: non_neg_integer()}
+
+    defstruct position_ms: 0
   end
 
   defmodule Stopped do

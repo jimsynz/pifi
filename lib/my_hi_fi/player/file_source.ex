@@ -37,6 +37,7 @@ defmodule MyHiFi.Player.FileSource do
 
   alias MyHiFi.Player.Download
   alias MyHiFi.Player.Mp3Frame
+  alias MyHiFi.Player.Skip
 
   # How far the reader moves before it tells the player where it is. 16 KB is about
   # one second of a 128 kbit/s episode.
@@ -172,6 +173,36 @@ defmodule MyHiFi.Player.FileSource do
   def handle_demand(:output, size, :bytes, _ctx, %State{} = state) do
     serve(%State{state | demand: state.demand + size})
   end
+
+  # A skip moves the byte that this element reads, and the pipeline keeps playing. A
+  # start of a pipeline would open the sound card again, and it would hold a silence of
+  # about one second. See `MyHiFi.Player.Skip`.
+  #
+  # The audio that already left this element still plays: the queue of the decoder and
+  # the queue of the port hold about one and a half seconds of it.
+  @impl true
+  def handle_parent_notification({:skip, _ms}, _ctx, %State{device: nil} = state) do
+    {[], state}
+  end
+
+  @impl true
+  def handle_parent_notification({:skip, ms}, _ctx, %State{} = state) do
+    case Skip.place(state.device, state.offset, ms, state.available) do
+      {:ok, place} ->
+        Membrane.Logger.info("A skip of #{ms} ms moved #{place.ms} ms, to #{place.byte}.")
+
+        {actions, state} = serve(%State{state | offset: place.byte, told: place.byte})
+
+        {[notify_parent: {:skipped, place}] ++ actions, state}
+
+      {:error, reason} ->
+        Membrane.Logger.warning("Could not skip #{ms} ms: #{inspect(reason)}")
+        {[], state}
+    end
+  end
+
+  @impl true
+  def handle_parent_notification(_notification, _ctx, %State{} = state), do: {[], state}
 
   @impl true
   def handle_info({:download, {:bytes, count}}, _ctx, %State{} = state) do

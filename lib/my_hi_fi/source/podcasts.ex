@@ -56,6 +56,12 @@ defmodule MyHiFi.Source.Podcasts do
   @impl MyHiFi.Source
   def icon, do: :podcast
 
+  # An episode is a file on the disk, so a person can move inside it.
+  # `MyHiFi.Player.Skip` reads MP3 frames, and 8771 of the 8773 episodes of the
+  # measurement hold `audio/mpeg`.
+  @impl MyHiFi.Source
+  def capabilities, do: [:next, :previous, :search, :skip]
+
   @impl MyHiFi.Source
   def root, do: :root
 
@@ -135,6 +141,16 @@ defmodule MyHiFi.Source.Podcasts do
   def resolve(ref), do: {:error, {:not_a_track, ref}}
 
   @impl MyHiFi.Source
+  def next({:episode, id}), do: sibling(id, 1)
+
+  def next(ref), do: {:error, {:not_a_track, ref}}
+
+  @impl MyHiFi.Source
+  def previous({:episode, id}), do: sibling(id, -1)
+
+  def previous(ref), do: {:error, {:not_a_track, ref}}
+
+  @impl MyHiFi.Source
   def favourite({:show, id}, true?) do
     with {:ok, show} <- Podcast.get_show(id),
          {:ok, _show} <- mark(show, true?) do
@@ -204,6 +220,29 @@ defmodule MyHiFi.Source.Podcasts do
 
   # The index gives a show, and a row gives it a `ref` that survives a restart.
   defp store(found), do: Enum.map(found, &Podcast.upsert_show_from_index!/1)
+
+  # The episodes of `browse/2`, and in the same order, so this list is the list that a
+  # person sees. It holds the newest episode first, and it has two ends.
+  defp sibling(id, step) do
+    with {:ok, episode} <- Podcast.get_episode(id),
+         episodes = Podcast.episodes_of_show!(episode.show_id),
+         index when is_integer(index) <- Enum.find_index(episodes, &(&1.id == id)) do
+      at(episodes, index + step)
+    else
+      _other -> {:error, :no_more}
+    end
+  end
+
+  # `Enum.at/2` reads a negative place from the end of a list, and the list of a show
+  # does not move round, so the newest episode has nothing before it.
+  defp at(_episodes, place) when place < 0, do: {:error, :no_more}
+
+  defp at(episodes, place) do
+    case Enum.at(episodes, place) do
+      nil -> {:error, :no_more}
+      %{id: id} -> {:ok, {:episode, id}}
+    end
+  end
 
   defp playable(episode) do
     case format(episode.mime_type) do

@@ -308,6 +308,58 @@ defmodule MyHiFi.Source.PodcastsTest do
     end
   end
 
+  describe "next and previous" do
+    setup do
+      created = show()
+
+      # `browse/2` sorts by the date, newest first, so this is the order that a person
+      # sees: the third, the second, and then the first.
+      first = episode(created, %{title: "First", published_at: ~U[2022-06-01 14:00:00Z]})
+      second = episode(created, %{title: "Second", published_at: ~U[2022-06-02 14:00:00Z]})
+      third = episode(created, %{title: "Third", published_at: ~U[2022-06-03 14:00:00Z]})
+
+      {:ok, first: first, second: second, third: third}
+    end
+
+    test "it holds an order, a search and a skip" do
+      assert Podcasts.capabilities() == [:next, :previous, :search, :skip]
+    end
+
+    test "next moves down the list", %{third: third, second: second} do
+      assert {:ok, {:episode, id}} = Podcasts.next({:episode, third.id})
+      assert id == second.id
+    end
+
+    test "previous moves up the list", %{second: second, third: third} do
+      assert {:ok, {:episode, id}} = Podcasts.previous({:episode, second.id})
+      assert id == third.id
+    end
+
+    # A list of episodes does not move round, and a person who reaches the end of a
+    # show has reached the end of it.
+    test "the list ends at the oldest episode", %{first: first} do
+      assert {:error, :no_more} = Podcasts.next({:episode, first.id})
+    end
+
+    test "the list ends at the newest episode", %{third: third} do
+      assert {:error, :no_more} = Podcasts.previous({:episode, third.id})
+    end
+
+    test "an episode of another show is not in the list", %{second: second} do
+      other = show(%{feed_url: "https://example.test/other", title: "Another show"})
+      only = episode(other, %{title: "The only one of the other show"})
+
+      assert {:error, :no_more} = Podcasts.next({:episode, only.id})
+      assert {:ok, {:episode, _id}} = Podcasts.next({:episode, second.id})
+    end
+
+    test "a ref that names no episode gives an error" do
+      assert {:error, :no_more} = Podcasts.next({:episode, Ash.UUID.generate()})
+      assert {:error, {:not_a_track, :root}} = Podcasts.next(:root)
+      assert {:error, {:not_a_track, :root}} = Podcasts.previous(:root)
+    end
+  end
+
   describe "one episode" do
     test "it describes an episode, and it names the show for the artwork" do
       created = show()

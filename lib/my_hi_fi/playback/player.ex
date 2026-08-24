@@ -25,6 +25,7 @@ defmodule MyHiFi.Playback.Player do
     stream_title: [type: :string, allow_nil?: true],
     artwork_path: [type: :string, allow_nil?: true],
     playing?: [type: :boolean, allow_nil?: false],
+    paused?: [type: :boolean, allow_nil?: false],
     standby?: [type: :boolean, allow_nil?: false],
     position_ms: [type: :integer, allow_nil?: false]
   ]
@@ -62,6 +63,71 @@ defmodule MyHiFi.Playback.Player do
       description "Stop the music."
 
       run fn _input, _context -> {:ok, MyHiFi.Player.stop()} end
+    end
+
+    action :pause, :atom do
+      description """
+      Stop the audio and keep the track, or start it again.
+
+      A pause is not a stop. A stop leaves the device with nothing selected, and a
+      pause leaves the track in front of the person. A play starts it at the place
+      that the source holds.
+      """
+
+      argument :paused?, :boolean, allow_nil?: false
+
+      run fn input, _context ->
+        case MyHiFi.Player.pause(input.arguments.paused?) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
+    action :next, :atom do
+      description """
+      Play the track after the one that plays now.
+
+      The source holds the order, and `MyHiFi.Source.capabilities/0` says whether it
+      holds one at all.
+      """
+
+      run fn _input, _context ->
+        case MyHiFi.Player.next() do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
+    action :previous, :atom do
+      description "Play the track before the one that plays now."
+
+      run fn _input, _context ->
+        case MyHiFi.Player.previous() do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
+    action :skip, :atom do
+      description """
+      Move inside the track that plays.
+
+      `ms` is signed, so a backward skip is a negative number. A track that a person
+      cannot move inside gives `:cannot_skip`, and a track that makes no sound yet
+      gives `:not_playing`.
+      """
+
+      argument :ms, :integer, allow_nil?: false
+
+      run fn input, _context ->
+        case MyHiFi.Player.skip(input.arguments.ms) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
     end
 
     action :standby, :atom do

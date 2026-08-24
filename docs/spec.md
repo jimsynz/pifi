@@ -159,6 +159,7 @@ defmodule MyHiFi.Source do
                    artwork: String.t() | nil, duration_ms: pos_integer() | nil,
                    favourite?: boolean() | nil}
   @type entry :: {:container, container()} | {:track, track()}
+  @type capability :: :next | :previous | :search | :skip
   @type page :: %{entries: [entry()], cursor: term() | nil}
   @type place :: %{ms: non_neg_integer(), bytes: non_neg_integer() | nil}
   @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
@@ -171,11 +172,14 @@ defmodule MyHiFi.Source do
 
   @callback title() :: String.t()
   @callback icon() :: atom()
+  @callback capabilities() :: [capability()]
   @callback root() :: ref()
   @callback browse(ref(), keyword()) :: {:ok, page()} | {:error, term()}
   @callback search(String.t(), keyword()) :: {:ok, page()} | {:error, term()}
   @callback track(ref()) :: {:ok, track()} | {:error, term()}
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
+  @callback next(ref()) :: {:ok, ref()} | {:error, term()}
+  @callback previous(ref()) :: {:ok, ref()} | {:error, term()}
   @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
   @callback store_position(ref(), place()) :: :ok | {:error, term()}
   @callback finished(ref()) :: :ok | {:error, term()}
@@ -198,6 +202,22 @@ Notes on the behaviour:
 - `duration_ms` is `nil` for a live stream.
 - `cursor` gives the next page. A `nil` cursor means the last page.
 - `search/2` returns `{:error, :not_supported}` if the source has no search.
+- `capabilities/0` names what the source holds, so a user interface knows which
+  controls to draw before it asks for anything. A radio stream holds no place, so
+  nothing moves through it and a skip control must be dead. The player reads the same
+  list, and a skip of a source with no `:skip` therefore reaches no pipeline.
+  `MyHiFi.Source.InternetRadio` gives `[:next, :previous, :search]`, and
+  `MyHiFi.Source.Podcasts` gives `[:next, :previous, :search, :skip]`.
+- The list names what the source holds, and not what one track holds. A source of
+  `:skip` can hold a track that a person cannot move inside, and the player refuses
+  that skip when it sees the track. A favourite is not in the list, because
+  `favourite?` on each entry is the more exact answer.
+- `next/1` and `previous/1` give the track beside this one, in the order that a person
+  sees in the browse list. Podcasts move through the episodes of the same show, and
+  internet radio moves through the favourite stations. A list of stations moves round,
+  in the way that the presets of a stereo do. A list of episodes ends, and the last
+  one gives `{:error, :no_more}`. That error and `{:error, :not_supported}` are
+  different answers, and `capabilities/0` gives the second one in advance.
 - `track/1` describes one track. The now playing screen holds a `ref` and nothing
   else, and without this callback it would have to move through the tree again to
   find what it already had.
@@ -403,7 +423,8 @@ Topic `:player`, from `MyHiFi.Player`:
 
 | Event | Fields |
 |---|---|
-| `Player.Started` | `source`, `track`, `artwork_path`, `live?` |
+| `Player.Started` | `source`, `track`, `artwork_path`, `live?`, `position_ms` |
+| `Player.Paused` | `position_ms` |
 | `Player.Stopped` | `reason` |
 | `Player.Buffering` | `percent` |
 | `Player.Progress` | `position_ms`, `duration_ms` |
@@ -442,7 +463,15 @@ knob ignores the view events. Nothing reports an error for this, because an
 ignored event is normal.
 
 `Player.Progress` arrives one time each second. A slow screen may drop the events
-that it cannot draw in time.
+that it cannot draw in time. A skip publishes one as well, as soon as the source
+reports the time that it moved, because a person who presses a skip watches the count.
+
+`Player.Started` holds `position_ms`, because a resume of an episode begins in the
+middle and the first `Player.Progress` arrives one second later.
+
+`Player.Paused` is not `Player.Stopped`. A stop leaves the device with nothing
+selected, and a pause leaves the track in front of the person, so a user interface
+keeps the title and draws a play control.
 
 ### 5.6 Player
 
@@ -451,12 +480,36 @@ commands:
 
 - `play(source, ref)`
 - `stop()`
-- `standby()`
+- `pause(paused?)`
+- `next()`
+- `previous()`
+- `skip(ms)`
+- `standby(entered?)`
 - `state()`
 
-The player state holds the source, the track, the position, and the connexion
-state. The player publishes an event on each change, and a `Player.Progress`
-event one time each second during playback.
+The player state holds the source, the track, the position, the pause, and the
+connexion state. The player publishes an event on each change, and a
+`Player.Progress` event one time each second during playback.
+
+**A pause stops the pipeline and it keeps the track selected.** A play then starts the
+pipeline at the place that the source holds, which is the resume of section 9, so a
+pause needs no mechanism of its own. A live station opens again at the current point
+of the stream, because a live stream holds no place.
+
+`state/0` gives `paused?`. A restored track is a paused track, so a boot shows the
+station and a play control. See section 9.
+
+A play leaves standby, because a person who asks for music asks the device to be
+awake. A standby that a person leaves does not start a track that they paused.
+
+`next()` and `previous()` ask the source, which owns the order. A move is a play of
+another track, so it writes the place of the track that played and it keeps the new
+track in the settings.
+
+`skip(ms)` takes a signed number of milliseconds. **It keeps the pipeline.** A start of
+a pipeline opens the sound card again and holds a silence of about one second, and a
+skip is a control that a person presses again and again, so the player calls the
+pipeline and `MyHiFi.Player.FileSource` moves the byte that it reads. See section 9.
 
 ## 6. Audio pipeline
 
@@ -874,13 +927,18 @@ audio, and a wrong offset would step over some instead.
 `live?` of the playable decides what the player does when a stream ends.
 
 - `live?: true` starts it again. A live stream that ends is a fault of the network,
-  and a person expects the music to come back.
+  and a person expects the music to come back. The player waits two seconds, and it
+  gives up after five tries. **A start that a person asks for cancels that wait.** The
+  pending start belongs to the stream that failed, and a stale one would build a second
+  pipeline beside the one that plays: the second `aplay` finds the sound card busy.
 - `live?: false` stops, publishes `Stopped{reason: :finished}`, and calls
   `finished/1` of the source. Nothing starts again, because the track is over.
 
 The player writes the place of a track through `store_position/2` when a person
-stops it, when the device enters standby, when a fault of the network ends the
-audio, and when a person chooses another output. It writes none for a track that
+stops it, when a person pauses it, when the device enters standby, when a fault of the
+network ends the audio, when a person chooses another output, and when a person plays
+something else. The last one holds a move to the next track as well, so a person who
+leaves an episode finds it where they left it. It writes none for a track that
 never began, because 0 would lose the place that the person already had. It writes
 none at the end of a track either: `finished/1` runs there, and a source that marks
 an episode played returns the place to the start itself.
@@ -910,15 +968,51 @@ and `MyHiFi.Player` holds the time, so the two come from one stop and nothing tu
 one into the other. See section 17.
 
 `MyHiFi.Source.Podcasts` writes both on the episode, and the next play opens the file
-at that byte. See section 5.6.1. No interface holds a control that moves through a
-stream.
+at that byte. See section 5.6.1.
+
+### A skip
+
+`skip(ms)` moves inside a track that plays, forward or backward. It keeps the
+pipeline: the player calls it, and `MyHiFi.Player.FileSource` moves the byte that it
+reads. Section 5.6 holds the reason.
+
+**A bitrate cannot turn a time into a byte**, so nothing here does that.
+`MyHiFi.Player.Mp3Frame` walks the frame headers of the file and adds the length of
+each frame in bytes and in time, so a forward skip is one walk and it measures a real
+span. A frame holds no pointer to the frame before it, so a backward skip chooses a
+byte from the bitrate of the audio at the current point and then walks forward to
+measure what it chose. It measures a second time when the first one lands more than a
+tenth from the request. **The time that the player then holds is measured, and never
+estimated.** `MyHiFi.Player.Skip` holds this.
+
+A skip needs four things, and a track that holds fewer gives `{:error, :cannot_skip}`:
+a source with `:skip` in `capabilities/0`, a track with an end, the `:download`
+transport, and the format `:mp3`. MP3 is not a restriction in practice: 8771 of the
+8773 episodes of the measurement hold `audio/mpeg`, and an ADTS frame needs another
+parser. A skip also needs sound, so a paused track gives `{:error, :not_playing}`.
+
+A skip that reaches past the end of what the file holds stops there. A whole file then
+ends the stream, and the source marks the track played. A file that still grows waits
+for the bytes, which is what the reader already does when the network is slower than
+the audio. A skip that reaches past the start of the file stops at the start.
+
+The audio that already left the reader still plays, so a person hears about one and a
+half seconds of the old place: the queue of the decoder holds about one second, and
+the queue of the port holds half of one. The display moves at once, because the player
+holds the count.
+
+A pause and a standby are different states. A pause belongs to a track, and a standby
+belongs to the device. A person who paused a track and then pressed standby did not
+ask for music, so leaving standby leaves that track paused. A play leaves standby,
+because a person who asks for music asks the device to be awake.
 
 On the first boot the device starts with nothing selected. It does not play.
 
 The settings hold the last station and the standby state, so both survive a
 restart. A restart selects that station and plays nothing, in the same way that a
 first boot does. A stereo that starts to play by itself after a power cut is a
-surprise.
+surprise. `state/0` reports such a track as paused, so a person reads its name and a
+play control.
 
 The settings hold a string, so a source names its own `ref` with
 `ref_to_string/1`. Nothing turns stored bytes back into a term. A changed row
@@ -958,8 +1052,8 @@ artwork, the title, the station, the second line, the time, and the two controls
 Under the faceplate the interface shows one of two pages:
 
 - **Browse.** The address names the source, such as `/browse/internet-radio`, and
-  the page then shows the tree of that source. It gives a search field, and it
-  hides that field for a source with no search. It gives a control that marks a
+  the page then shows the tree of that source. It gives a search field, and it draws
+  no such field for a source with no `:search` in `capabilities/0`. It gives a control that marks a
   track as a favourite. The favourites are a container in the tree of the source,
   so they need no page of their own. The entry that plays holds a marker: the page
   follows the `:player` topic, and it compares the `ref` of the track of the player
@@ -1382,9 +1476,10 @@ the next one: a read measured 591 such skips. A read on 2026-08-24 stepped back
 of it, and the decoder then reported one skipped byte in the place of 591.
 
 **The count that a page shows still holds the time that a person heard**, so it reads
-a second or two ahead of the sound after a resume. Making the two agree needs the
-timeline of the decoder in the place of the clock of the player, and that belongs
-with a control that moves through a track.
+a second or two ahead of the sound after a resume. A skip holds the same lead: the
+reader moves at once, and the audio that already left it plays first. Making the two
+agree needs the timeline of the decoder in the place of the clock of the player, and
+that is work of its own.
 
 ### The sample rate that this board can play, measured on 2026-08-24
 

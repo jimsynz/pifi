@@ -1,6 +1,12 @@
 defmodule MyHiFi.Player.Mp3Frame do
   @moduledoc """
-  Finds the boundary of an MP3 frame a little before a byte of a file.
+  Reads the frames of an MP3 file, to find a place inside it.
+
+  A resume needs the boundary of a frame a little before a byte. A skip needs the
+  byte that holds a time. Both come from the frame headers, and neither one needs a
+  bitrate.
+
+  ## What a resume needs
 
   A resume needs this for two reasons.
 
@@ -15,6 +21,18 @@ defmodule MyHiFi.Player.Mp3Frame do
   over a second or two of speech. A person who resumes must hear a little again, and
   never lose a word, so this steps back before it aligns.
 
+  ## What a skip needs
+
+  **A bitrate cannot turn a time into a byte.** 11 of the 46 episodes of the
+  measurement of 2026-08-24 hold more than one bitrate, and a resume that used one
+  landed as much as 1994.6 s from the mark.
+
+  A header holds the bitrate and the sample rate of its own frame, so it gives the
+  length of that frame in bytes and its length in time. `forward/4` adds both, so it
+  measures a real span of audio and it holds for a file of many bitrates as well as
+  for a file of one. `MyHiFi.Player.Skip` holds what a backward skip then does with
+  that measurement.
+
   ## Why it walks forward
 
   An MP3 frame holds no pointer to the frame before it, so the only way back is to
@@ -22,11 +40,15 @@ defmodule MyHiFi.Player.Mp3Frame do
   and a scan backwards would often stop on one of them. That is the same trap that
   MAD meets when it skips a byte at a time.
 
-  This reads a window that ends at the byte, finds a frame inside it, and walks
-  forward. A walk forward confirms itself: the length that a header gives lands
-  exactly on the next sync word, so two frames in a row name a real one. The window
-  is about 10 KB and it parses a few hundred headers, so this needs no walk of the
-  whole file.
+  `boundary_before/3` reads a window that ends at the byte, finds a frame inside it,
+  and walks forward. A walk forward confirms itself: the length that a header gives
+  lands exactly on the next sync word, so two frames in a row name a real one. The
+  window is about 10 KB and it parses a few hundred headers, so this needs no walk of
+  the whole file.
+
+  A backward skip meets the same wall, and `MyHiFi.Player.Skip` answers it in the
+  same way: it chooses a byte before the point, and it walks forward from there to
+  measure what it chose.
   """
 
   import Bitwise
@@ -47,6 +69,35 @@ defmodule MyHiFi.Player.Mp3Frame do
   # How far before the target to look for a frame. One frame of any bitrate fits in
   # this many times over, so a window that holds no frame at all holds no audio.
   @search_bytes 8192
+
+  # How much audio a probe of the bitrate walks over. One second is about 38 frames of
+  # a 128 kbit/s file, so a file whose bitrate changes gives the rate of the audio
+  # here and not the rate of one frame.
+  @probe_ms 1000
+
+  @doc """
+  The first frame boundary at or after `byte`.
+
+  `limit` is the byte to stop at. `MyHiFi.Player.FileSource` gives the count that the
+  download reports, so nothing reads a part of the file that has not arrived.
+
+  A window that holds no frame gives `{:error, :no_frame}`. That window is about 10
+  KB, and one frame of any bitrate fits in it many times over, so a window with no
+  frame holds no audio.
+  """
+  @spec boundary_at(:file.fd(), non_neg_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def boundary_at(_device, byte, limit) when byte >= limit, do: {:error, :no_frame}
+
+  def boundary_at(device, byte, limit) do
+    window_bytes = min(@search_bytes + @max_frame_bytes, limit - byte)
+
+    case :file.pread(device, byte, window_bytes) do
+      {:ok, window} -> boundary_in(window, byte)
+      :eof -> {:error, :no_frame}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   @doc """
   The last frame boundary at or before `byte` less `margin`.
@@ -75,10 +126,56 @@ defmodule MyHiFi.Player.Mp3Frame do
     end
   end
 
+  @doc """
+  How many bytes near `byte` hold `ms` of audio.
+
+  A backward skip needs a byte to begin at, and no walk goes backward. This walks one
+  second forward, which gives the bitrate of the audio here, and it scales that to the
+  time that the caller asks for.
+
+  **The answer is an estimate.** A file of one bitrate lands exactly, and a file of
+  many lands near. `MyHiFi.Player.Skip` therefore measures the span that it chooses,
+  and it reports what it measured.
+  """
+  @spec bytes_of_ms(:file.fd(), non_neg_integer(), pos_integer(), non_neg_integer()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def bytes_of_ms(device, byte, ms, limit) do
+    with {:ok, start} <- boundary_at(device, byte, limit),
+         {:ok, %{byte: reached, ms: walked}} <- forward(device, start, @probe_ms, limit) do
+      scaled(reached - start, walked, ms)
+    end
+  end
+
+  @doc """
+  Walk forward from `byte`, and give the place that the walk reaches.
+
+  It stops at the first bound that it meets: `ms` of audio, or `limit` bytes. An `ms`
+  of `:infinity` therefore measures the time between two bytes, which is what a
+  backward skip needs, and a `limit` that the walk meets first is a skip that reaches
+  the end of what the file holds.
+
+  The byte that it gives is a frame boundary, and the milliseconds are the sum of the
+  length of each frame that it stepped over. It never passes the time that the caller
+  asks for, so it lands inside one frame of it, which is 26 ms of a 44100 Hz file.
+  """
+  @spec forward(:file.fd(), non_neg_integer(), pos_integer() | :infinity, non_neg_integer()) ::
+          {:ok, %{byte: non_neg_integer(), ms: non_neg_integer()}} | {:error, term()}
+  def forward(device, byte, ms, limit) do
+    with {:ok, start} <- boundary_at(device, byte, limit) do
+      {:ok, step(device, start, ms, limit, 0)}
+    end
+  end
+
   defp boundary(window, from, limit) do
+    with {:ok, index} <- boundary_in(window, 0) do
+      {:ok, from + walk(window, index, limit)}
+    end
+  end
+
+  defp boundary_in(window, from) do
     case first_frame(window, 0) do
       nil -> {:error, :no_frame}
-      index -> {:ok, from + walk(window, index, limit)}
+      index -> {:ok, from + index}
     end
   end
 
@@ -98,8 +195,8 @@ defmodule MyHiFi.Player.Mp3Frame do
   end
 
   defp confirmed?(window, index) do
-    with {:ok, length} <- length_at(window, index),
-         {:ok, _next} <- length_at(window, index + length) do
+    with {:ok, length, _microseconds} <- frame(window, index),
+         {:ok, _next, _next_microseconds} <- frame(window, index + length) do
       true
     else
       _other -> false
@@ -109,17 +206,50 @@ defmodule MyHiFi.Player.Mp3Frame do
   # The last boundary that is not past the target. Each step is one frame, so this
   # cannot land inside one.
   defp walk(window, index, limit) do
-    case length_at(window, index) do
-      {:ok, length} when index + length <= limit -> walk(window, index + length, limit)
-      _other -> index
+    case frame(window, index) do
+      {:ok, length, _microseconds} when index + length <= limit ->
+        walk(window, index + length, limit)
+
+      _other ->
+        index
     end
   end
 
-  defp length_at(window, index) when index + 4 <= byte_size(window) do
+  # The sum is in microseconds, because one frame of a 44100 Hz file holds 26.122 ms
+  # and a walk of 30 seconds steps over 1149 of them. A sum of whole milliseconds
+  # would lose 5 seconds of that walk.
+  #
+  # `:infinity` needs no clause of its own. A number is less than an atom in the term
+  # order of Erlang, so the guard holds for it.
+  defp step(device, byte, ms, limit, microseconds) do
+    case frame_at(device, byte) do
+      {:ok, length, added}
+      when byte + length <= limit and div(microseconds + added, 1000) <= ms ->
+        step(device, byte + length, ms, limit, microseconds + added)
+
+      _other ->
+        %{byte: byte, ms: div(microseconds, 1000)}
+    end
+  end
+
+  defp scaled(_bytes, 0, _ms), do: {:error, :no_frame}
+  defp scaled(bytes, walked, ms), do: {:ok, div(bytes * ms, walked)}
+
+  # One read of four bytes for each frame. The walk of a skip of 30 seconds therefore
+  # asks the operating system 1149 times, and each answer comes from the cache of the
+  # page that the read before it brought in.
+  defp frame_at(device, byte) do
+    case :file.pread(device, byte, 4) do
+      {:ok, header} -> header(header)
+      _other -> :error
+    end
+  end
+
+  defp frame(window, index) when index + 4 <= byte_size(window) do
     window |> binary_part(index, 4) |> header()
   end
 
-  defp length_at(_window, _index), do: :error
+  defp frame(_window, _index), do: :error
 
   defp header(<<0xFF, second, third, _fourth>>) when (second &&& 0xE0) == 0xE0 do
     version = second >>> 3 &&& 0x03
@@ -131,7 +261,8 @@ defmodule MyHiFi.Player.Mp3Frame do
     with true <- layer == 0x01,
          {:ok, kilobits} <- lookup(table(version), index),
          {:ok, rate} <- rate(version, rate_index) do
-      {:ok, div(div(samples(version), 8) * kilobits * 1000, rate) + padding}
+      {:ok, div(div(samples(version), 8) * kilobits * 1000, rate) + padding,
+       div(samples(version) * 1_000_000, rate)}
     else
       _other -> :error
     end

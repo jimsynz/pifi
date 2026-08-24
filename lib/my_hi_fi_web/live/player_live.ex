@@ -17,6 +17,15 @@ defmodule MyHiFiWeb.PlayerLive do
 
   A touch on the artwork opens the large view, which fills the screen. The state
   of that view belongs to this process, because a browser tab is its own session.
+
+  The faceplate holds the standby control, the play control and the stop control.
+  The large view holds the whole transport row as well: previous, back 15 seconds,
+  play or pause, forward 30 seconds, and next. Seven round controls do not fit the
+  screen of a telephone.
+
+  A control that the source does not hold is dead. `MyHiFi.Source.capabilities/0`
+  gives that list, and a radio station therefore shows the two skip controls disabled.
+  This page holds no knowledge of any particular service.
   """
 
   use MyHiFiWeb, :live_view
@@ -33,7 +42,7 @@ defmodule MyHiFiWeb.PlayerLive do
 
     socket =
       socket
-      |> assign(:status, if(state.playing?, do: :playing, else: :idle))
+      |> assign(:status, status(state))
       |> assign(:track, state.track)
       |> assign(:standby?, state.standby?)
       |> assign(:position_ms, state.position_ms)
@@ -41,6 +50,7 @@ defmodule MyHiFiWeb.PlayerLive do
       |> assign(:stream_title, state.stream_title)
       |> assign(:artwork_path, state.artwork_path)
       |> assign(:live?, state.live?)
+      |> assign(:capabilities, capabilities(state.source))
       |> assign(:expanded?, false)
       |> assign(:reason, nil)
 
@@ -55,17 +65,25 @@ defmodule MyHiFiWeb.PlayerLive do
   end
 
   @impl Phoenix.LiveView
-  def handle_info(%Events.Started{track: track, artwork_path: artwork_path, live?: live?}, socket) do
+  def handle_info(%Events.Started{} = event, socket) do
     {:noreply,
      assign(socket,
        status: :playing,
-       track: track,
-       artwork_path: artwork_path,
-       live?: live?,
+       track: event.track,
+       artwork_path: event.artwork_path,
+       live?: event.live?,
+       capabilities: capabilities(event.source),
        stream_title: nil,
-       position_ms: 0,
+       position_ms: event.position_ms,
        reason: nil
      )}
+  end
+
+  # A pause keeps the track, so this page keeps the title and the artwork and it draws
+  # a play control. See `MyHiFi.Event.Player.Paused`.
+  @impl Phoenix.LiveView
+  def handle_info(%Events.Paused{position_ms: position}, socket) do
+    {:noreply, assign(socket, status: :paused, position_ms: position)}
   end
 
   @impl Phoenix.LiveView
@@ -95,7 +113,8 @@ defmodule MyHiFiWeb.PlayerLive do
        stream_title: nil,
        artwork_path: nil,
        position_ms: 0,
-       live?: false
+       live?: false,
+       capabilities: []
      )}
   end
 
@@ -131,6 +150,33 @@ defmodule MyHiFiWeb.PlayerLive do
   @impl Phoenix.LiveView
   def handle_event("stop", _params, socket) do
     :ok = Playback.stop!()
+    {:noreply, socket}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("play_pause", _params, socket) do
+    _result = Playback.pause(sounding?(socket.assigns))
+    {:noreply, socket}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("next", _params, socket) do
+    _result = Playback.next()
+    {:noreply, socket}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("previous", _params, socket) do
+    _result = Playback.previous()
+    {:noreply, socket}
+  end
+
+  # The player answers a control that the track does not hold with an error, and this
+  # page draws such a control dead. Nothing here shows the answer, in the same way
+  # that standby shows none.
+  @impl Phoenix.LiveView
+  def handle_event("skip", %{"ms" => ms}, socket) do
+    _result = Playback.skip(String.to_integer(ms))
     {:noreply, socket}
   end
 
@@ -189,7 +235,7 @@ defmodule MyHiFiWeb.PlayerLive do
               <p id="title" class="truncate text-[0.95rem] font-medium text-ink">
                 {@stream_title || title(@track) || "Nothing selected"}
               </p>
-              <.live_badge :if={@live?} />
+              <.live_badge :if={@live?} id="live" />
             </div>
 
             <p
@@ -205,6 +251,8 @@ defmodule MyHiFiWeb.PlayerLive do
             {elapsed(assigns)}
           </p>
         </div>
+
+        <.play_control id="play-pause" status={@status} track={@track} />
 
         <.round_control id="stop" click="stop" icon="hero-stop" label="Stop" disabled={@status == :idle} />
       </div>
@@ -247,7 +295,7 @@ defmodule MyHiFiWeb.PlayerLive do
         <div class="relative max-w-md text-center">
           <p class="flex items-center justify-center gap-2 text-xs uppercase tracking-[0.2em] text-accent">
             {status_text(assigns)}
-            <.live_badge :if={@live?} />
+            <.live_badge :if={@live?} id="expanded-live" />
           </p>
 
           <p id="expanded-title" class="mt-2 text-2xl font-medium text-ink">
@@ -262,7 +310,41 @@ defmodule MyHiFiWeb.PlayerLive do
             The player stopped: {inspect(@reason)}
           </p>
 
-          <div class="mt-6 flex items-center justify-center gap-3">
+          <div id="transport" class="mt-6 flex items-center justify-center gap-3">
+            <.round_control
+              id="previous"
+              click="previous"
+              icon="hero-backward"
+              label="The track before"
+              disabled={:previous not in @capabilities or is_nil(@track)}
+            />
+            <.round_control
+              id="back"
+              click="skip"
+              phx-value-ms="-15000"
+              icon="hero-arrow-uturn-left"
+              label="Back 15 seconds"
+              disabled={:skip not in @capabilities or @status != :playing}
+            />
+            <.play_control id="expanded-play-pause" status={@status} track={@track} class="size-14" />
+            <.round_control
+              id="forward"
+              click="skip"
+              phx-value-ms="30000"
+              icon="hero-arrow-uturn-right"
+              label="Forward 30 seconds"
+              disabled={:skip not in @capabilities or @status != :playing}
+            />
+            <.round_control
+              id="next"
+              click="next"
+              icon="hero-forward"
+              label="The track after"
+              disabled={:next not in @capabilities or is_nil(@track)}
+            />
+          </div>
+
+          <div class="mt-4 flex items-center justify-center gap-3">
             <.round_control
               id="expanded-standby"
               click="standby"
@@ -287,14 +369,39 @@ defmodule MyHiFiWeb.PlayerLive do
 
   # A stream with no end holds no length and no position of its own, so the display
   # says what it is. See `MyHiFi.Event.Player.Started`.
+  #
+  # The faceplate and the large view both draw this, and each element of a page needs
+  # its own name, so the caller gives one.
+  attr(:id, :string, required: true)
+
   defp live_badge(assigns) do
     ~H"""
     <span
-      id="live"
+      id={@id}
       class="shrink-0 rounded border border-[color-mix(in_oklab,var(--color-accent)_45%,transparent)] px-1.5 py-0.5 text-[0.6rem] font-medium uppercase tracking-[0.14em] text-accent"
     >
       Live
     </span>
+    """
+  end
+
+  # One control for play and for pause. A person presses one place, and the icon says
+  # what the press does now.
+  attr(:id, :string, required: true)
+  attr(:status, :atom, required: true)
+  attr(:track, :map, default: nil)
+  attr(:class, :any, default: "size-11")
+
+  defp play_control(assigns) do
+    ~H"""
+    <.round_control
+      id={@id}
+      click="play_pause"
+      icon={if sounding?(assigns), do: "hero-pause", else: "hero-play"}
+      label={if sounding?(assigns), do: "Pause", else: "Play"}
+      disabled={is_nil(@track)}
+      class={@class}
+    />
     """
   end
 
@@ -306,6 +413,7 @@ defmodule MyHiFiWeb.PlayerLive do
   attr(:pressed, :boolean, default: nil)
   attr(:disabled, :boolean, default: false)
   attr(:class, :any, default: "size-11")
+  attr(:rest, :global)
 
   defp round_control(assigns) do
     ~H"""
@@ -314,6 +422,7 @@ defmodule MyHiFiWeb.PlayerLive do
       type="button"
       phx-click={@click}
       disabled={@disabled}
+      {@rest}
       aria-label={@label}
       aria-pressed={not is_nil(@pressed) and to_string(@pressed)}
       class={[
@@ -345,7 +454,23 @@ defmodule MyHiFiWeb.PlayerLive do
   defp subtitle(%{subtitle: subtitle}) when is_binary(subtitle), do: subtitle
   defp subtitle(_track), do: nil
 
+  # A restored track is a paused track, so a boot shows the station and a play control.
+  # See `MyHiFi.Player`.
+  defp status(%{playing?: true}), do: :playing
+  defp status(%{paused?: true}), do: :paused
+  defp status(_state), do: :idle
+
+  # A source names what it holds, and this page draws a dead control for the rest. A
+  # started event of a test holds no source, so an absent one holds nothing.
+  defp capabilities(nil), do: []
+  defp capabilities(source), do: source.capabilities()
+
+  # Buffering makes no sound yet, and a press of the control must still stop the
+  # attempt.
+  defp sounding?(%{status: status}), do: status in [:playing, :buffering]
+
   defp status_text(%{standby?: true}), do: "Standby"
+  defp status_text(%{status: :paused}), do: "Paused"
   defp status_text(%{status: :playing}), do: "Playing"
   defp status_text(%{status: :buffering}), do: "Buffering"
   defp status_text(%{status: :failed}), do: "Stopped"

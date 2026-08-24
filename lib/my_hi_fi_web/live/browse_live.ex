@@ -346,7 +346,7 @@ defmodule MyHiFiWeb.BrowseLive do
     |> assign(:entries, [])
     |> assign(:cursor, nil)
     |> assign(:query, nil)
-    |> assign(:search?, true)
+    |> assign(:search?, :search in module.capabilities())
     |> assign(:search_form, to_form(%{"query" => ""}, as: :search))
   end
 
@@ -357,15 +357,6 @@ defmodule MyHiFiWeb.BrowseLive do
         |> assign(:entries, page.entries)
         |> assign(:cursor, page.cursor)
         |> assign(:search_form, to_form(%{"query" => socket.assigns.query || ""}, as: :search))
-
-      # A source without search hides the field. The behaviour gives no way to ask
-      # in advance, so the page asks once and remembers the answer.
-      {:error, :not_supported} ->
-        socket
-        |> assign(:search?, false)
-        |> assign(:query, nil)
-        |> put_flash(:error, "This source has no search.")
-        |> load()
 
       {:error, reason} ->
         socket

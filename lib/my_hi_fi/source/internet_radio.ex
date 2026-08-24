@@ -30,6 +30,12 @@ defmodule MyHiFi.Source.InternetRadio do
   @impl MyHiFi.Source
   def icon, do: :radio
 
+  # A radio stream is live, so a person cannot move inside it and `:skip` is not here.
+  # Next and previous move through the favourites, in the way that the preset controls
+  # of a stereo do.
+  @impl MyHiFi.Source
+  def capabilities, do: [:next, :previous, :search]
+
   @impl MyHiFi.Source
   def root, do: :root
 
@@ -104,6 +110,16 @@ defmodule MyHiFi.Source.InternetRadio do
   end
 
   def resolve(ref), do: {:error, {:not_a_track, ref}}
+
+  @impl MyHiFi.Source
+  def next({:station, id}), do: preset(id, 1)
+
+  def next(ref), do: {:error, {:not_a_track, ref}}
+
+  @impl MyHiFi.Source
+  def previous({:station, id}), do: preset(id, -1)
+
+  def previous(ref), do: {:error, {:not_a_track, ref}}
 
   # An HLS address gives a playlist, and the playlist holds the container and the
   # codec. `MyHiFi.Player.Hls` reads it. This is the one function of this module
@@ -227,6 +243,30 @@ defmodule MyHiFi.Source.InternetRadio do
       "OGG" -> :ogg
       _other -> :unknown
     end
+  end
+
+  # The favourites of `browse/2`, and in the same order, so this list is the list that
+  # a person sees. The presets of a stereo have no end, so it moves round.
+  defp preset(id, step) do
+    case Radio.favourite_stations!() do
+      [] ->
+        {:error, :no_more}
+
+      stations ->
+        found = moved(stations, Enum.find_index(stations, &(&1.id == id)), step)
+
+        {:ok, {:station, found.id}}
+    end
+  end
+
+  # A station that is not a favourite gives the first station of the list, or the last
+  # one for a step back. A person who presses a preset control wants a preset.
+  defp moved(stations, nil, step) when step > 0, do: List.first(stations)
+
+  defp moved(stations, nil, _step), do: List.last(stations)
+
+  defp moved(stations, index, step) do
+    Enum.at(stations, rem(index + step + length(stations), length(stations)))
   end
 
   defp tracks(stations, options) do

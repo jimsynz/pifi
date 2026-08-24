@@ -31,6 +31,9 @@ defmodule MyHiFi.PlayerFinishTest do
     def icon, do: :library
 
     @impl MyHiFi.Source
+    def capabilities, do: [:next, :previous, :skip]
+
+    @impl MyHiFi.Source
     def root, do: :root
 
     @impl MyHiFi.Source
@@ -55,6 +58,12 @@ defmodule MyHiFi.PlayerFinishTest do
          position_ms: position_ms()
        }}
     end
+
+    @impl MyHiFi.Source
+    def next(:only), do: {:error, :no_more}
+
+    @impl MyHiFi.Source
+    def previous(:only), do: {:error, :no_more}
 
     @impl MyHiFi.Source
     def favourite(_ref, _true?), do: {:error, :not_supported}

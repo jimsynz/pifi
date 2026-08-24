@@ -69,19 +69,30 @@ defmodule MyHiFi.Player.Pipeline do
     {[spec: spec], %{parent: options.parent}}
   end
 
-  # The sink says when sound starts, and not the source. Every transport reaches
-  # the sink, and only the sink knows that samples arrived.
   @doc """
-  Stop the sound now.
+  What the player asks of a pipeline that runs.
 
-  The player answers a person before it takes the pipeline down, so the sink becomes
-  a null sink and the teardown happens after. See `MyHiFi.Player`.
+  `:silence` stops the sound now. The player answers a person before it takes the
+  pipeline down, so the sink becomes a null sink and the teardown happens after. See
+  `MyHiFi.Player`.
+
+  `{:skip, ms}` moves the reader of the source, and the pipeline keeps playing. `ms`
+  is signed, so a backward skip is a negative number. This answers before the source
+  reads the disk, and the source reports the time that it really moved. See
+  `MyHiFi.Player.Skip`.
   """
   @impl true
   def handle_call(:silence, _ctx, state) do
     {[reply: :ok, notify_child: {:sink, :silence}], state}
   end
 
+  @impl true
+  def handle_call({:skip, ms}, _ctx, state) do
+    {[reply: :ok, notify_child: {:source, {:skip, ms}}], state}
+  end
+
+  # The sink says when sound starts, and not the source. Every transport reaches
+  # the sink, and only the sink knows that samples arrived.
   @impl true
   def handle_child_notification(:playing, :sink, _ctx, state) do
     send(state.parent, {:pipeline_playing, self()})
@@ -97,6 +108,12 @@ defmodule MyHiFi.Player.Pipeline do
   @impl true
   def handle_child_notification({:position_bytes, bytes}, :source, _ctx, state) do
     send(state.parent, {:pipeline_position_bytes, self(), bytes})
+    {[], state}
+  end
+
+  @impl true
+  def handle_child_notification({:skipped, place}, :source, _ctx, state) do
+    send(state.parent, {:pipeline_skipped, self(), place})
     {[], state}
   end
 

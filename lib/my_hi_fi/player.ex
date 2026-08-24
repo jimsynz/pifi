@@ -10,6 +10,20 @@ defmodule MyHiFi.Player do
   `MyHiFi.Event.Player`. Nothing reads the state of this process directly, apart
   from `state/0` for a person at the console.
 
+  ## The controls
+
+  A pause stops the pipeline and it keeps the track selected, so a play starts the
+  pipeline again at the place that the source holds. That is the resume of section 9 of
+  the specification, and a pause therefore needs no mechanism of its own.
+
+  A skip keeps the pipeline. It moves the byte that `MyHiFi.Player.FileSource` reads,
+  because a start of a pipeline opens the sound card again and holds a silence of about
+  one second. See `MyHiFi.Player.Skip`.
+
+  Next and previous ask the source, which owns the order that a person sees. See
+  `MyHiFi.Source.next/1`, and `MyHiFi.Source.capabilities/0` for the control that each
+  source holds.
+
   A live stream ends when the network fails, and a person expects the music to
   come back. The player therefore starts the stream again after a short wait, and
   it gives up after a few tries.
@@ -34,6 +48,10 @@ defmodule MyHiFi.Player do
   # terminate takes it. A stop of an HLS stream took 360 ms on 2026-08-24.
   @silence_timeout :timer.seconds(1)
   @max_restarts 5
+
+  # A skip answers before the source reads the disk, so a pipeline that does not answer
+  # this is a pipeline that is already wedged.
+  @skip_timeout :timer.seconds(5)
   @output_device_key "output_device"
   @last_source_key "last_source"
   @last_ref_key "last_ref"
@@ -55,6 +73,8 @@ defmodule MyHiFi.Player do
             offset_ms: non_neg_integer(),
             position_bytes: non_neg_integer() | nil,
             restarts: non_neg_integer(),
+            restart_timer: reference() | nil,
+            paused?: boolean(),
             standby?: boolean()
           }
 
@@ -70,6 +90,8 @@ defmodule MyHiFi.Player do
               offset_ms: 0,
               position_bytes: nil,
               restarts: 0,
+              restart_timer: nil,
+              paused?: false,
               standby?: false
   end
 
@@ -90,6 +112,51 @@ defmodule MyHiFi.Player do
   @doc "Stop the music."
   @spec stop() :: :ok
   def stop, do: GenServer.call(__MODULE__, :stop)
+
+  @doc """
+  Stop the audio and keep the track, or start it again.
+
+  A pause is not a stop. A stop leaves the device with nothing selected, and a pause
+  leaves the track in front of the person.
+
+  A play starts the track at the place that the source holds, so a podcast episode
+  continues and a live station opens again at the current point of the stream. A play
+  also leaves standby, because a person who asks for music asks the device to be
+  awake.
+  """
+  @spec pause(boolean()) :: :ok | {:error, term()}
+  def pause(paused?), do: GenServer.call(__MODULE__, {:pause, paused?}, :timer.seconds(30))
+
+  @doc """
+  Play the track after the one that plays now.
+
+  The source holds the order. See `MyHiFi.Source.next/1`.
+  """
+  @spec next() :: :ok | {:error, term()}
+  def next, do: GenServer.call(__MODULE__, {:move, :next}, :timer.seconds(30))
+
+  @doc """
+  Play the track before the one that plays now.
+
+  The source holds the order. See `MyHiFi.Source.previous/1`.
+  """
+  @spec previous() :: :ok | {:error, term()}
+  def previous, do: GenServer.call(__MODULE__, {:move, :previous}, :timer.seconds(30))
+
+  @doc """
+  Move inside the track that plays.
+
+  `ms` is signed, so a backward skip is a negative number. The pipeline keeps playing,
+  and the source reports the time that it really moved, which arrives as a
+  `MyHiFi.Event.Player.Progress` event.
+
+  A track that a person cannot move inside gives `{:error, :cannot_skip}`: a live
+  stream holds no place, a source may hold no skip at all, and
+  `MyHiFi.Player.Skip` reads MP3 frames alone. A track that makes no sound yet gives
+  `{:error, :not_playing}`, and a pause therefore holds no skip.
+  """
+  @spec skip(integer()) :: :ok | {:error, term()}
+  def skip(ms), do: GenServer.call(__MODULE__, {:skip, ms})
 
   @doc """
   Enter standby, or leave it.
@@ -145,7 +212,8 @@ defmodule MyHiFi.Player do
   @impl GenServer
   def handle_continue({:terminate, pipeline, monitor}, %State{} = state) do
     stop_pipeline(%State{state | pipeline: pipeline, monitor: monitor})
-    {:noreply, %State{state | pipeline: nil, monitor: nil, started_at: nil}}
+
+    {:noreply, %State{cancel_restart(state) | pipeline: nil, monitor: nil, started_at: nil}}
   end
 
   @impl GenServer
@@ -153,8 +221,11 @@ defmodule MyHiFi.Player do
     {:noreply, restore_station(%State{state | standby?: stored_standby?()})}
   end
 
+  # The place of the track that plays now goes to its source first. A person who picks
+  # another episode, or the next one, must find this one where they left it.
   @impl GenServer
   def handle_call({:play, source, ref}, _from, %State{} = state) do
+    store_position(state)
     state = stop_pipeline(state)
 
     case start(source, ref, state) do
@@ -185,8 +256,87 @@ defmodule MyHiFi.Player do
          stream_title: nil,
          artwork_path: nil,
          offset_ms: 0,
-         position_bytes: nil
+         position_bytes: nil,
+         paused?: false
      }, {:continue, {:terminate, state.pipeline, state.monitor}}}
+  end
+
+  # A pause holds a track for a person, so a device with nothing selected has nothing
+  # to pause.
+  @impl GenServer
+  def handle_call({:pause, true}, _from, %State{source: nil} = state) do
+    {:reply, :ok, state}
+  end
+
+  @impl GenServer
+  def handle_call({:pause, true}, _from, %State{pipeline: nil} = state) do
+    {:reply, :ok, %State{state | paused?: true}}
+  end
+
+  # `offset_ms` holds the place, because the terminate below clears `started_at` and
+  # `position_ms/1` then counts from the offset alone. A page that opens while the
+  # device is paused therefore reads the place that a person stopped at.
+  @impl GenServer
+  def handle_call({:pause, true}, _from, %State{} = state) do
+    store_position(state)
+    silence(state)
+    Event.publish(:player, %Events.Paused{position_ms: position_ms(state)})
+
+    {:reply, :ok, %State{state | paused?: true, stream_title: nil, offset_ms: position_ms(state)},
+     {:continue, {:terminate, state.pipeline, state.monitor}}}
+  end
+
+  @impl GenServer
+  def handle_call({:pause, false}, _from, %State{source: nil} = state) do
+    {:reply, {:error, :nothing_selected}, %State{state | paused?: false}}
+  end
+
+  @impl GenServer
+  def handle_call({:pause, false}, _from, %State{pipeline: pipeline} = state)
+      when pipeline != nil do
+    {:reply, :ok, %State{state | paused?: false}}
+  end
+
+  @impl GenServer
+  def handle_call({:pause, false}, _from, %State{} = state) do
+    state = waking(state)
+
+    case start(state.source, state.ref, state) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_call({:move, _direction}, _from, %State{source: nil} = state) do
+    {:reply, {:error, :nothing_selected}, state}
+  end
+
+  # A move is a play of another track of the same source, so this gives the work to the
+  # clause that plays one. That clause writes the place of this track, it stops the
+  # pipeline, and it keeps the new track in the settings.
+  @impl GenServer
+  def handle_call({:move, direction}, from, %State{} = state) do
+    with :ok <- held(state.source, direction),
+         {:ok, ref} <- beside(state, direction) do
+      handle_call({:play, state.source, ref}, from, waking(state))
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_call({:skip, _ms}, _from, %State{started_at: nil} = state) do
+    {:reply, {:error, :not_playing}, state}
+  end
+
+  @impl GenServer
+  def handle_call({:skip, ms}, _from, %State{} = state) do
+    if skippable?(state) do
+      {:reply, ask_skip(state, ms), state}
+    else
+      {:reply, {:error, :cannot_skip}, state}
+    end
   end
 
   @impl GenServer
@@ -202,17 +352,21 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_call({:standby, false}, _from, %State{source: nil} = state) do
-    Settings.put(@standby_key, "false")
-    Event.publish(:player, %Events.Standby{entered?: false})
-    {:reply, :ok, %State{state | standby?: false}}
+    {:reply, :ok, waking(state)}
+  end
+
+  # A person who paused a track and then pressed standby did not ask for music, so
+  # leaving standby leaves that track paused. A play starts it.
+  @impl GenServer
+  def handle_call({:standby, false}, _from, %State{paused?: true} = state) do
+    {:reply, :ok, waking(state)}
   end
 
   @impl GenServer
   def handle_call({:standby, false}, _from, %State{} = state) do
-    Settings.put(@standby_key, "false")
-    Event.publish(:player, %Events.Standby{entered?: false})
+    state = waking(state)
 
-    case start(state.source, state.ref, %State{state | standby?: false}) do
+    case start(state.source, state.ref, state) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
@@ -227,6 +381,7 @@ defmodule MyHiFi.Player do
        stream_title: state.stream_title,
        artwork_path: state.artwork_path,
        playing?: state.started_at != nil,
+       paused?: state.paused?,
        standby?: state.standby?,
        position_ms: position_ms(state),
        live?: live?(state)
@@ -273,7 +428,8 @@ defmodule MyHiFi.Player do
       source: state.source,
       track: state.track,
       artwork_path: artwork_path,
-      live?: live?(state)
+      live?: live?(state),
+      position_ms: position_ms(state)
     })
 
     schedule_progress()
@@ -297,6 +453,26 @@ defmodule MyHiFi.Player do
   @impl GenServer
   def handle_info({:pipeline_position_bytes, pipeline, bytes}, %State{pipeline: pipeline} = state) do
     {:noreply, %State{state | position_bytes: bytes}}
+  end
+
+  # The element measured the time that it moved, so the count of the player follows it
+  # and no part of this firmware turns a byte into a time. The progress event goes out
+  # here and not one second later, because a person who presses a skip watches the
+  # count.
+  @impl GenServer
+  def handle_info({:pipeline_skipped, pipeline, place}, %State{pipeline: pipeline} = state) do
+    state = %State{
+      state
+      | offset_ms: state.offset_ms + place.ms,
+        position_bytes: place.byte
+    }
+
+    Event.publish(:player, %Events.Progress{
+      position_ms: position_ms(state),
+      duration_ms: state.track && state.track.duration_ms
+    })
+
+    {:noreply, state}
   end
 
   @impl GenServer
@@ -344,6 +520,8 @@ defmodule MyHiFi.Player do
   end
 
   defp start(source, ref, %State{} = state) do
+    state = cancel_restart(state)
+
     with {:ok, playable} <- source.resolve(ref),
          {:ok, track} <- source.track(ref),
          {:ok, sink} <- sink(state) do
@@ -370,7 +548,8 @@ defmodule MyHiFi.Player do
                artwork_path: nil,
                started_at: nil,
                offset_ms: playable.position_ms,
-               position_bytes: playable[:position_bytes]
+               position_bytes: playable[:position_bytes],
+               paused?: false
            }}
 
         {:error, reason} ->
@@ -440,6 +619,48 @@ defmodule MyHiFi.Player do
   defp live?(%State{playable: %{live?: live?}}), do: live?
   defp live?(%State{}), do: false
 
+  # A person asked for music, so the device is awake. A stereo that a person presses
+  # play on leaves standby, and this device does the same.
+  defp waking(%State{standby?: false} = state), do: state
+
+  defp waking(%State{} = state) do
+    Settings.put(@standby_key, "false")
+    Event.publish(:player, %Events.Standby{entered?: false})
+    %State{state | standby?: false}
+  end
+
+  # The source owns the order, and `capabilities/0` says whether it holds one at all.
+  # A user interface reads the same list, so a control that gives this error is a
+  # control that the interface drew dead.
+  defp held(source, direction) do
+    if direction in source.capabilities(), do: :ok, else: {:error, :not_supported}
+  end
+
+  defp beside(%State{source: source, ref: ref}, :next), do: source.next(ref)
+  defp beside(%State{source: source, ref: ref}, :previous), do: source.previous(ref)
+
+  # A skip needs four things: a source that holds one, a track with an end, a file to
+  # read, and a format that `MyHiFi.Player.Skip` reads. `:download` is the transport
+  # that gives the file, and `MyHiFi.Player.FileSource` is the element that moves. All
+  # four give one answer to a person: this track holds no skip.
+  defp skippable?(%State{
+         source: source,
+         playable: %{live?: false, transport: :download, format: :mp3}
+       }) do
+    :skip in source.capabilities()
+  end
+
+  defp skippable?(%State{}), do: false
+
+  defp ask_skip(%State{pipeline: pipeline}, ms) do
+    Membrane.Pipeline.call(pipeline, {:skip, ms}, @skip_timeout)
+    :ok
+  catch
+    :exit, _reason ->
+      Logger.warning("The pipeline did not answer a skip.")
+      {:error, :not_playing}
+  end
+
   defp chosen_device do
     case Settings.fetch(@output_device_key) do
       {:ok, %{value: value}} -> value
@@ -461,12 +682,15 @@ defmodule MyHiFi.Player do
     end
   end
 
+  # A restored track is a paused track. A person then reads the name of the station
+  # and a play control, and section 9 asks for that: the device selects the station and
+  # plays nothing.
   defp restore_station(%State{} = state) do
     with {:ok, source} <- stored_source(),
          {:ok, name} <- stored_value(@last_ref_key),
          {:ok, ref} <- source.ref_from_string(name),
          {:ok, track} <- source.track(ref) do
-      %State{state | source: source, ref: ref, track: track}
+      %State{state | source: source, ref: ref, track: track, paused?: true}
     else
       _other -> state
     end
@@ -559,8 +783,27 @@ defmodule MyHiFi.Player do
     store_position(state)
     state = stop_pipeline(state)
     Event.publish(:player, %Events.Buffering{percent: 0})
-    Process.send_after(self(), :restart, @restart_delay)
-    %State{state | restarts: state.restarts + 1}
+
+    %State{
+      state
+      | restarts: state.restarts + 1,
+        restart_timer: Process.send_after(self(), :restart, @restart_delay)
+    }
+  end
+
+  # **A pending restart belongs to the stream that failed.** Anything that a person
+  # then asks for supersedes it, so a start and a stop each cancel it.
+  #
+  # Without this the timer of a lost stream reaches a player that already plays
+  # something else, and `handle_info(:restart, …)` then starts a second pipeline beside
+  # the one that runs. The second `aplay` finds the card busy, its sink breaks with
+  # `:epipe`, and a person who changed station inside the two seconds of the delay
+  # hears nothing.
+  defp cancel_restart(%State{restart_timer: nil} = state), do: state
+
+  defp cancel_restart(%State{restart_timer: timer} = state) do
+    Process.cancel_timer(timer)
+    %State{state | restart_timer: nil}
   end
 
   defp fail(reason, %State{} = state) do

@@ -22,6 +22,9 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     def icon, do: :library
 
     @impl MyHiFi.Source
+    def capabilities, do: []
+
+    @impl MyHiFi.Source
     def root, do: :root
 
     @impl MyHiFi.Source
@@ -31,6 +34,12 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     @impl MyHiFi.Source
     def search(_query, _options), do: {:error, :not_supported}
+
+    @impl MyHiFi.Source
+    def next(_ref), do: {:error, :not_supported}
+
+    @impl MyHiFi.Source
+    def previous(_ref), do: {:error, :not_supported}
 
     @impl MyHiFi.Source
     def track(:only), do: {:ok, track()}
@@ -84,6 +93,9 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     def icon, do: :podcast
 
     @impl MyHiFi.Source
+    def capabilities, do: []
+
+    @impl MyHiFi.Source
     def root, do: :root
 
     @impl MyHiFi.Source
@@ -102,6 +114,12 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     @impl MyHiFi.Source
     def search(_query, _options), do: {:error, :not_supported}
+
+    @impl MyHiFi.Source
+    def next(_ref), do: {:error, :not_supported}
+
+    @impl MyHiFi.Source
+    def previous(_ref), do: {:error, :not_supported}
 
     @impl MyHiFi.Source
     def track(ref), do: {:error, {:not_a_track, ref}}
@@ -276,18 +294,21 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       assert html =~ "Favourites"
     end
 
-    test "the field goes away for a source with no search", %{conn: conn} do
+    # `MyHiFi.Source.capabilities/0` answers this before the page asks for anything, so
+    # the field is never drawn and no person meets an error.
+    test "the field is not drawn for a source with no search", %{conn: conn} do
       use_source(PlainSource)
 
-      {:ok, view, _html} = live(conn, ~p"/browse/plain-source")
+      {:ok, view, html} = live(conn, ~p"/browse/plain-source")
 
-      assert has_element?(view, "#search-form")
-
-      html = view |> form("#search-form", search: %{query: "anything"}) |> render_submit()
-
-      assert html =~ "This source has no search."
       refute has_element?(view, "#search-form")
       assert html =~ "One track"
+    end
+
+    test "the field is drawn for a source that holds a search", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+
+      assert has_element?(view, "#search-form")
     end
   end
 

@@ -87,6 +87,15 @@ Licence: Apache-2.0.
   shared workflow then sets `NBPR_BUILD_BACKEND=shell` and installs the four
   Buildroot packages that the image lacks. A new version of the system starts a
   new build of every `nbpr_*` package, and that build takes 10 minutes.
+- **A skip moves the reader, and it does not start a pipeline again.**
+  `MyHiFi.Output.APlaySink` starts `aplay` for each pipeline, `aplay` opens the sound
+  card, and the card is the part of this board that fails. A start also holds a silence
+  of about one second, and a skip is a control that a person presses again and again.
+  The player therefore calls the pipeline and `MyHiFi.Player.FileSource` moves the byte
+  that it reads. **A skip needs no bitrate either:** `MyHiFi.Player.Mp3Frame` walks the
+  frame headers and `MyHiFi.Player.Skip` measures the span that it lands on, because 11
+  of 46 real episodes hold more than one bitrate. This holds for MP3 alone, and 8771 of
+  8773 measured episodes hold `audio/mpeg`.
 - **A peripheral renders itself.** Do not build a central renderer and do not
   send pixels or frames to a screen. Send it typed events. A 128 by 64
   monochrome screen and a 320 by 240 colour screen need different layouts, and

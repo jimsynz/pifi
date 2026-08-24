@@ -122,6 +122,68 @@ defmodule MyHiFi.Source.InternetRadioTest do
     end
   end
 
+  describe "what this source holds" do
+    test "it holds an order and a search, and no skip" do
+      # A radio stream is live, so there is no place to move to.
+      assert InternetRadio.capabilities() == [:next, :previous, :search]
+    end
+  end
+
+  describe "next and previous" do
+    setup do
+      first = station(%{title: "A first"})
+      second = station(%{title: "B second"})
+      third = station(%{title: "C third"})
+
+      for created <- [first, second, third], do: Radio.set_favourite!(created)
+
+      {:ok, first: first, second: second, third: third}
+    end
+
+    test "next gives the favourite after this one", %{first: first, second: second} do
+      assert {:ok, {:station, id}} = InternetRadio.next({:station, first.id})
+      assert id == second.id
+    end
+
+    test "previous gives the favourite before this one", %{first: first, second: second} do
+      assert {:ok, {:station, id}} = InternetRadio.previous({:station, second.id})
+      assert id == first.id
+    end
+
+    # The presets of a stereo have no end.
+    test "the list moves round at both ends", %{first: first, third: third} do
+      assert {:ok, {:station, id}} = InternetRadio.next({:station, third.id})
+      assert id == first.id
+
+      assert {:ok, {:station, id}} = InternetRadio.previous({:station, first.id})
+      assert id == third.id
+    end
+
+    test "a station that is not a favourite reaches the list", %{first: first, third: third} do
+      other = station(%{title: "Not a favourite"})
+
+      assert {:ok, {:station, id}} = InternetRadio.next({:station, other.id})
+      assert id == first.id
+
+      assert {:ok, {:station, id}} = InternetRadio.previous({:station, other.id})
+      assert id == third.id
+    end
+
+    test "a ref that names no station gives an error" do
+      assert {:error, {:not_a_track, :root}} = InternetRadio.next(:root)
+      assert {:error, {:not_a_track, :root}} = InternetRadio.previous(:root)
+    end
+  end
+
+  describe "next and previous with no favourite" do
+    test "they give an error, because there is no list" do
+      created = station()
+
+      assert {:error, :no_more} = InternetRadio.next({:station, created.id})
+      assert {:error, :no_more} = InternetRadio.previous({:station, created.id})
+    end
+  end
+
   describe "browse/2 with an unknown container" do
     test "gives an error and does not fail" do
       assert {:error, {:no_such_container, :nonsense}} = InternetRadio.browse(:nonsense)

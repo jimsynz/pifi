@@ -12,6 +12,13 @@ defmodule MyHiFi.Source do
   """
 
   @typedoc """
+  What a source holds, beyond the tree that every source holds.
+
+  See `c:capabilities/0`.
+  """
+  @type capability :: :next | :previous | :search | :skip
+
+  @typedoc """
   Names one entry to a source.
 
   A source chooses the shape, and no other module reads inside it. A caller passes
@@ -136,6 +143,31 @@ defmodule MyHiFi.Source do
   """
   @callback icon() :: atom()
 
+  @doc """
+  What this source holds, so a user interface knows which controls to draw.
+
+  A radio station holds no place, so nothing moves through it and a skip control must
+  be dead. A user interface cannot work that out, and it must not hold a list of the
+  sources, so the source says it.
+
+  - `:next` and `:previous` name the order that `next/1` and `previous/1` move
+    through.
+  - `:search` names `search/2`.
+  - `:skip` names a track that a person can move inside.
+
+  `MyHiFi.Player` reads this list as well. A skip of a source with no `:skip` gives
+  `{:error, :cannot_skip}` and it reaches no pipeline, so the list is one fact and not
+  a copy in each interface.
+
+  This names what the source holds, and not what one track holds. A source of `:skip`
+  can still hold a track that a person cannot move inside, and the player refuses that
+  skip when it sees the track.
+
+  A favourite is not in this list. Each entry carries `favourite?`, and that answer is
+  the more exact one: internet radio marks a track and podcasts mark a container.
+  """
+  @callback capabilities() :: [capability()]
+
   @doc "The entry at the top of the tree."
   @callback root() :: ref()
 
@@ -164,6 +196,29 @@ defmodule MyHiFi.Source do
 
   @doc "Turn a track into something that the player can play."
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
+
+  @doc """
+  The track after this one.
+
+  The order is the one that a person sees in the browse list, because that is the
+  order that they asked for. Podcasts move through the episodes of the same show, and
+  internet radio moves through the favourite stations.
+
+  A list of stations moves round, in the way that the presets of a stereo do. A list
+  of episodes ends, and the last one gives `{:error, :no_more}`.
+
+  `{:error, :no_more}` and `{:error, :not_supported}` are different answers. A source
+  with no order gives the second one, and `capabilities/0` says so before a caller
+  asks.
+  """
+  @callback next(ref()) :: {:ok, ref()} | {:error, term()}
+
+  @doc """
+  The track before this one.
+
+  See `next/1` for the order, and for the two errors.
+  """
+  @callback previous(ref()) :: {:ok, ref()} | {:error, term()}
 
   @doc """
   Give a `ref` a name that a caller can store.

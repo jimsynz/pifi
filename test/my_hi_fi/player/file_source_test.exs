@@ -280,4 +280,108 @@ defmodule MyHiFi.Player.FileSourceTest do
       assert payloads(actions) == "89"
     end
   end
+
+  describe "a skip" do
+    defp mp3_state(path, frames, overrides) do
+      contents = mp3(frames)
+      File.write!(path, contents)
+      {:ok, device} = :file.open(path, [:read, :binary, :raw])
+
+      Map.merge(
+        %State{
+          key: "episode-1",
+          uri: "https://example.test/episode.mp3",
+          device: device,
+          available: byte_size(contents),
+          buffer_bytes: @buffer_bytes,
+          filling?: false
+        },
+        overrides
+      )
+    end
+
+    defp skipped(actions) do
+      Enum.find_value(actions, fn
+        {:notify_parent, {:skipped, place}} -> place
+        _other -> nil
+      end)
+    end
+
+    test "a skip forward moves the reader", %{path: path} do
+      state = mp3_state(path, 2000, %{offset: 100 * @frame_bytes})
+
+      assert {actions, state} = FileSource.handle_parent_notification({:skip, 15_000}, nil, state)
+
+      assert %{byte: byte, ms: ms} = skipped(actions)
+      assert byte > 100 * @frame_bytes
+      assert byte == state.offset
+      assert_in_delta ms, 15_000, 30
+    end
+
+    test "a skip backward moves the reader", %{path: path} do
+      state = mp3_state(path, 2000, %{offset: 1000 * @frame_bytes})
+
+      assert {actions, state} =
+               FileSource.handle_parent_notification({:skip, -15_000}, nil, state)
+
+      assert %{byte: byte, ms: ms} = skipped(actions)
+      assert byte < 1000 * @frame_bytes
+      assert byte == state.offset
+      assert_in_delta ms, -15_000, 30
+    end
+
+    # The player writes this byte beside the time when a person stops, so a skip must
+    # move the count that the element reports as well as the byte that it reads.
+    test "the next report of the place comes from the new byte", %{path: path} do
+      state = mp3_state(path, 2000, %{offset: 1000 * @frame_bytes, told: 1000 * @frame_bytes})
+
+      assert {_actions, state} =
+               FileSource.handle_parent_notification({:skip, -15_000}, nil, state)
+
+      assert state.told == state.offset
+    end
+
+    test "a demand after a skip reads the new place", %{path: path} do
+      state = mp3_state(path, 2000, %{offset: 0})
+
+      assert {_actions, state} =
+               FileSource.handle_parent_notification({:skip, 15_000}, nil, state)
+
+      assert {actions, _state} = FileSource.handle_demand(:output, 4, :bytes, nil, state)
+
+      assert payloads(actions) == @header
+    end
+
+    test "a skip forward past the end of the file stops at the end", %{path: path} do
+      state = mp3_state(path, 100, %{offset: 90 * @frame_bytes})
+
+      assert {actions, state} = FileSource.handle_parent_notification({:skip, 60_000}, nil, state)
+
+      assert %{byte: byte} = skipped(actions)
+      assert byte == 100 * @frame_bytes
+      assert state.offset == byte
+    end
+
+    test "a file that holds no frame moves nothing", %{path: path} do
+      state = playing(path, :binary.copy(<<0>>, 100_000), %{offset: 50_000})
+
+      assert {[], state} = FileSource.handle_parent_notification({:skip, 15_000}, nil, state)
+      assert state.offset == 50_000
+    end
+
+    # The notification and the open of the file can race, and the player refuses a
+    # skip before the sound starts.
+    test "a skip before the file is open moves nothing", %{path: path} do
+      state = mp3_state(path, 100, %{device: nil, offset: 500})
+
+      assert {[], state} = FileSource.handle_parent_notification({:skip, 15_000}, nil, state)
+      assert state.offset == 500
+    end
+
+    test "it holds no opinion about any other notification", %{path: path} do
+      state = playing(path, "some audio")
+
+      assert {[], ^state} = FileSource.handle_parent_notification(:something_else, nil, state)
+    end
+  end
 end

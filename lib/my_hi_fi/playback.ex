@@ -19,6 +19,10 @@ defmodule MyHiFi.Playback do
       define :state, action: :state
       define :play, action: :play, args: [:source, :ref]
       define :stop, action: :stop
+      define :pause, action: :pause, args: [:paused?]
+      define :next, action: :next
+      define :previous, action: :previous
+      define :skip, action: :skip, args: [:ms]
       define :standby, action: :standby, args: [:entered?]
       define :output, action: :output
       define :select_output, action: :select_output, args: [:id]
