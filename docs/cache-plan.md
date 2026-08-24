@@ -1,7 +1,7 @@
 # Plan: one cache on disk, for any part of the firmware
 
 - Date: 2026-08-23
-- Status: steps 1 to 6 and 8 are done. Step 7 needs the board.
+- Status: every step is done. Step 7 was measured on the board on 2026-08-24.
 - Language: this document uses ASD-STE100 Simplified Technical English.
 
 ## 1. Purpose
@@ -224,7 +224,7 @@ caller that knows. A cache that is full of entries that it may not evict gives
 | `ash_storage` is not released | The API iterates, and this firmware would hold a git reference to a moving target. A breaking change arrives with a `mix deps.update`. | Pin a reference, as `vintage_net_wizard` is pinned. Read the change list before each move. Accept that this is the largest risk of this plan. |
 | Three resources | The data model holds five resources today, and this adds three for a cache of pictures. | Measure the migration and the compile time. Keep `MyHiFi.Cache` as the only door, so the resources stay behind it and a later change of mind costs one module. |
 | Serving any type from `'self'` | A generic cache holds any bytes. A generic route that served them would give stored XSS on the origin of the device. | The route stays the route of artwork, and it serves the four image types only. A namespace that needs a route of its own gets one, with its own list of types. `@sobelow_skip ["XSS.ContentType"]` stays true only while that holds. |
-| A write for each read | 40 covers on a page write 40 rows. | Section 5 holds the measurement to make. Move to the second answer there if it is slow. |
+| ~~A write for each read~~ | Measured on 2026-08-24. The write is 11.82 ms and not the "under a millisecond" of section 5, so a page of 40 covers needs about 0.5 s. | The first answer stays, because the route holds a cache header of one week and a browser therefore asks once. See step 7. |
 | The reserve | 1 GB is a guess. A download of a long episode is 200 MB. | Measure after downloads arrive. |
 | Transformations | The near future needs a thumbnail of 320 pixels for the screen, and `vix` cannot cross-compile. | Section 9. |
 
@@ -262,8 +262,24 @@ and this project already refused 17 MB for portaudio.
 6. ~~Join an entry to a record.~~ Done on 2026-08-23, with a join of ours and not the
    attachments of `ash_storage`. `MyHiFi.Podcast.Show` declares its side. See sections
    6.1 to 6.3.
-7. Measure: the write for each read, the time of a migration on the board, and the
-   memory.
+7. ~~Measure: the write for each read, the time of a migration on the board, and the
+   memory.~~ Done on 2026-08-24. Section 17 of `docs/spec.md` holds each number.
+
+   **The write costs 11.82 ms, and section 5 of this plan named "under a
+   millisecond".** Plain SQL writes the same row in 2.21 ms, so the Ash action holds
+   9.6 ms of it. A whole `MyHiFi.Artwork.serve/1` is 26.06 ms in series, and 33 of
+   them, 8 at a time, took 438 ms. A page of 40 covers therefore needs about 0.5 s of
+   database work.
+
+   **The plan keeps its first answer, and for another reason.** The route sends a
+   cache header of one week, so a browser asks once for each picture. The cost falls
+   on a first view alone, and a write behind a process would save 0.5 s once a week
+   and lose the last minute at each restart. Change this only if the device screen
+   reads the cache often, because that reader holds no browser cache.
+
+   The 5 migrations against an empty database took 704 ms and 902 ms in two runs, so
+   a first boot pays under a second. A scratch database on `/root` gave those
+   numbers, and the real one was not touched.
 8. ~~Change section 13 of `docs/spec.md`, and section 17 for the measurements.~~ Done
    on 2026-08-23.
 

@@ -7,7 +7,8 @@ defmodule MyHiFi.Podcast.Episode do
   so every episode holds one.
 
   An episode is not live, so it has a length and a place. `position_ms` holds where
-  a person stopped, and `played?` says that it reached its end.
+  a person stopped, `position_bytes` holds the byte of the file that names, and
+  `played?` says that it reached its end.
   """
 
   use Ash.Resource,
@@ -88,7 +89,7 @@ defmodule MyHiFi.Podcast.Episode do
       of this episode starts from here.
       """
 
-      accept [:position_ms]
+      accept [:position_ms, :position_bytes]
     end
 
     update :mark_played do
@@ -101,6 +102,7 @@ defmodule MyHiFi.Podcast.Episode do
 
       change set_attribute(:played?, true)
       change set_attribute(:position_ms, 0)
+      change set_attribute(:position_bytes, nil)
     end
   end
 
@@ -148,8 +150,11 @@ defmodule MyHiFi.Podcast.Episode do
       description """
       The `length` of the enclosure, as the feed writes it. It is absent for 39% of
       the episodes of the measurement, and it is wrong for many of the rest: one
-      episode of 5 named 14,165,913 bytes and sent 7,270,145. A resume therefore
-      reads the bitrate of the audio instead. See `MyHiFi.Player.Mp3`.
+      episode of 5 named 14,165,913 bytes and sent 7,270,145.
+
+      **A resume reads none of it.** `position_bytes` holds the byte that the reader
+      reached, so nothing turns a time into a byte. A page shows this number, and no
+      other part of the firmware relies on it.
       """
 
       public? true
@@ -174,6 +179,22 @@ defmodule MyHiFi.Podcast.Episode do
       description "Where the person stopped. The player writes it, and a resume reads it."
       allow_nil? false
       default 0
+      public? true
+    end
+
+    attribute :position_bytes, :integer do
+      description """
+      The byte of the file that `position_ms` names. `MyHiFi.Player.FileSource` reads
+      it, and a resume is exact because of it.
+
+      A time alone is not enough. A byte offset needs a bitrate, and a sweep of 46
+      real episodes on 2026-08-24 found that 11 of them hold more than one: a resume
+      by bitrate landed as much as 1994.6 s from the mark. The reader knows the byte
+      and the player knows the time, so this holds what they saw together.
+
+      It allows nil for an episode that no person has played.
+      """
+
       public? true
     end
 

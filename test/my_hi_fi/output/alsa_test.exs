@@ -103,9 +103,17 @@ defmodule MyHiFi.Output.AlsaTest do
   end
 
   describe "sink_spec/1" do
-    test "adds the plug layer, so ALSA converts the format and the rate" do
-      assert %MyHiFi.Output.APlaySink{device: "plughw:CARD=Audio,DEV=0"} =
+    # 44100 Hz is rough on this board and 48000 Hz is clean, because USB audio needs
+    # a whole number of samples in each 1 ms packet and the dwc2 controller handles
+    # the alternation of 44.1 badly. `rate48` of `/etc/asound.conf` holds the card at
+    # 48000 Hz and converts the format as `plughw` did.
+    test "it names the definition that holds the card at 48000 Hz" do
+      assert %MyHiFi.Output.APlaySink{device: "rate48:CARD=Audio,DEV=0"} =
                Alsa.sink_spec("hw:CARD=Audio,DEV=0")
+    end
+
+    test "a name that holds no hardware prefix goes through as it is" do
+      assert %MyHiFi.Output.APlaySink{device: "default"} = Alsa.sink_spec("default")
     end
   end
 end

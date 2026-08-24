@@ -1,7 +1,6 @@
 defmodule MyHiFi.Source.PodcastsTest do
   use MyHiFi.DataCase, async: false
 
-  alias MyHiFi.Player.Mp3
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Feed
   alias MyHiFi.Podcast.Index
@@ -11,12 +10,10 @@ defmodule MyHiFi.Source.PodcastsTest do
   setup do
     Application.put_env(:my_hi_fi, Index, plug: {Req.Test, Index}, retry: false)
     Application.put_env(:my_hi_fi, Feed, plug: {Req.Test, Feed})
-    Application.put_env(:my_hi_fi, Mp3, plug: {Req.Test, Mp3})
 
     on_exit(fn ->
       Application.delete_env(:my_hi_fi, Index)
       Application.delete_env(:my_hi_fi, Feed)
-      Application.delete_env(:my_hi_fi, Mp3)
     end)
 
     {:ok, _setting} = Settings.put(Index.key_setting(), "THEKEY")
@@ -30,21 +27,6 @@ defmodule MyHiFi.Source.PodcastsTest do
 
   defp stub_feed(xml) do
     Req.Test.stub(Feed, fn conn -> Plug.Conn.send_resp(conn, 200, xml) end)
-  end
-
-  # Audio with no ID3 tag, and one MP3 frame header of 128 kbps at the start. A
-  # resume reads the bitrate from this.
-  defp stub_audio(bitrate_byte \\ 0x90) do
-    audio = <<0xFF, 0xFB, bitrate_byte, 0x00>> <> :binary.copy(<<0>>, 4092)
-
-    Req.Test.stub(Mp3, fn conn ->
-      ["bytes=" <> range] = Plug.Conn.get_req_header(conn, "range")
-      [first, last] = String.split(range, "-")
-      first = String.to_integer(first)
-      last = min(String.to_integer(last), byte_size(audio) - 1)
-
-      Plug.Conn.send_resp(conn, 206, binary_part(audio, first, last - first + 1))
-    end)
   end
 
   defp index_feed(overrides \\ %{}) do
@@ -343,76 +325,70 @@ defmodule MyHiFi.Source.PodcastsTest do
   end
 
   describe "resolve" do
-    test "an MP3 episode plays over HTTP with no container" do
+    test "an MP3 episode plays from a file that a download writes" do
       created = show()
       one = episode(created)
 
       assert {:ok, playable} = Podcasts.resolve({:episode, one.id})
 
       assert playable.uri == "https://example.test/1.mp3"
-      assert playable.transport == :http
+      assert playable.transport == :download
       assert playable.container == :none
       assert playable.format == :mp3
       assert playable.live? == false
-      # An episode at the start needs no range.
+      assert playable.key == one.id
+      # An episode at the start begins at the first byte.
+      assert playable.position_bytes == 0
       assert playable.headers == []
     end
 
-    test "an episode with a place asks for the bytes from that place" do
-      stub_audio()
+    test "an episode with a place begins at the byte that it holds" do
       created = show()
       one = episode(created)
-      {:ok, one} = Podcast.store_position(one, %{position_ms: 250_000})
+
+      {:ok, one} =
+        Podcast.store_position(one, %{position_ms: 250_000, position_bytes: 4_000_000})
 
       assert {:ok, playable} = Podcasts.resolve({:episode, one.id})
 
-      # 250 seconds of 128 kbps is 4,000,000 bytes, and the audio starts at 0.
-      assert playable.headers == [{"range", "bytes=4000000-"}]
+      # The byte comes from the reader, so no bitrate turns the time into it.
+      assert playable.position_bytes == 4_000_000
       assert playable.position_ms == 250_000
+      assert playable.headers == []
     end
 
+    # 11 of 46 real episodes hold more than one bitrate, and a resume by bitrate
+    # landed as much as 1994.6 s from the mark. Nothing here reads a bitrate, a
+    # length, or a duration.
     test "the length and the duration of the feed decide nothing" do
-      stub_audio()
       created = show()
-      # Numbers that would give a wildly different offset if this read them.
       one = episode(created, %{byte_length: 99, duration_ms: 99})
-      {:ok, one} = Podcast.store_position(one, %{position_ms: 250_000})
+
+      {:ok, one} =
+        Podcast.store_position(one, %{position_ms: 250_000, position_bytes: 4_000_000})
 
       assert {:ok, playable} = Podcasts.resolve({:episode, one.id})
-      assert playable.headers == [{"range", "bytes=4000000-"}]
+      assert playable.position_bytes == 4_000_000
     end
 
-    test "an episode whose bitrate cannot be read starts at the beginning" do
-      Req.Test.stub(Mp3, fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
+    test "an episode that a person never played begins at the first byte" do
       created = show()
       one = episode(created)
       {:ok, one} = Podcast.store_position(one, %{position_ms: 250_000})
 
       assert {:ok, playable} = Podcasts.resolve({:episode, one.id})
 
-      # Repeating some audio is better than stepping over some.
-      assert playable.headers == []
-      assert playable.position_ms == 0
+      # A place with no byte cannot say where in the file it is, so this begins
+      # again. Repeating some audio is better than stepping over some.
+      assert playable.position_bytes == 0
     end
 
-    test "an episode at the start reads no audio" do
-      Req.Test.stub(Mp3, fn _conn -> raise "a first play must ask for no bitrate" end)
-      created = show()
-      one = episode(created)
-
-      assert {:ok, playable} = Podcasts.resolve({:episode, one.id})
-      assert playable.headers == []
-    end
-
-    test "an AAC episode plays, and it reads no MP3 frame" do
-      Req.Test.stub(Mp3, fn _conn -> raise "AAC holds no MP3 frame" end)
+    test "an AAC episode plays" do
       created = show()
       one = episode(created, %{mime_type: "audio/aac"})
-      {:ok, one} = Podcast.store_position(one, %{position_ms: 250_000})
 
       assert {:ok, playable} = Podcasts.resolve({:episode, one.id})
       assert playable.format == :aac
-      assert playable.headers == []
     end
 
     test "an m4a episode names the reason that it cannot play" do
@@ -450,13 +426,14 @@ defmodule MyHiFi.Source.PodcastsTest do
       created = show()
       one = episode(created)
 
-      assert :ok = Podcasts.store_position({:episode, one.id}, 90_000)
+      assert :ok = Podcasts.store_position({:episode, one.id}, %{ms: 90_000, bytes: 1_440_000})
 
-      assert {:ok, %{position_ms: 90_000}} = Podcast.get_episode(one.id)
+      assert {:ok, %{position_ms: 90_000, position_bytes: 1_440_000}} =
+               Podcast.get_episode(one.id)
     end
 
     test "a ref that names no episode does nothing and gives ok" do
-      assert :ok = Podcasts.store_position(:root, 90_000)
+      assert :ok = Podcasts.store_position(:root, %{ms: 90_000, bytes: 1_440_000})
     end
   end
 

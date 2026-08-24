@@ -1,0 +1,354 @@
+defmodule MyHiFi.Player.FileSource do
+  @moduledoc """
+  A Membrane source that reads audio from a file while that file grows.
+
+  `MyHiFi.Player.Download` writes the file as fast as the network allows, and this
+  element reads it at the speed of the sound card. **A file needs no flow control.**
+  The demand of Membrane reaches the pad of an element and it cannot reach a socket
+  that another library owns, which is why `MyHiFi.Player.HttpSource` dropped the
+  audio of a podcast. Nothing here can arrive faster than a read asks for it.
+
+  The file is the buffer, so this element holds no queue. `:file.pread/3` gives the
+  bytes that a demand asks for, and the rest wait on the disk.
+
+  ## What it waits for
+
+  It reads no further than the bytes that the download reports. At that point it
+  gives no buffer, and a `{:download, {:bytes, count}}` message wakes it. A person
+  then hears silence for as long as the network is slower than the audio, which is
+  what a live stream does today.
+
+  It gives `end_of_stream` when it reaches the end of a file that the download
+  called whole. A file that the cache already holds is whole from the start, so an
+  episode that a person plays a second time asks the network for nothing.
+
+  ## Where it starts
+
+  `position_bytes` is the byte that the person stopped at.
+  `MyHiFi.Player.Download` and this element make a resume exact: the reader knows
+  the byte and the player knows the time, so no part of this firmware turns one into
+  the other. A bitrate cannot do that, because 11 of 46 real episodes hold more than
+  one.
+  """
+
+  use Membrane.Source
+
+  require Membrane.Logger
+
+  alias MyHiFi.Player.Download
+  alias MyHiFi.Player.Mp3Frame
+
+  # How far the reader moves before it tells the player where it is. 16 KB is about
+  # one second of a 128 kbit/s episode.
+  @tell_every 16 * 1024
+
+  # **The largest buffer that may leave this element.** `Membrane.MP3.MAD.Decoder`
+  # decodes a whole input buffer in one callback: `decode_buffer/5` recurses to the
+  # end of it and holds every action until it returns. A buffer of a whole 49.7 MB
+  # episode therefore asks it to decode 3108 seconds at once, and that is 822 MB of
+  # `s24le` samples on a board that holds 363.9 MB.
+  #
+  # A read on 2026-08-24 did exactly that. The board raised its memory alarm, the
+  # decoder reported a malformed frame for each byte that it then skipped, and a
+  # person heard noise. `MyHiFi.Player.HttpSource` never met this, because a part of
+  # a network answer is a few kilobytes.
+  #
+  # 16 KB is about one second of a 128 kbit/s episode, and about 38 frames.
+  @read_bytes 16 * 1024
+
+  # How far a resume steps back before the byte that it holds.
+  #
+  # **The byte that a resume holds is in front of what a person heard.** This element
+  # reports the byte that it read, and the pipeline holds a lead over the sound: a
+  # read on the board on 2026-08-24 measured 1.7 s after a short play and 3.8 s after
+  # a longer one, and 3.8 s of a 128 kbit/s episode is 61 KB. 96 KB therefore holds
+  # more than the largest lead that a read has measured, so a person hears a little
+  # again and never loses a word.
+  #
+  # Bytes and not milliseconds, because the lead is itself a count of bytes and a
+  # count of bytes needs no bitrate.
+  @rewind_bytes 96 * 1024
+
+  def_options(
+    key: [
+      spec: String.t(),
+      description: "The key that a download holds this track under."
+    ],
+    uri: [
+      spec: String.t(),
+      description: "The address of the audio, for a download that has not run."
+    ],
+    position_bytes: [
+      spec: non_neg_integer(),
+      default: 0,
+      description: "The byte to begin at. It is 0 for a track that begins at the start."
+    ],
+    format: [
+      spec: atom(),
+      default: :mp3,
+      description: """
+      The codec of the file. A resume steps back to a frame boundary, and only
+      `:mp3` holds frames that `MyHiFi.Player.Mp3Frame` reads.
+      """
+    ],
+    buffer_bytes: [
+      spec: pos_integer(),
+      default: 64 * 1024,
+      description: """
+      How many bytes the file must hold before the first sound. It hides a
+      network that is slower than the audio for a moment.
+      """
+    ]
+  )
+
+  # `demand_unit: :bytes` is not optional. Without it a manual output pad takes the
+  # default unit and the `handle_demand/5` clause below never matches. See
+  # `MyHiFi.Player.HttpSource`, where that cost a build to find.
+  def_output_pad(:output,
+    accepted_format: %Membrane.RemoteStream{},
+    flow_control: :manual,
+    demand_unit: :bytes
+  )
+
+  defmodule State do
+    @moduledoc false
+
+    @type t :: %__MODULE__{
+            key: String.t(),
+            uri: String.t(),
+            format: atom(),
+            device: :file.fd() | nil,
+            offset: non_neg_integer(),
+            available: non_neg_integer(),
+            demand: non_neg_integer(),
+            buffer_bytes: pos_integer(),
+            filling?: boolean(),
+            whole?: boolean(),
+            told: non_neg_integer()
+          }
+
+    defstruct [
+      :key,
+      :uri,
+      :device,
+      format: :mp3,
+      offset: 0,
+      available: 0,
+      demand: 0,
+      buffer_bytes: 64 * 1024,
+      filling?: true,
+      whole?: false,
+      told: 0
+    ]
+  end
+
+  @impl true
+  def handle_init(_ctx, options) do
+    {[],
+     %State{
+       key: options.key,
+       uri: options.uri,
+       offset: options.position_bytes,
+       format: options.format,
+       buffer_bytes: options.buffer_bytes
+     }}
+  end
+
+  @impl true
+  def handle_playing(_ctx, %State{} = state) do
+    # This element and not the pipeline asks for the download, because the caller of
+    # `ensure/2` becomes the watcher and this is the process that waits for the
+    # bytes.
+    case Download.ensure(state.key, state.uri) do
+      {:ok, %{paths: paths, complete?: whole?}} ->
+        {[stream_format: {:output, %Membrane.RemoteStream{}}], open(state, paths, whole?)}
+
+      {:error, reason} ->
+        raise "Could not read #{state.uri}: #{inspect(reason)}"
+    end
+  end
+
+  @impl true
+  def handle_demand(:output, size, :bytes, _ctx, %State{} = state) do
+    serve(%State{state | demand: state.demand + size})
+  end
+
+  @impl true
+  def handle_info({:download, {:bytes, count}}, _ctx, %State{} = state) do
+    serve(%State{state | available: count})
+  end
+
+  @impl true
+  def handle_info({:download, :done}, _ctx, %State{} = state) do
+    serve(%State{state | available: held_bytes(state), whole?: true})
+  end
+
+  @impl true
+  def handle_info({:download, {:error, reason}}, _ctx, %State{} = state) do
+    raise "Could not read #{state.uri}: #{inspect(reason)}"
+  end
+
+  @impl true
+  def handle_info(message, _ctx, %State{} = state) do
+    Membrane.Logger.debug("Ignoring #{inspect(message)}")
+    {[], state}
+  end
+
+  @impl true
+  def handle_terminate_request(_ctx, %State{device: nil} = state),
+    do: {[terminate: :normal], state}
+
+  @impl true
+  def handle_terminate_request(_ctx, %State{} = state) do
+    :file.close(state.device)
+    {[terminate: :normal], %State{state | device: nil}}
+  end
+
+  # A download that finishes between the answer of `ensure/2` and this open moves the
+  # file, so both names come back and one of them is there.
+  defp open(%State{} = state, paths, whole?) do
+    case Enum.find_value(paths, &opened(&1)) do
+      {device, size} ->
+        %State{
+          state
+          | device: device,
+            available: size,
+            whole?: whole?,
+            offset: state.offset |> rewound(device, state.format) |> begin_at(size, whole?)
+        }
+
+      nil ->
+        raise "No file of #{state.key} at #{inspect(paths)}"
+    end
+  end
+
+  @doc """
+  The byte that a resume begins at, given the byte that it holds.
+
+  It steps back by `@rewind_bytes` and it lands on a frame boundary. See
+  `MyHiFi.Player.Mp3Frame` for both reasons.
+
+  This function is public so that a test can reach it, as `MyHiFi.Player.HttpSource`
+  makes `trim/1` public. A caller inside this module is the only one that needs it.
+  """
+  @spec rewound(non_neg_integer(), :file.fd(), atom()) :: non_neg_integer()
+  def rewound(offset, _device, _format) when offset <= 0, do: 0
+
+  def rewound(offset, device, :mp3) do
+    case Mp3Frame.boundary_before(device, offset, @rewind_bytes) do
+      {:ok, byte} ->
+        Membrane.Logger.info("A resume of #{offset} begins at #{byte}.")
+        byte
+
+      # A file that holds no frame where this looked still plays. The step back is
+      # what stops a person from losing a word, and the alignment costs MAD under two
+      # frames when it is absent.
+      {:error, reason} ->
+        Membrane.Logger.warning("Could not align a resume of #{offset}: #{inspect(reason)}")
+        max(offset - @rewind_bytes, 0)
+    end
+  end
+
+  # Another codec holds frames of another shape, so this steps back and aligns
+  # nothing. A repeat of some audio is still better than a step over some.
+  def rewound(offset, _device, _format), do: max(offset - @rewind_bytes, 0)
+
+  # A place past the end of a whole file means the person reached the end, so this
+  # begins there and the stream ends at once. A place past the end of a file that
+  # still grows is a place that the download has not reached, and `serve/1` waits for
+  # it. Holding that place is the reason that a resume is exact.
+  defp begin_at(offset, size, true), do: min(offset, size)
+  defp begin_at(offset, _size, false), do: offset
+
+  defp opened(path) do
+    with {:ok, %File.Stat{size: size}} <- File.stat(path),
+         {:ok, device} <- :file.open(path, [:read, :binary, :raw]) do
+      {device, size}
+    else
+      {:error, _reason} -> nil
+    end
+  end
+
+  # Nothing leaves this element until the file holds enough to hide a network that
+  # falls behind the audio for a moment. A whole file passes at once.
+  defp serve(%State{filling?: true, whole?: false} = state) do
+    if state.available - state.offset >= state.buffer_bytes do
+      Membrane.Logger.info("The file holds #{state.available} bytes. Playing.")
+      serve(%State{state | filling?: false})
+    else
+      {[], state}
+    end
+  end
+
+  defp serve(%State{filling?: true} = state), do: serve(%State{state | filling?: false})
+
+  defp serve(%State{demand: 0} = state), do: {[], state}
+
+  defp serve(%State{} = state) do
+    case servable(state) do
+      size when size > 0 -> read(state, size)
+      _none -> {ending(state), state}
+    end
+  end
+
+  defp servable(%State{} = state) do
+    state.demand |> min(state.available - state.offset) |> min(@read_bytes) |> max(0)
+  end
+
+  defp read(%State{} = state, size) do
+    case :file.pread(state.device, state.offset, size) do
+      {:ok, payload} ->
+        state = %State{
+          state
+          | offset: state.offset + byte_size(payload),
+            demand: state.demand - byte_size(payload)
+        }
+
+        {actions, state} = telling(state)
+
+        {[buffer: {:output, %Membrane.Buffer{payload: payload}}] ++
+           actions ++ continuing(state), state}
+
+      # The file is shorter than the count that the download reported, so the next
+      # message says what it really holds.
+      :eof ->
+        {[], state}
+
+      {:error, reason} ->
+        raise "Could not read the file of #{state.key}: #{inspect(reason)}"
+    end
+  end
+
+  # One buffer holds `@read_bytes` at most, so a demand larger than that needs more
+  # than one turn. `:redemand` asks Membrane for that turn. The demand falls with each
+  # buffer, so this ends.
+  defp continuing(%State{} = state) do
+    case {ending(state), servable(state)} do
+      {[], more} when more > 0 -> [redemand: :output]
+      {ending, _more} -> ending
+    end
+  end
+
+  defp ending(%State{whole?: true, offset: offset, available: available})
+       when offset >= available,
+       do: [end_of_stream: :output]
+
+  defp ending(%State{}), do: []
+
+  # The player writes this byte beside the time when a person stops, and the two
+  # together make a resume exact. It goes out each `@tell_every` bytes and not on
+  # each buffer: at 128 kbit/s that is about one message each second, and a buffer is
+  # about 50 ms of sound.
+  defp telling(%State{offset: offset, told: told} = state) when offset - told >= @tell_every do
+    {[notify_parent: {:position_bytes, offset}], %State{state | told: offset}}
+  end
+
+  defp telling(%State{} = state), do: {[], state}
+
+  defp held_bytes(%State{device: device}) do
+    case :file.position(device, :eof) do
+      {:ok, size} -> size
+      {:error, _reason} -> 0
+    end
+  end
+end

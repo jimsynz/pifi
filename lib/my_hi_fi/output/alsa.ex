@@ -52,14 +52,21 @@ defmodule MyHiFi.Output.Alsa do
   @doc """
   Give a sink that plays to one device.
 
-  The `id` of a device is its ALSA hardware name, so this adds the `plug` layer
-  and nothing else. ALSA then converts the sample format and the sample rate when
-  the card accepts neither. A DAC at full speed on USB often accepts fewer rates
-  than a decoder gives.
+  The `id` of a device is its ALSA hardware name, and this names the `rate48`
+  definition of `/etc/asound.conf` in its place. That definition holds the `plug`
+  layer, so ALSA converts the sample format, and it holds the card at 48000 Hz.
+
+  **The rate is not a preference.** USB audio sends one isochronous packet in each
+  1 ms frame, so 44100 Hz needs 44.1 samples in a packet and a controller must
+  alternate the size of them. The dwc2 controller of this board handles that badly.
+  A 440 Hz tone straight to `aplay` on 2026-08-24 was rough at 44100 Hz and clean at
+  24000 Hz and at 48000 Hz, and the level of the tone decided nothing. Almost every
+  podcast holds 44100 Hz MP3, and both RNZ streams hold 24000 Hz, so internet radio
+  never met this.
   """
   @impl MyHiFi.Output
   def sink_spec(device_id) do
-    %MyHiFi.Output.APlaySink{device: "plug" <> device_id}
+    %MyHiFi.Output.APlaySink{device: String.replace_prefix(device_id, "hw:", "rate48:")}
   end
 
   @doc """

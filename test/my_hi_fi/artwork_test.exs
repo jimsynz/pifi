@@ -44,6 +44,19 @@ defmodule MyHiFi.ArtworkTest do
       assert File.read!(on_disk(name)) == @png
     end
 
+    # 4 of the 247 New Zealand stations name the text "null" as their logo, because
+    # that is what Radio Browser sends. `Req` raises for an address that holds no
+    # scheme, so this gave an exception and not an error, and the job then failed
+    # three times.
+    test "an address that names no scheme gives an error and raises nothing" do
+      stub("image/png", @png)
+
+      assert {:error, :no_address} = Artwork.fetch("null")
+      assert {:error, :no_address} = Artwork.fetch("station.test/logo.png")
+      assert {:error, :no_address} = Artwork.fetch("ftp://station.test/logo.png")
+      assert {:error, :no_address} = Artwork.fetch("https://")
+    end
+
     test "the same address gives the same name" do
       stub("image/png", @png)
 

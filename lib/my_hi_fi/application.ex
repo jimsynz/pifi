@@ -5,12 +5,18 @@ defmodule MyHiFi.Application do
 
   use Application
 
+  alias MyHiFi.Player.Download
+
   @impl true
   def start(_type, _args), do: start_app()
 
   defp start_normally do
     put_device_secrets()
     migrate()
+    # A download writes its file outside the cache, so no row names that file and no
+    # eviction can see it. An interruption of the power leaves one behind, and this
+    # is the only thing that reclaims it. See `MyHiFi.Player.Download`.
+    Download.sweep()
 
     children =
       [
@@ -22,6 +28,8 @@ defmodule MyHiFi.Application do
            Application.fetch_env!(:my_hi_fi, Oban)
          )},
         {Phoenix.PubSub, [name: MyHiFi.PubSub]},
+        {Registry, keys: :unique, name: Download.Registry},
+        {DynamicSupervisor, strategy: :one_for_one, name: Download.Supervisor},
         MyHiFi.Player,
         MyHiFiWeb.Endpoint
       ] ++ target_children()

@@ -37,6 +37,11 @@ defmodule MyHiFi.Artwork.Worker do
       {:error, {:status, status}} when status in 400..499 ->
         {:cancel, {:status, status}}
 
+      # An address that holds no scheme can never hold a picture. Radio Browser sends
+      # the text `"null"` for 4 of the 247 New Zealand stations.
+      {:error, :no_address} ->
+        {:cancel, :no_address}
+
       {:error, reason} ->
         {:error, reason}
     end
@@ -45,7 +50,7 @@ defmodule MyHiFi.Artwork.Worker do
   @doc "Ask for one logo, unless the cache holds it."
   @spec enqueue(String.t() | nil) :: :ok
   def enqueue(url) when is_binary(url) and url != "" do
-    if is_nil(Artwork.name(url)) do
+    if Artwork.readable?(url) and is_nil(Artwork.name(url)) do
       %{"url" => url} |> new() |> Oban.insert()
     end
 

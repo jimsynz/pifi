@@ -72,6 +72,41 @@ defmodule MyHiFi.Output.APlaySinkTest do
     end
   end
 
+  describe "the silence that a stop asks for" do
+    test "it closes the program, so the room is quiet at once" do
+      port = Port.open({:spawn, "cat"}, [:binary])
+      state = %State{device: "null", port: port, sounded?: true}
+
+      assert {[], state} = APlaySink.handle_parent_notification(:silence, nil, state)
+
+      assert state.port == nil
+      assert state.silent?
+      refute Port.info(port)
+    end
+
+    test "a buffer after that goes nowhere, and it raises nothing" do
+      state = %State{device: "null", port: nil, silent?: true}
+      buffer = %Membrane.Buffer{payload: "samples that no person hears"}
+
+      assert {[], ^state} = APlaySink.handle_buffer(:input, buffer, nil, state)
+    end
+
+    test "a new format starts no program, so nothing sounds again" do
+      format = %Membrane.RawAudio{sample_format: :s24le, sample_rate: 44_100, channels: 2}
+      state = %State{device: "null", port: nil, silent?: true}
+
+      assert {[], state} = APlaySink.handle_stream_format(:input, format, nil, state)
+
+      assert state.port == nil
+    end
+
+    test "any other notice from the parent changes nothing" do
+      state = %State{device: "null"}
+
+      assert {[], ^state} = APlaySink.handle_parent_notification(:something, nil, state)
+    end
+  end
+
   describe "handle_stream_format" do
     test "the same format again starts no second program" do
       format = %Membrane.RawAudio{sample_format: :s24le, sample_rate: 44_100, channels: 2}

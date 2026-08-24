@@ -37,9 +37,7 @@ defmodule MyHiFi.Source.Podcasts do
 
   @behaviour MyHiFi.Source
 
-  require Logger
-
-  alias MyHiFi.Player.Mp3
+  alias MyHiFi.Player.Download
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Podcast.Refresh
@@ -147,20 +145,23 @@ defmodule MyHiFi.Source.Podcasts do
   def favourite(ref, _true?), do: {:error, {:not_a_show, ref}}
 
   @impl MyHiFi.Source
-  def store_position({:episode, id}, position_ms) do
+  def store_position({:episode, id}, %{ms: ms, bytes: bytes}) do
     with {:ok, episode} <- Podcast.get_episode(id),
-         {:ok, _episode} <- Podcast.store_position(episode, %{position_ms: position_ms}) do
+         {:ok, _episode} <-
+           Podcast.store_position(episode, %{position_ms: ms, position_bytes: bytes}) do
       :ok
     end
   end
 
-  def store_position(_ref, _position_ms), do: :ok
+  def store_position(_ref, _place), do: :ok
 
   @impl MyHiFi.Source
   def finished({:episode, id}) do
     with {:ok, episode} <- Podcast.get_episode(id),
          {:ok, _episode} <- Podcast.mark_played(episode) do
-      :ok
+      # The file held `keep?` while the person was in the middle of it. They reached
+      # the end, so an eviction may take it now.
+      Download.release(id)
     end
   end
 
@@ -210,17 +211,17 @@ defmodule MyHiFi.Source.Podcasts do
         {:error, {:unsupported_format, episode.mime_type}}
 
       format ->
-        {headers, position_ms} = resume(episode, format)
-
         {:ok,
          %{
            uri: episode.audio_url,
-           headers: headers,
-           transport: :http,
+           headers: [],
+           transport: :download,
            container: :none,
            format: format,
            live?: false,
-           position_ms: position_ms
+           position_ms: episode.position_ms,
+           key: episode.id,
+           position_bytes: episode.position_bytes || 0
          }}
     end
   end
@@ -236,41 +237,6 @@ defmodule MyHiFi.Source.Podcasts do
   defp format("audio/aac"), do: :aac
   defp format("audio/aacp"), do: :aac
   defp format(_other), do: nil
-
-  # A resume asks the server for the bytes from a point. The length and the
-  # duration give an average bitrate, and that is exact for a constant bitrate MP3.
-  #
-  # 18 of the 49 feeds of the measurement write no length, so this gives no header
-  # for those and the episode starts at the beginning. The player writes the length
-  # from the `content-length` of the first play, so the second play of such an
-  # episode holds a place. See section 8.1 of `docs/podcasts-plan.md`.
-  # The header and the place come from one function, so the two can never disagree.
-  # A caller that gets no header gets a place of 0, and the player then counts from
-  # the start.
-  #
-  # `MyHiFi.Player.Mp3` reads the bitrate out of the audio itself. The `length` of
-  # an enclosure and `itunes:duration` are not the answer: a measurement of 5 real
-  # episodes on 2026-08-23 put one of them 227 seconds from the mark, because a
-  # publisher who adds an advertisement at the time of the request changes the size
-  # of the file and the feed keeps the old number. The bitrate of the audio put
-  # every one of the same seeks within 0.03 seconds.
-  #
-  # This asks the network for 4 KB, and only when a person resumes. An episode with
-  # no place has never played, so a first play asks for nothing.
-  defp resume(%{position_ms: position} = episode, :mp3) when position > 0 do
-    case Mp3.offset(episode.audio_url, position) do
-      {:ok, offset} ->
-        {[{"range", "bytes=#{offset}-"}], position}
-
-      # A resume that cannot find the bitrate starts at the beginning. That repeats
-      # some audio, and a wrong offset would step over some instead.
-      {:error, reason} ->
-        Logger.warning("Could not read the bitrate of #{episode.audio_url}: #{inspect(reason)}")
-        {[], 0}
-    end
-  end
-
-  defp resume(_episode, _format), do: {[], 0}
 
   defp mark(show, true), do: Podcast.subscribe(show)
   defp mark(show, false), do: Podcast.unsubscribe(show)

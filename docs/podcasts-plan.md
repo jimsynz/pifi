@@ -1,7 +1,8 @@
 # Plan: podcasts as the second source
 
 - Date: 2026-08-23
-- Status: in progress. Steps 1 to 9 are done. Steps 10 and 11 remain, and both need the board.
+- Status: every step is done. Step 10 passed on the board on 2026-08-24, after four
+  faults of the output path came out. See `docs/episode-download-plan.md`.
 - Language: this document uses ASD-STE100 Simplified Technical English.
 
 ## 1. Purpose
@@ -555,9 +556,9 @@ A count decides, and not a guess.
 | The key needs a person | The podcast source shows nothing until a person registers at the index and enters two values. | The settings page holds the address and the reason. Measure how a person finds this. |
 | ~~The index client is not proven~~ | Proven on 2026-08-23. Every function ran against the real index with a real key, and that read found one fault that no stub could. See section 6.1. | |
 | The clock at a first boot | The index holds a 3 minute window, and a board with no battery starts in 1970. | Ask `nerves_time` first, and give a reason and not a 401. |
-| Memory | A refresh reads a feed while the audio plays. | The parse holds no document and it stops at 200 items. Measure the BEAM during a refresh of ten shows. |
+| ~~Memory~~ | Measured on 2026-08-24. A refresh of 13 feeds needed 11.7 MB of the BEAM at its peak, and the memory available never went under 146.4 MB. | |
 | Rate limits | The index publishes no number. A category page asks for the trending shows of each category. | Ask for one category at a time, and only when a person opens it. Hold the category list in the settings. |
-| The position of an episode | The `range` header gives a byte offset, and a time needs the bitrate. `byte_length` and `duration_ms` give an average, and that is exact for a constant bitrate MP3 alone. **The mechanism works**: 18 of 18 hosts answer a `Range` request with 206 and a `Content-Range`, and each one advertises `accept-ranges: bytes`. See section 8.1. | A variable bitrate episode still restarts at the wrong second. Measure that error on a real show in step 7. Store the byte offset next to the position if it is large. |
+| The position of an episode | **Open, and larger than this plan said.** A sweep of 47 feeds on 2026-08-24 walked every frame of each episode that its windows disagreed about. **11 of 46 episodes hold more than one bitrate**, one of them holds 9 and another holds 14. A resume of such an episode lands as much as 1994.6 s from the mark, where a constant bitrate episode of the same sweep landed 0.48 s away. Section 8.2 read 5 episodes and found no variable one, and 5 was too small a sample. The mechanism of the `range` header is still correct: 18 of 18 hosts answer with 206 and a `Content-Range`. | Read the true map from time to byte, or hold the byte offset next to the position. The bitrate of the first frame is not enough. |
 | ~~An episode with no length~~ | Answered on 2026-08-23. The length of a feed decides nothing, so an absent one costs nothing. See section 8.2. | |
 | A show that changes its address | `feed_url` identifies a show, so a publisher who moves their feed gives this device a second row. The subscription and every position stay with the old row. | `<podcast:guid>` names a show across such a move, and 6 of the 49 feeds hold one. The index also gives `podcastGuid` for each show that it holds, which reaches more shows than the feeds do. Neither one reaches a private feed. Decide this when a real feed moves, and not before. |
 | Two sources of truth | The index gives a title, and so does the feed. | The feed wins, because the publisher owns it. The index fills a show that no feed read yet. |
@@ -603,9 +604,40 @@ A count decides, and not a guess.
    week, because two visits to the trending list wrote 201 rows. `MyHiFi.Podcast.Refresh`
    holds the read of one feed, so the job and the source cannot disagree. Run
    against a live 256 episode feed: it wrote 200.
-10. Play an episode on the board. Stop in the middle, and confirm the resume.
-11. Measure the memory during a refresh, and record it in section 17 of the
-    specification.
+10. ~~Play an episode on the board. Stop in the middle, and confirm the resume.~~
+    Passed on 2026-08-24, at the fourth attempt. The place and the resume were
+    correct from the first read; the sound was not, and it took four faults to fix.
+
+    - **The audio broke, and no person could listen.**
+      `MyHiFi.Player.HttpSource` holds no flow control on the read of the body, so a
+      podcast server filled its queue and `trim/1` dropped the oldest 64 KB. The log
+      of two plays of one 49.7 MB episode held **1259** such drops. The answer is a
+      file: `MyHiFi.Player.Download` writes it and `MyHiFi.Player.FileSource` reads
+      it. See `docs/episode-download-plan.md`.
+    - **The stop gave up before its own work ended.** `MyHiFi.Player.stop/0` used the
+      default `GenServer.call` timeout of 5 seconds, and `stop_pipeline/1` waited up
+      to 5 seconds by itself. The player now stops the sound, answers, and takes the
+      pipeline down in `handle_continue/2`. A stop measured 75 ms after that.
+    - **The reader gave the decoder the whole file in one buffer.**
+      `Membrane.MP3.MAD.Decoder` decodes a whole input buffer in one callback, so
+      that asked it for 822 MB of samples on a board that holds 363.9 MB. The board
+      raised its memory alarm and a person heard noise. `MyHiFi.Player.FileSource`
+      now gives 16 KB at a time and asks for another turn.
+    - **44100 Hz is rough on this board.** This one was not a fault of the podcast
+      work: it was there for every 44100 Hz stream, and both RNZ streams hold 24000
+      Hz so radio never showed it. A 440 Hz tone straight to `aplay` found it, and
+      `rate48` of `/etc/asound.conf` holds the card at 48000 Hz. See section 17 of
+      the specification.
+
+    The resume steps over a second or two of audio, because the pipeline holds that
+    much lead over the sound. Section 17 of the specification holds the numbers, and
+    an exact resume needs the true map from a time to a byte.
+
+11. ~~Measure the memory during a refresh, and record it in section 17 of the
+    specification.~~ Done on 2026-08-24. A refresh of 13 subscribed feeds, and a
+    first read of 12 of them, took 47.4 s and read every one. The BEAM held 111.8 MB
+    before, 123.5 MB at the peak and 108.6 MB after, and the memory available never
+    went under 146.4 MB. A refresh is therefore not a risk.
 
 ## 12. Changes to the specification
 

@@ -1,6 +1,6 @@
 defmodule MyHiFi.Cache.Entry.Changes.Write do
   @moduledoc """
-  Writes the bytes of an entry to the disk, and holds what they are.
+  Puts the file of an entry on the disk, and holds what it is.
 
   It builds the `key` of the extension, which is the path of the file under the root
   of the cache. `AshStorage` deletes a file by that field, so it must be the path and
@@ -8,11 +8,30 @@ defmodule MyHiFi.Cache.Entry.Changes.Write do
 
   The fields happen in two steps, and the order is not a choice. `key`, `filename`
   and `service_name` allow no nil, so they go in while the changeset validates. The
-  upload and the size and the sum of the bytes go in a `before_action` hook, so a row
-  that exists names a file that exists and a write that fails adds no row.
+  write and the size go in a `before_action` hook, so a row that exists names a file
+  that exists and a write that fails adds no row.
+
+  ## Two ways in
+
+  A caller gives the `bytes` argument or the `path` argument.
+
+  - `bytes` holds the whole file in memory. `MyHiFi.Artwork` uses it, because a
+    picture is 46 KB and it reads the first bytes to name the type.
+  - `path` names a file that already sits on this partition, and the hook moves it
+    with `File.rename/2`. `MyHiFi.Player.Download` uses it: an episode is 50 MB, and
+    a move of one partition copies no byte and cannot half finish.
+
+  A `path` entry holds no `checksum`. `AshStorage` allows nil there, and nothing in
+  this firmware reads the field, because each reader opens the file by its path. An
+  md5 of 50 MB costs about a second of the CPU of this board and it answers no
+  question that a caller asks.
   """
 
   use Ash.Resource.Change
+
+  # Sobelow reads `@sobelow_skip` from the source. This registration stops the
+  # compiler warning that no Elixir code reads the attribute.
+  Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
 
   alias AshStorage.Service.Context
   alias AshStorage.Service.Disk
@@ -55,11 +74,16 @@ defmodule MyHiFi.Cache.Entry.Changes.Write do
   end
 
   defp upload(changeset) do
-    bytes = Ash.Changeset.get_argument(changeset, :bytes)
-    key = Ash.Changeset.get_attribute(changeset, :key)
-    options = [root: Cache.directory()]
+    case Ash.Changeset.get_argument(changeset, :path) do
+      nil -> write_bytes(changeset, Ash.Changeset.get_argument(changeset, :bytes))
+      path -> move_file(changeset, path)
+    end
+  end
 
-    case Disk.upload(key, bytes, %Context{service_opts: options}) do
+  defp write_bytes(changeset, bytes) do
+    key = Ash.Changeset.get_attribute(changeset, :key)
+
+    case Disk.upload(key, bytes, %Context{service_opts: [root: Cache.directory()]}) do
       :ok ->
         changeset
         |> Ash.Changeset.force_change_attribute(:byte_size, byte_size(bytes))
@@ -70,6 +94,31 @@ defmodule MyHiFi.Cache.Entry.Changes.Write do
         Ash.Changeset.add_error(changeset,
           field: :bytes,
           message: "could not be written: #{inspect(reason)}"
+        )
+    end
+  end
+
+  # `AshStorage.Service.Disk` holds no move, so this does the two steps that its
+  # `upload/3` does for bytes: it makes the directory, and it puts the file there.
+  #
+  # The destination is `Cache.directory/0` and the `key`, and the `key` is the
+  # namespace and the entry key. `MyHiFi.Cache.Entry` constrains both of those, so
+  # neither can hold a separator or name a parent directory.
+  @sobelow_skip ["Traversal.FileModule"]
+  defp move_file(changeset, path) do
+    destination = Path.join(Cache.directory(), Ash.Changeset.get_attribute(changeset, :key))
+
+    with {:ok, %File.Stat{size: size}} <- File.stat(path),
+         :ok <- destination |> Path.dirname() |> File.mkdir_p(),
+         :ok <- File.rename(path, destination) do
+      changeset
+      |> Ash.Changeset.force_change_attribute(:byte_size, size)
+      |> Ash.Changeset.force_change_attribute(:last_accessed_at, DateTime.utc_now())
+    else
+      {:error, reason} ->
+        Ash.Changeset.add_error(changeset,
+          field: :path,
+          message: "could not be moved: #{inspect(reason)}"
         )
     end
   end

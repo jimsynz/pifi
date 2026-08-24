@@ -66,13 +66,22 @@ defmodule MyHiFi.Source do
   @type page :: %{entries: [entry()], cursor: term() | nil}
 
   @typedoc """
+  Where a person stopped in a track.
+
+  `ms` is the time from the start of the track. `bytes` is the byte of the file that
+  the reader had reached, and it is nil for a source that reads no file.
+  """
+  @type place :: %{ms: non_neg_integer(), bytes: non_neg_integer() | nil}
+
+  @typedoc """
   Everything that the player needs to play a track.
 
   Three facts decide the pipeline, and they are separate because they vary
   separately.
 
-  - `transport` is how the bytes arrive. `:http` is one continuous answer, and
-    `:hls` is a playlist of segments that the player reads again and again.
+  - `transport` is how the bytes arrive. `:http` is one continuous answer, `:hls` is
+    a playlist of segments that the player reads again and again, and `:download`
+    is a file that `MyHiFi.Player.Download` writes while the player reads it.
   - `container` is what holds the audio. `:mpeg_ts` needs a demultiplexer, `:ogg`
     names a container that the decoder reads itself, and `:none` gives the audio as
     it is.
@@ -91,18 +100,24 @@ defmodule MyHiFi.Source do
   progress bar then shows the place in the whole track, and not the place in this
   request.
 
-  A source that asks for no bytes gives 0 here, even when it holds a place for that
-  track. A podcast episode whose feed gives no length is one of those: it has a
-  place and no way to turn it into a byte offset, so it begins again at the start.
+  `key` and `position_bytes` belong to `:download` alone. `key` is what the cache
+  holds the file under, and `position_bytes` is the byte to begin at. A transport
+  that reads no file leaves both absent.
+
+  **A `:download` source needs no bitrate.** It gives `position_ms` for the count
+  that a person reads, and `position_bytes` for the place in the file, and the two
+  come from one stop. See `MyHiFi.Player.FileSource`.
   """
   @type playable :: %{
           uri: String.t(),
           headers: [{String.t(), String.t()}],
-          transport: :http | :hls,
+          transport: :http | :hls | :download,
           container: :none | :mpeg_ts | :ogg,
           format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :unknown,
           live?: boolean(),
-          position_ms: non_neg_integer()
+          position_ms: non_neg_integer(),
+          key: String.t() | nil,
+          position_bytes: non_neg_integer() | nil
         }
 
   @doc "The name of this source, for a person to read."
@@ -202,10 +217,14 @@ defmodule MyHiFi.Source do
   no control at all for a position.
 
   The player holds no knowledge of what a position means to a service. It gives the
-  number of milliseconds from the start of the track, and the source decides
-  whether to keep it.
+  place that it saw, and the source decides whether to keep it.
+
+  A place holds two numbers, and `bytes` is the reason that a resume is exact. A
+  time alone needs a bitrate to become a byte offset, and 11 of 46 real episodes
+  hold more than one bitrate. `bytes` is nil for a stream that no reader counts
+  bytes of, such as a live station.
   """
-  @callback store_position(ref(), non_neg_integer()) :: :ok | {:error, term()}
+  @callback store_position(ref(), place()) :: :ok | {:error, term()}
 
   @doc """
   Note that a track reached its end.

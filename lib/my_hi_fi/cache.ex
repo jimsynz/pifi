@@ -34,6 +34,7 @@ defmodule MyHiFi.Cache do
   resources do
     resource MyHiFi.Cache.Entry do
       define :put, action: :put, args: [:namespace, :entry_key]
+      define :put_file, action: :put_file, args: [:namespace, :entry_key]
       define :put_from_url, action: :put_from_url, args: [:namespace]
       define :fetch, action: :by_key, args: [:namespace, :entry_key]
       define :list_entries, action: :read

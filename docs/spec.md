@@ -160,10 +160,14 @@ defmodule MyHiFi.Source do
                    favourite?: boolean() | nil}
   @type entry :: {:container, container()} | {:track, track()}
   @type page :: %{entries: [entry()], cursor: term() | nil}
+  @type place :: %{ms: non_neg_integer(), bytes: non_neg_integer() | nil}
   @type playable :: %{uri: String.t(), headers: [{String.t(), String.t()}],
-                      transport: :http | :hls, container: :none | :mpeg_ts | :ogg,
+                      transport: :http | :hls | :download,
+                      container: :none | :mpeg_ts | :ogg,
                       format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :unknown,
-                      live?: boolean(), position_ms: non_neg_integer()}
+                      live?: boolean(), position_ms: non_neg_integer(),
+                      key: String.t() | nil,
+                      position_bytes: non_neg_integer() | nil}
 
   @callback title() :: String.t()
   @callback icon() :: atom()
@@ -173,7 +177,7 @@ defmodule MyHiFi.Source do
   @callback track(ref()) :: {:ok, track()} | {:error, term()}
   @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
   @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
-  @callback store_position(ref(), non_neg_integer()) :: :ok | {:error, term()}
+  @callback store_position(ref(), place()) :: :ok | {:error, term()}
   @callback finished(ref()) :: :ok | {:error, term()}
   @callback ref_to_string(ref()) :: {:ok, String.t()} | {:error, term()}
   @callback ref_from_string(String.t()) :: {:ok, ref()} | {:error, term()}
@@ -238,6 +242,11 @@ Notes on the behaviour:
   with no container and 8 give MP3 inside MPEG-TS. Of the 6 Ogg stations, 3 hold
   Vorbis and 3 hold FLAC, and the service reports the codec `OGG` for every one.
   One field cannot say any of that. See sections 6.3 and 6.4.
+- `:download` is the third transport. A podcast episode arrives faster than its own
+  audio, so this device writes it to a file and reads that file. `key` names the
+  file and `position_bytes` says where to begin in it. See section 6.2.1.
+- `store_position/2` takes a place, and a place holds the time and the byte. The byte
+  is what makes a resume exact, and section 9 holds the reason.
 - `ref_to_string/1` and `ref_from_string/1` name a `ref` and read that name back.
   The player keeps the last station in the settings, and a setting holds a string.
   A source gives `{:error, :cannot_name}` for a `ref` that it does not name: the
@@ -287,7 +296,8 @@ several, and `aplay` opens a device. One HD-Audio card of a laptop holds the
 devices 3, 7, 8 and 9 for HDMI and holds no device 0, so `plughw:CARD=Generic,DEV=0`
 gives `audio open error: No such file or directory`. The `id` of a device is
 therefore its ALSA hardware name, such as `hw:CARD=Generic_1,DEV=0`, and
-`sink_spec/1` adds the `plug` layer to it. The title names the card and the
+`sink_spec/1` names the `rate48` definition of `/etc/asound.conf` in its place,
+which holds the `plug` layer and the card at 48000 Hz. See section 6.2. The title names the card and the
 device, such as `HD-Audio Generic, ALC255 Analog`.
 
 It reads `/proc/asound/cards` and `/proc/asound/card*/pcm*p/info`, so it runs no
@@ -530,10 +540,24 @@ about 20 seconds of samples, and a request to stop then waits behind all of them
 The link to the sink allows eight buffers, which is under half a second. ALSA
 holds another half second, and the decoder runs much faster than the sound.
 
-The player does no resampling. It tells `aplay` the sample rate that the decoder
-gives. The DAC accepts 44.1 kHz and 48 kHz. If the rate changes, the player
-starts `aplay` again. This removes the need for a resampler, and it therefore
-removes the need for ffmpeg.
+The player holds no resampler of its own. It tells `aplay` the sample rate that
+the decoder gives, and if that rate changes it starts `aplay` again. This removes
+the need for ffmpeg.
+
+**ALSA holds the card at 48000 Hz, and that is not a preference.** USB audio sends
+one isochronous packet in each 1 ms frame, so 44100 Hz needs 44.1 samples in a
+packet and a controller must alternate the size of them. The dwc2 controller of
+this board handles that badly: it wrote
+`WARNING: drivers/usb/dwc2/hcd.c:2685 dwc2_assign_and_init_hc` while a 44100 Hz
+stream played on 2026-08-24, and a person heard noise.
+
+`rate48` of `/etc/asound.conf` therefore holds the card at 48000 Hz and ALSA
+converts. `MyHiFi.Output.Alsa.sink_spec/1` names that definition in the place of
+`plughw`. The DAC accepts 44100 Hz, so nothing below this layer would have chosen
+to convert. See section 17 for the tone that found it.
+
+Almost every podcast holds 44100 Hz MP3, and both RNZ streams hold 24000 Hz, which
+is why internet radio never met this and the first podcast did.
 
 ICY metadata: `MyHiFi.Player.HttpSource` reads the stream with `Req`, so the same
 element reads the ICY titles. It sends the `Icy-MetaData: 1` request header, and
@@ -552,6 +576,23 @@ Three answers from real stations on 2026-08-21. A Shoutcast station sends
 `icy-metaint` and the titles. RNZ National sends `icy-metaint` and empty blocks
 only, so the page shows the station and no track. Some stations send no
 `icy-metaint` header, and every byte is then audio.
+
+### 6.2.1 A podcast episode
+
+An episode does not arrive at the bitrate of its audio. A server sends the whole
+file at the speed of the network, so the demand of Membrane cannot pace it: that
+demand reaches the pad of an element, and it cannot reach a socket that Finch owns.
+`MyHiFi.Player.HttpSource` therefore dropped the oldest audio of an episode 1259
+times in one read, and a person heard fragments.
+
+`MyHiFi.Player.Download` writes the file, and `MyHiFi.Player.FileSource` reads it at
+the speed of the sound card. **A file needs no flow control.** The file is the
+buffer, so the element holds no queue of its own: it reads no further than the bytes
+that the download reports, and it waits there.
+
+A stop of the playback does not end a download. The request is already in flight, and
+a content delivery network often sends the whole file first. A later play of that
+episode therefore asks the network for nothing and it begins at once.
 
 ### 6.3 HLS
 
@@ -676,7 +717,8 @@ Domain `MyHiFi.Podcast`:
   two rows for one podcast.
 - `Episode` holds one recording. Attributes: `id`, `show_id`, `guid`, `title`,
   `subtitle`, `description`, `audio_url`, `mime_type`, `byte_length`,
-  `duration_ms`, `published_at`, `artwork_url`, `position_ms`, `played?`.
+  `duration_ms`, `published_at`, `artwork_url`, `position_ms`, `position_bytes`,
+  `played?`.
   `show_id` with `guid` is the identity, because a `guid` is unique inside its feed
   and not between feeds.
 - Actions on `Show`: `read`, `destroy`, `subscriptions`, `upsert_from_feed`,
@@ -856,8 +898,19 @@ network and the web interface active. It also keeps the last position.
 
 When the device leaves standby, it starts the last track again. For a live stream
 it opens the station again, because a live stream has no position. For a track
-with a length, it starts at the last position. No source gives a track with a
-length yet, so the player stores no position and holds no way to move through a
+with a length, it starts at the last position. A podcast episode is such a track.
+`MyHiFi.Player` calls `store_position/2` on the source when it stops, and when it
+enters standby. It gives a place, and a place holds two numbers: the time from the
+start, and the byte of the file that the reader had reached.
+
+**The byte is what makes a resume exact.** A byte offset from a time alone needs a
+bitrate, and 11 of 46 real episodes hold more than one: such a resume landed as much
+as 1994.6 s from the mark. `MyHiFi.Player.FileSource` reports the byte that it read
+and `MyHiFi.Player` holds the time, so the two come from one stop and nothing turns
+one into the other. See section 17.
+
+`MyHiFi.Source.Podcasts` writes both on the episode, and the next play opens the file
+at that byte. See section 5.6.1. No interface holds a control that moves through a
 stream.
 
 On the first boot the device starts with nothing selected. It does not play.
@@ -999,8 +1052,16 @@ of its own. Two callers may therefore choose one key and hold different things.
    cannot know: the four types that this device serves, the read of the first bytes
    because a `content-type` header is often wrong, and the 4 MB limit for one
    picture.
-2. **Downloads.** A later version holds `:download` and keys by the identifier of an
-   episode.
+2. **Downloads.** `MyHiFi.Player.Download` holds `download` and keys by the
+   identifier of an episode. It reads the file as fast as the network allows, and
+   `MyHiFi.Player.FileSource` plays it while it grows. An entry holds `keep?` while
+   a person is in the middle of the episode, and `finished/1` releases that mark.
+
+   A file waits at `<data>/partial/<episode id>` while it grows, and not in the
+   cache. `MyHiFi.Cache.Entry.Changes.Write` names a row that names a file that
+   exists, and a file whose size changes would make the accounting of the cache
+   wrong. `MyHiFi.Player.Download.sweep/0` removes a partial file that an
+   interruption left, because no row names such a file and no eviction can see it.
 
 The limit is the free space of the partition, less a fixed reserve of 1 GB. A share of
 the free space would give a reserve that grows for no reason on a card of 14.2 GB, and
@@ -1039,9 +1100,18 @@ Three rules keep the cache safe.
   can hold a script, and this device serves each logo from its own address. Such
   a script would run with the rights of the web interface.
 
-The stream buffer is not part of the cache. It is a ring buffer in memory. See
-section 6.2. A buffer on the SD card would write all the time, and that shortens
-the life of the card.
+**The buffer of a live stream is not part of the cache.** It is a ring buffer in
+memory. See section 6.2. Such a buffer on the SD card would write all the time, and
+that shortens the life of the card.
+
+A podcast episode is not a live stream, and that reason does not reach it. It is a
+finite file that this device writes one time and then reads, so it goes on the card.
+An episode is about 50 MB, and two hours of listening each day is about 115 MB each
+day. A person who plays one episode two times writes it one time, because the cache
+holds it.
+
+**A file is also the only way that a resume can be exact.** A byte offset from a
+time needs a bitrate, and 11 of 46 real episodes hold more than one. See section 17.
 
 ## 14. Network
 
@@ -1082,7 +1152,7 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 
 | Item | Risk | Action |
 |---|---|---|
-| ~~RAM~~ | Small, and no longer a risk. Linux sees 363.9 MB of the 512 MB, because the custom system gives 16 MB to the GPU and 16 MB to CMA. A measurement on 2026-08-22 gave 202.4 MB available with HE-AAC in play, and the BEAM held 84.3 MB. | HLS and the artwork cache are still to come. Measure again after each one. |
+| ~~RAM~~ | Small, and no longer a risk. Linux sees 363.9 MB of the 512 MB, because the custom system gives 16 MB to the GPU and 16 MB to CMA. Measured again on 2026-08-24, with podcasts, the artwork cache and HLS all in place: 187.8 MB available with an HLS stream in play, and the BEAM held 98.6 MB. | |
 | ~~Bundlex target~~ | Solved on 2026-08-21. `mix.exs` sets the four variables, and the arm libraries download. | |
 | Precompiled builds | Membrane may change or remove an `aarch64` build. | Pin the versions, as `membrane_mp3_mad_plugin` already does. |
 | ~~USB host mode~~ | Solved on 2026-08-21. The custom system holds `dr_mode=host`, the USB host stack, and the USB audio driver. | |
@@ -1094,6 +1164,12 @@ gives, so cowboy and cowlib stay out of the dependency tree.
 | Event rate | A `Player.Progress` event each second, and a slow SPI display, may not agree. | Let a display drop events. Measure the PiTFT refresh time. |
 | PiTFT pins | The HAT uses SPI0 and some GPIO pins. | Confirm that the I2C pins stay free. |
 | PiTFT parts | The clone may not use an ILI9341 screen and an STMPE610 touch controller. | Confirm the parts before you write the driver. |
+| ~~A source that arrives faster than the sound~~ | Answered on 2026-08-24. A local file needs no flow control, so `MyHiFi.Player.Download` writes the episode and `MyHiFi.Player.FileSource` reads it at the speed of the sound card. See section 6.2.1. | Read it on the board. |
+| ~~A stop that gives up before its own work ends~~ | Answered on 2026-08-24. The player stops the sound, answers, and takes the pipeline down in `handle_continue/2`. `MyHiFi.Output.APlaySink` closes its `aplay` port and drops each buffer after that. | |
+| ~~An address that holds no scheme~~ | Answered on 2026-08-24. `MyHiFi.Artwork.readable?/1` refuses one, and the job cancels instead of failing three times. | |
+| ~~The position of an episode~~ | Answered on 2026-08-24. The episode holds `position_bytes` beside `position_ms`, and no bitrate turns one into the other. See section 9. | Measure the skew on the board. It is the latency of the pipeline, which was 35 to 245 ms on 2026-08-21. |
+| The life of the SD card | An episode of 50 MB goes on the card now. Two hours of listening each day is about 115 MB each day, and 42 GB in a year. | Section 13 holds the reasoning. Measure the size of a real episode, and watch the free space. |
+| A download that no person finishes | An entry holds `keep?` until the episode is played, so an episode that a person abandons holds its file against every eviction. 250 of those fill the cache. | `finished/1` releases the mark for an episode that ends. A reconcile that releases the file of an episode whose row is gone is still to write. |
 
 ## 16. Order of work
 
@@ -1269,3 +1345,151 @@ cache saves, because that tree is 1.5 GB and the 6 artefacts are 14 MB. A
 measurement in the CI image on 2026-08-22 gave 10 minutes for the 6 packages,
 and each later run reads the cache and builds nothing. A new package version, or
 a new version of the system, starts one more build.
+
+### The lead that the pipeline holds over the sound, measured on 2026-08-24
+
+A resume opens the file at `position_bytes`, so how far it lands from the place
+that a person stopped at is the lead that the pipeline holds over the sound. Each
+row is a play of 24 seconds and a stop, and the lead is `position_bytes` as a time
+less `position_ms`.
+
+| The pipeline | Lead |
+|---|---|
+| As it was | 31.0 s |
+| With `busy_limits_port` on the `aplay` port | 14.0 s |
+| With `auto_demand_size` on the decoder as well | 1.7 s |
+
+**The queue of a port has no limit of its own**, so `Port.command/2` never blocked
+and nothing paced the pipeline. **Membrane gives a pad that counts bytes 600,000 of
+them** by default, and that is 37.5 seconds of a 128 kbit/s episode. Neither number
+showed on a live stream, because the network paced it.
+
+1.7 s is the rest of the pipeline: the queue of the decoder, the queue of the port,
+and the buffer of ALSA. A longer play gave 3.8 s, so the lead is small and it is not
+a constant.
+
+**A resume therefore steps back before the byte that it holds.** 3.8 s of a
+128 kbit/s episode is 61 KB, and `MyHiFi.Player.FileSource` steps back 96 KB, so the
+step is larger than any lead that a read has measured. A person hears about two
+seconds again, and never loses a word. The margin is in bytes because the lead is
+itself a count of bytes, so it needs no bitrate and it holds for a variable bitrate
+file.
+
+`MyHiFi.Player.Mp3Frame` also lands that byte on a frame boundary. Without it a
+resume opens the file in the middle of a frame and MAD skips bytes until it finds
+the next one: a read measured 591 such skips. A read on 2026-08-24 stepped back
+98,473 bytes from 3,981,312, which is 169 bytes past the margin and under one frame
+of it, and the decoder then reported one skipped byte in the place of 591.
+
+**The count that a page shows still holds the time that a person heard**, so it reads
+a second or two ahead of the sound after a resume. Making the two agree needs the
+timeline of the decoder in the place of the clock of the player, and that belongs
+with a control that moves through a track.
+
+### The sample rate that this board can play, measured on 2026-08-24
+
+A podcast sounded distorted on the board. The file was a valid 128 kbit/s, 44100 Hz
+MP3, it played correctly on another machine, and the decoder reported no malformed
+frame. A 440 Hz tone straight to `aplay`, with no decoder and no pipeline, found the
+reason.
+
+| Device | Rate | Level of the tone | Result |
+|---|---|---|---|
+| `plughw` | 44100 Hz | 36% of full scale | rough |
+| `plughw` | 24000 Hz | 36% | clean |
+| `plughw` | 44100 Hz | 3.6% | rough |
+| `plughw` | 48000 Hz | 36% | clean |
+| `plug`, slave rate 48000 | 44100 Hz | 36% | **clean** |
+
+**The level decides nothing and the rate decides everything.** 24000 Hz and 48000 Hz
+each hold a whole number of samples in a millisecond, and 44100 Hz does not. USB
+audio sends one isochronous packet in each 1 ms frame, so 44100 Hz needs 44.1
+samples in a packet and a controller must alternate the size of them. The dwc2
+controller of this board wrote
+`WARNING: drivers/usb/dwc2/hcd.c:2685 dwc2_assign_and_init_hc` while such a stream
+played.
+
+`rate48` of `/etc/asound.conf` holds the card at 48000 Hz, and the last row is that
+definition. See section 6.2.
+
+This is not a fault of the podcast work. It was there for every 44100 Hz stream, and
+internet radio never showed it because both RNZ streams hold 24000 Hz.
+
+### The measurements of 2026-08-24
+
+The whole firmware ran on the board on 2026-08-24, with 13 subscribed shows, 2054
+episodes and 27 artwork entries on the data partition. The device is idle in the
+first column, and the numbers come from `/proc/meminfo` and `:erlang.memory/1`.
+
+| Measurement | Idle | HLS HE-AAC in play |
+|---|---|---|
+| Memory available | 209.8 MB | 187.8 MB |
+| BEAM memory | 88.5 MB | 98.6 MB |
+| Process memory | 27.2 MB | 29.2 MB |
+| Binary memory | 2.5 MB | 4.5 MB |
+| CPU of the four cores | — | 3.0% |
+
+This is the HLS measurement that the table above says is absent. HLS needs 10.1 MB
+of the BEAM for one stream, and 3.0% of the four cores. Podcasts and the artwork
+cache together cost 11.5 MB of the BEAM at idle, against the 77.0 MB of
+2026-08-22. The memory is therefore not a risk, and section 15 no longer holds
+that row open.
+
+The artwork cache, with 40 station addresses read and served:
+
+| Measurement | Value |
+|---|---|
+| Addresses read, and pictures stored | 40 read, 33 stored, 27 entries. Several stations name one address. |
+| Time to read 40 logos over the network | 17.9 s |
+| `MyHiFi.Cache.fetch/2`, one entry | 6.05 ms |
+| `MyHiFi.Cache.touch/1`, one entry | 11.82 ms |
+| The same write in plain SQL | 2.21 ms |
+| `MyHiFi.Artwork.serve/1`, one entry, in series | 26.06 ms |
+| 33 entries served, 8 at a time | 438 ms, and 13.27 ms of wall clock for each |
+| Cache entries, and the bytes on disk | 27, and 2.4 MB |
+| The cache limit, and the free space | 12.45 GB, of 15.2 GB with 14.4 GB free |
+| The 5 migrations against an empty database | 704 ms and 902 ms, in two runs |
+| The database with 2054 episodes | 4.6 MB, against 332 KB before the feed reads |
+
+**The write for each read costs 11.8 ms and not the "under a millisecond" that
+`docs/cache-plan.md` names.** Plain SQL writes the row in 2.21 ms, so the Ash
+action holds 9.6 ms of that. A page of 40 covers therefore needs about 0.5 s of
+database work, and it needs that only on a first view, because the route sends a
+cache header of one week. The plan keeps its first answer, and it keeps it for the
+header and not for the speed of the write.
+
+A refresh of 13 subscribed feeds, and a first read of 12 of them:
+
+| Measurement | Value |
+|---|---|
+| Time for 13 feeds | 47.4 s, and 3.6 s for each |
+| Feeds read, and feeds that failed | 13 and 0 |
+| BEAM memory before, at the peak, and after | 111.8 MB, 123.5 MB, 108.6 MB |
+| Memory available at its lowest | 146.4 MB |
+
+The peak needs 11.7 MB more than the state before it, and the memory available
+never went under 146.4 MB. A refresh is therefore not a risk. The BEAM figures of
+this table hold the shell of a person as well, so the idle table above is the one
+to compare against.
+
+### The bitrate of a real episode, measured on 2026-08-24
+
+I read the newest episode of 47 feeds of the index, three windows of 256 KB in
+each, and then every frame of the whole file of each episode that the windows
+disagreed about.
+
+| Measurement | Value |
+|---|---|
+| Episodes read | 46 of 47 feeds |
+| Episodes that hold one bitrate | 33 |
+| Episodes that hold more than one, by the windows | 13 |
+| Episodes that hold more than one, by every frame | 11 |
+| Worst seek error of those 11 | 1994.6 s |
+| Seek error of a constant bitrate episode of the same sweep | 0.12 s to 0.48 s |
+
+**11 of 46 episodes hold more than one bitrate.** One episode holds 9 bitrates,
+from 32 to 320 kbit/s, and another holds 14, from 8 to 160 kbit/s. The 5 episodes
+of the measurement of 2026-08-23 all held one bitrate, and that answer was too
+small a sample. A resume of such an episode lands as much as 1994.6 s from the
+mark, because `MyHiFi.Player.Mp3` reads the bitrate of the first frame and the
+rest of the file holds another one.

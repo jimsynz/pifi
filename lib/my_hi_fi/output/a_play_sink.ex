@@ -6,9 +6,17 @@ defmodule MyHiFi.Output.APlaySink do
   software. `membrane_alsa_plugin` does not exist, so this sink starts `aplay` in
   an Erlang port and writes the samples to it.
 
-  The port gives the pacing for free. `aplay` reads at the rate of the clock of
-  the DAC, so a write blocks once its buffer is full, and the pipeline then runs
-  at the speed of the hardware.
+  `busy_limits_port` is what gives the pacing. `aplay` reads at the rate of the
+  clock of the DAC, and with that option `Port.command/2` blocks this element once
+  the queue of the port holds `@busy_limits` bytes. The demand of Membrane then
+  stops reaching the decoder, and the whole pipeline runs at the speed of the
+  hardware.
+
+  **Without the option the queue of a port has no limit.** `Port.command/2` never
+  blocks, so nothing pushed back and the pipeline ran ahead of the sound. A read on
+  2026-08-24 measured the reader of the file 31 seconds in front of what a person
+  heard, which put a resume 31 seconds past the place that they stopped at. A live
+  stream hid this, because the network paced it instead.
 
   `aplay` starts again when the stream format changes, because the format is on
   the command line and not in the stream.
@@ -20,14 +28,25 @@ defmodule MyHiFi.Output.APlaySink do
 
   alias Membrane.RawAudio
 
+  # How many bytes of samples may wait in the queue of the port. `Port.command/2`
+  # blocks above the high mark and it runs again below the low one, so this is the
+  # lead that the pipeline may hold over the sound. 44100 Hz of `s24le` stereo is
+  # 264,600 bytes each second, so 128 KB is under half a second and 32 KB is about a
+  # tenth of one.
+  #
+  # This is what makes `position_bytes` of an episode name the place that a person
+  # heard. See the module documentation.
+  @busy_limits {32 * 1024, 128 * 1024}
+
   def_options(
     device: [
       spec: String.t(),
       default: "default",
       description: """
-      The ALSA device, such as `plughw:CARD=Audio,DEV=0`. A `plughw`
-      device lets ALSA convert the format and the rate for a DAC that
-      accepts neither.
+      The ALSA device, such as `rate48:CARD=Audio,DEV=0`. `MyHiFi.Output.Alsa`
+      builds that name, and `rate48` of `/etc/asound.conf` converts the sample
+      format and holds the card at 48000 Hz. 44100 Hz is rough on this board,
+      because USB audio needs a whole number of samples in each 1 ms packet.
       """
     ]
   )
@@ -41,10 +60,11 @@ defmodule MyHiFi.Output.APlaySink do
             device: String.t(),
             port: port() | nil,
             format: RawAudio.t() | nil,
-            sounded?: boolean()
+            sounded?: boolean(),
+            silent?: boolean()
           }
 
-    defstruct device: "default", port: nil, format: nil, sounded?: false
+    defstruct device: "default", port: nil, format: nil, sounded?: false, silent?: false
   end
 
   @impl true
@@ -54,6 +74,13 @@ defmodule MyHiFi.Output.APlaySink do
 
   @impl true
   def handle_stream_format(:input, format, _ctx, %State{format: format} = state) do
+    {[], state}
+  end
+
+  # A person stopped, so this element is the null sink now. Starting `aplay` again
+  # for a new format would make sound after that.
+  @impl true
+  def handle_stream_format(:input, _format, _ctx, %State{silent?: true} = state) do
     {[], state}
   end
 
@@ -84,10 +111,33 @@ defmodule MyHiFi.Output.APlaySink do
     {[], state}
   end
 
+  # **This is the null sink.** No port means no sound, and the samples go nowhere.
+  # A stop closes the port at once and the pipeline stops in its own time, so a
+  # person hears silence as soon as they ask for it. See `MyHiFi.Player`.
+  @impl true
+  def handle_buffer(:input, _buffer, _ctx, %State{port: nil} = state) do
+    {[], state}
+  end
+
   @impl true
   def handle_end_of_stream(:input, _ctx, %State{} = state) do
     {[], close_port(state)}
   end
+
+  @doc """
+  Stop the sound now, and let the pipeline stop later.
+
+  `aplay` holds the sound card and it reads at the rate of the clock of the DAC, so
+  closing the port is what makes the room quiet. A measurement on 2026-08-21 gave 35
+  to 245 ms from a stop to silence.
+  """
+  @impl true
+  def handle_parent_notification(:silence, _ctx, %State{} = state) do
+    {[], %State{close_port(state) | silent?: true}}
+  end
+
+  @impl true
+  def handle_parent_notification(_notification, _ctx, %State{} = state), do: {[], state}
 
   @impl true
   def handle_info({port, {:exit_status, status}}, _ctx, %State{port: port} = state) do
@@ -119,7 +169,12 @@ defmodule MyHiFi.Output.APlaySink do
       "-"
     ]
 
-    Port.open({:spawn_executable, aplay()}, [:binary, :exit_status, args: arguments])
+    Port.open({:spawn_executable, aplay()}, [
+      :binary,
+      :exit_status,
+      {:busy_limits_port, @busy_limits},
+      args: arguments
+    ])
   end
 
   defp close_port(%State{port: nil} = state), do: state

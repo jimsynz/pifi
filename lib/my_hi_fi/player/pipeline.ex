@@ -23,6 +23,7 @@ defmodule MyHiFi.Player.Pipeline do
 
   use Membrane.Pipeline
 
+  alias MyHiFi.Player.FileSource
   alias MyHiFi.Player.Hls
   alias MyHiFi.Player.HttpSource
   alias MyHiFi.Player.PortDecoder
@@ -46,6 +47,12 @@ defmodule MyHiFi.Player.Pipeline do
   # `adapter/2`.
   @fdk_input_bytes 8192
 
+  # How many bytes of MP3 may wait in the queue of the decoder. This is not about
+  # what MAD can hold: it is the lead that the pipeline keeps over the sound, and
+  # that lead decides how far a resume lands from the place that a person stopped
+  # at. 16 KB is about one second of a 128 kbit/s episode. See `adapter/2`.
+  @mad_input_bytes 16 * 1024
+
   @impl true
   def handle_init(_ctx, options) do
     playable = options.playable
@@ -64,6 +71,17 @@ defmodule MyHiFi.Player.Pipeline do
 
   # The sink says when sound starts, and not the source. Every transport reaches
   # the sink, and only the sink knows that samples arrived.
+  @doc """
+  Stop the sound now.
+
+  The player answers a person before it takes the pipeline down, so the sink becomes
+  a null sink and the teardown happens after. See `MyHiFi.Player`.
+  """
+  @impl true
+  def handle_call(:silence, _ctx, state) do
+    {[reply: :ok, notify_child: {:sink, :silence}], state}
+  end
+
   @impl true
   def handle_child_notification(:playing, :sink, _ctx, state) do
     send(state.parent, {:pipeline_playing, self()})
@@ -73,6 +91,12 @@ defmodule MyHiFi.Player.Pipeline do
   @impl true
   def handle_child_notification({:metadata, title}, :source, _ctx, state) do
     send(state.parent, {:pipeline_metadata, self(), title})
+    {[], state}
+  end
+
+  @impl true
+  def handle_child_notification({:position_bytes, bytes}, :source, _ctx, state) do
+    send(state.parent, {:pipeline_position_bytes, self(), bytes})
     {[], state}
   end
 
@@ -94,6 +118,19 @@ defmodule MyHiFi.Player.Pipeline do
     child(:source, %HttpSource{
       uri: playable.uri,
       headers: playable.headers,
+      buffer_bytes: buffer_bytes
+    })
+  end
+
+  # A podcast episode is a file that `MyHiFi.Player.Download` writes as fast as the
+  # network allows. The element reads it at the speed of the sound card, so the file
+  # is the buffer and this transport needs none of the ring buffer of `HttpSource`.
+  defp source(%{transport: :download} = playable, buffer_bytes) do
+    child(:source, %FileSource{
+      key: playable.key,
+      uri: playable.uri,
+      position_bytes: playable.position_bytes || 0,
+      format: playable.format,
       buffer_bytes: buffer_bytes
     })
   end
@@ -171,9 +208,21 @@ defmodule MyHiFi.Player.Pipeline do
     via_in(link, :input, auto_demand_size: @fdk_input_bytes)
   end
 
-  # An MP3 or an Ogg stream needs nothing. `MyHiFi.Player.HttpSource` gives a
-  # `Membrane.RemoteStream` with no content format. MAD holds the bytes that it
-  # cannot use yet, and a port decoder reads a pipe, so neither loses anything.
+  # **The queue of the decoder is the lead that the pipeline holds over the sound.**
+  # Membrane gives a pad that counts bytes 1500 * 400 = 600,000 of them by default,
+  # and that is 37.5 seconds of a 128 kbit/s episode. A read on the board on
+  # 2026-08-24 measured the reader 14 seconds in front of what a person heard, so a
+  # resume began 14 seconds past the place that they stopped at.
+  #
+  # A live stream hid this. `MyHiFi.Player.HttpSource` holds its own ring buffer for
+  # the jitter of a network, so a small queue here costs it nothing.
+  defp adapter(link, %{format: :mp3}) do
+    via_in(link, :input, auto_demand_size: @mad_input_bytes)
+  end
+
+  # An Ogg stream needs nothing. `MyHiFi.Player.HttpSource` gives a
+  # `Membrane.RemoteStream` with no content format, and a port decoder reads a pipe,
+  # so it loses nothing.
   defp adapter(link, _playable), do: link
 
   # MAD gives 24-bit samples, and FDK gives 16-bit ones. The sink reads the format

@@ -29,6 +29,10 @@ defmodule MyHiFi.Player do
   @progress_interval :timer.seconds(1)
   @restart_delay :timer.seconds(2)
   @terminate_timeout :timer.seconds(5)
+
+  # A person hears silence inside this, or the pipeline is wedged and the forced
+  # terminate takes it. A stop of an HLS stream took 360 ms on 2026-08-24.
+  @silence_timeout :timer.seconds(1)
   @max_restarts 5
   @output_device_key "output_device"
   @last_source_key "last_source"
@@ -49,6 +53,7 @@ defmodule MyHiFi.Player do
             artwork_path: String.t() | nil,
             started_at: integer() | nil,
             offset_ms: non_neg_integer(),
+            position_bytes: non_neg_integer() | nil,
             restarts: non_neg_integer(),
             standby?: boolean()
           }
@@ -63,6 +68,7 @@ defmodule MyHiFi.Player do
               artwork_path: nil,
               started_at: nil,
               offset_ms: 0,
+              position_bytes: nil,
               restarts: 0,
               standby?: false
   end
@@ -132,6 +138,16 @@ defmodule MyHiFi.Player do
   # restart. The device selects that station and plays nothing: a stereo that
   # starts to play by itself after a power cut is a surprise, and section 9 asks
   # for silence at the first start.
+  # A person waits for no pipeline. `handle_call(:stop, …)` answers as soon as the
+  # sound stops, and this takes the pipeline down before the process reads another
+  # message. A `play` that follows therefore still finds the sound card free, which
+  # is the reason that `stop_pipeline/1` waits at all.
+  @impl GenServer
+  def handle_continue({:terminate, pipeline, monitor}, %State{} = state) do
+    stop_pipeline(%State{state | pipeline: pipeline, monitor: monitor})
+    {:noreply, %State{state | pipeline: nil, monitor: nil, started_at: nil}}
+  end
+
   @impl GenServer
   def handle_continue(:restore, %State{} = state) do
     {:noreply, restore_station(%State{state | standby?: stored_standby?()})}
@@ -156,7 +172,7 @@ defmodule MyHiFi.Player do
   @impl GenServer
   def handle_call(:stop, _from, %State{} = state) do
     store_position(state)
-    state = stop_pipeline(state)
+    silence(state)
     Event.publish(:player, %Events.Stopped{reason: :requested})
 
     {:reply, :ok,
@@ -168,17 +184,20 @@ defmodule MyHiFi.Player do
          playable: nil,
          stream_title: nil,
          artwork_path: nil,
-         offset_ms: 0
-     }}
+         offset_ms: 0,
+         position_bytes: nil
+     }, {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
   @impl GenServer
   def handle_call({:standby, true}, _from, %State{} = state) do
     store_position(state)
-    state = stop_pipeline(state)
+    silence(state)
     Settings.put(@standby_key, "true")
     Event.publish(:player, %Events.Standby{entered?: true})
-    {:reply, :ok, %State{state | standby?: true, stream_title: nil}}
+
+    {:reply, :ok, %State{state | standby?: true, stream_title: nil},
+     {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
   @impl GenServer
@@ -271,6 +290,15 @@ defmodule MyHiFi.Player do
      }}
   end
 
+  # `MyHiFi.Player.FileSource` reports the byte that it has read. The player holds
+  # the last one, and `store_position/1` writes it beside the time. The two numbers
+  # therefore come from one stop, and no part of this firmware turns a time into a
+  # byte with a bitrate. See `MyHiFi.Source.place/0`.
+  @impl GenServer
+  def handle_info({:pipeline_position_bytes, pipeline, bytes}, %State{pipeline: pipeline} = state) do
+    {:noreply, %State{state | position_bytes: bytes}}
+  end
+
   @impl GenServer
   def handle_info({:pipeline_metadata, pipeline, title}, %State{pipeline: pipeline} = state) do
     # The title stays here as well, because a page that opens in the middle of a
@@ -341,7 +369,8 @@ defmodule MyHiFi.Player do
                stream_title: nil,
                artwork_path: nil,
                started_at: nil,
-               offset_ms: playable.position_ms
+               offset_ms: playable.position_ms,
+               position_bytes: playable[:position_bytes]
            }}
 
         {:error, reason} ->
@@ -479,6 +508,21 @@ defmodule MyHiFi.Player do
     end
   end
 
+  # `aplay` holds the sound card, so closing its port is what makes the room quiet.
+  # The pipeline may take its time after that. A call that no pipeline answers is a
+  # pipeline that is already wedged, and the forced terminate of `stop_pipeline/1`
+  # holds that case.
+  defp silence(%State{pipeline: nil}), do: :ok
+
+  defp silence(%State{pipeline: pipeline}) do
+    Membrane.Pipeline.call(pipeline, :silence, @silence_timeout)
+    :ok
+  catch
+    :exit, _reason ->
+      Logger.warning("The pipeline did not answer a silence.")
+      :ok
+  end
+
   defp stop_pipeline(%State{pipeline: nil} = state), do: state
 
   # This waits for the old pipeline, and the wait is what makes a change of
@@ -547,7 +591,8 @@ defmodule MyHiFi.Player do
         playable: nil,
         stream_title: nil,
         artwork_path: nil,
-        offset_ms: 0
+        offset_ms: 0,
+        position_bytes: nil
     }
   end
 
@@ -561,7 +606,7 @@ defmodule MyHiFi.Player do
   defp store_position(%State{source: nil}), do: :ok
 
   defp store_position(%State{source: source, ref: ref} = state) do
-    source.store_position(ref, position_ms(state))
+    source.store_position(ref, %{ms: position_ms(state), bytes: state.position_bytes})
     :ok
   end
 

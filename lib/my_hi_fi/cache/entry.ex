@@ -93,6 +93,33 @@ defmodule MyHiFi.Cache.Entry do
       change MyHiFi.Cache.Entry.Changes.Write
     end
 
+    create :put_file do
+      description """
+      Move a file that already sits on this partition into the cache.
+
+      An episode of a podcast is 50 MB, and nothing reads that into memory. Both
+      paths are under the data partition, so `File.rename/2` copies no byte and the
+      file is either in the cache or where it was.
+
+      The caller owns the file until this action answers. A caller that writes a
+      file over time therefore writes it somewhere else, and it gives that path here
+      when the file is whole. See `MyHiFi.Player.Download`.
+      """
+
+      upsert? true
+      upsert_identity :namespace_entry_key
+
+      accept [:namespace, :entry_key, :content_type, :filename, :keep?]
+
+      argument :path, :string do
+        description "The file to move. It holds the whole thing, and it is not in the cache."
+        allow_nil? false
+        constraints min_length: 1
+      end
+
+      change MyHiFi.Cache.Entry.Changes.Write
+    end
+
     create :put_from_url do
       description """
       Read an address and hold what it gives.
@@ -177,6 +204,12 @@ defmodule MyHiFi.Cache.Entry do
 
       allow_nil? false
       public? true
+
+      # The namespace and the key become the path of a file, so neither may hold a
+      # separator or name a parent directory. Without this a caller could write
+      # outside the cache. The pattern refuses `.` and `..` as well, because a name
+      # must begin with a letter, a number, an underscore, or a hyphen.
+      constraints match: ~r/\A[A-Za-z0-9_-][A-Za-z0-9._-]*\z/
     end
 
     attribute :entry_key, :string do
@@ -191,7 +224,7 @@ defmodule MyHiFi.Cache.Entry do
 
       allow_nil? false
       public? true
-      constraints min_length: 1
+      constraints min_length: 1, match: ~r/\A[A-Za-z0-9_-][A-Za-z0-9._-]*\z/
     end
 
     attribute :last_accessed_at, :utc_datetime_usec do

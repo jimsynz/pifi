@@ -84,6 +84,94 @@ defmodule MyHiFi.CacheTest do
     end
   end
 
+  describe "the names that a caller may use" do
+    # The namespace and the key become the path of a file, so a caller that could
+    # name a parent directory could write anywhere on the partition.
+    test "a key that names a parent directory is refused" do
+      assert {:error, _reason} = Cache.put("artwork", "../../etc/passwd", %{bytes: "x"})
+      assert {:error, _reason} = Cache.put("artwork", "..", %{bytes: "x"})
+      assert {:error, _reason} = Cache.put("artwork", "a/b", %{bytes: "x"})
+      assert keys() == []
+    end
+
+    test "a namespace that names a parent directory is refused" do
+      assert {:error, _reason} = Cache.put("../../etc", "passwd", %{bytes: "x"})
+      assert {:error, _reason} = Cache.put("a/b", "key", %{bytes: "x"})
+      assert keys() == []
+    end
+
+    test "a hash and an identifier are both names that a caller may use" do
+      assert {:ok, _entry} = Cache.put("artwork", String.duplicate("a", 64), %{bytes: "x"})
+      assert {:ok, _entry} = Cache.put("download", Ash.UUID.generate(), %{bytes: "x"})
+      assert {:ok, _entry} = Cache.put("artwork", "abc123.jpg", %{bytes: "x"})
+    end
+  end
+
+  describe "put_file" do
+    # The file must sit on the partition that holds the cache, because the action
+    # moves it and a move across two partitions gives `:exdev`. A caller of this
+    # action builds its path from the same place, so this test does the same.
+    setup do
+      directory = Path.join(Path.dirname(Cache.directory()), "partial_test")
+      File.mkdir_p!(directory)
+      on_exit(fn -> File.rm_rf(directory) end)
+
+      {:ok, path: Path.join(directory, "episode_#{System.unique_integer([:positive])}")}
+    end
+
+    test "it moves the file into the cache and holds its size", %{path: path} do
+      File.write!(path, "the whole episode")
+
+      entry = Cache.put_file!("download", "episode", %{path: path, content_type: "audio/mpeg"})
+
+      assert entry.namespace == "download"
+      assert entry.byte_size == 17
+      assert entry.content_type == "audio/mpeg"
+      assert File.read!(on_disk(entry)) == "the whole episode"
+    end
+
+    test "the file it moved is gone from where it was", %{path: path} do
+      File.write!(path, "audio")
+
+      Cache.put_file!("download", "episode", %{path: path})
+
+      refute File.exists?(path)
+    end
+
+    test "it holds no checksum, because no reader of this firmware asks for one", %{path: path} do
+      File.write!(path, "audio")
+
+      entry = Cache.put_file!("download", "episode", %{path: path})
+
+      assert entry.checksum == nil
+    end
+
+    test "a caller marks an entry to keep as it moves it", %{path: path} do
+      File.write!(path, "audio")
+
+      entry = Cache.put_file!("download", "episode", %{path: path, keep?: true})
+
+      assert entry.keep? == true
+    end
+
+    test "a path that names no file adds no row", %{path: path} do
+      assert {:error, _reason} = Cache.put_file("download", "episode", %{path: path})
+      assert keys() == []
+    end
+
+    test "the same key twice holds one entry", %{path: path} do
+      File.write!(path, "first")
+      Cache.put_file!("download", "episode", %{path: path})
+
+      File.write!(path, "second time")
+      entry = Cache.put_file!("download", "episode", %{path: path})
+
+      assert keys() == ["episode"]
+      assert entry.byte_size == 11
+      assert File.read!(on_disk(entry)) == "second time"
+    end
+  end
+
   describe "fetch" do
     test "it reads one entry of one namespace" do
       entry = put("artwork", "abc123", "x")

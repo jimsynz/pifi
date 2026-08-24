@@ -97,13 +97,42 @@ defmodule MyHiFi.Artwork do
   """
   @spec fetch(String.t()) :: {:ok, String.t()} | {:error, term()}
   def fetch(url) when is_binary(url) and url != "" do
-    case name(url) do
-      nil -> download(url)
-      name -> {:ok, name}
+    if readable?(url) do
+      case name(url) do
+        nil -> download(url)
+        name -> {:ok, name}
+      end
+    else
+      {:error, :no_address}
     end
   end
 
   def fetch(_url), do: {:error, :no_address}
+
+  @doc """
+  Whether this firmware can read one address.
+
+  **4 of the 247 New Zealand stations name the text `"null"` as their logo**,
+  because that is what Radio Browser sends. `Req` raises for an address that holds
+  no scheme, so a caller of `fetch/1` got an exception and not an error, and
+  `MyHiFi.Artwork.Worker` then failed three times for a station that can never hold
+  a picture.
+
+  A feed of a podcast writes its own addresses, so this guards every caller and not
+  the station list alone.
+  """
+  @spec readable?(String.t() | nil) :: boolean()
+  def readable?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] ->
+        is_binary(host) and host != ""
+
+      _other ->
+        false
+    end
+  end
+
+  def readable?(_url), do: false
 
   @doc """
   Where the pictures live.

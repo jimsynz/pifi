@@ -200,7 +200,7 @@ defmodule MyHiFi.Source.InternetRadio do
   # tells every source where a person stopped, and a source that cannot use that
   # says nothing about it.
   @impl MyHiFi.Source
-  def store_position(_ref, _position_ms), do: :ok
+  def store_position(_ref, _place), do: :ok
 
   # A station never ends by itself. The player starts a stream that stops again, so
   # this never runs, and it exists because the behaviour asks every source for it.

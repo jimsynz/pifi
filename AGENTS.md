@@ -19,6 +19,16 @@ Licence: Apache-2.0.
   BEAM held 84.3 MB. One stream needs 2.3% of the four cores. The memory and the
   CPU are therefore not tight, and HLS and the artwork cache are still to come.
 - **The USB port holds the DAC.** For this reason the knob uses I2C, not USB.
+- **The card plays at 48000 Hz, and 44100 Hz is rough.** USB audio sends one
+  isochronous packet in each 1 ms frame, so 44100 Hz needs 44.1 samples in a packet
+  and a controller must alternate the size of them. The dwc2 controller of this board
+  handles that badly. A 440 Hz tone straight to `aplay` on 2026-08-24 was rough at
+  44100 Hz at two levels, and clean at 24000 Hz and at 48000 Hz. `rate48` of
+  `rootfs_overlay/etc/asound.conf` therefore holds the card at 48000 Hz, and
+  `MyHiFi.Output.Alsa.sink_spec/1` names it in the place of `plughw`. **Do not tell
+  `aplay` to open the card at the rate of the decoder.** The DAC accepts 44100 Hz, so
+  nothing below that layer will choose to convert. Almost every podcast holds 44100
+  Hz MP3, and both RNZ streams hold 24000 Hz, which is why radio never showed this.
 - **The Nerves system holds no audio decoder.** It holds `alsa-lib`, `aplay`, and
   `amixer` only. `membrane_alsa_plugin` does not exist. The output sink sends raw
   samples to `aplay` through an Erlang port.
@@ -116,9 +126,16 @@ Licence: Apache-2.0.
   child of it, because Oban queries its own tables as soon as it starts. Like the
   secret, this runs for a target build in any `MIX_ENV` and never on the host, so
   development and test keep using `mix ash.setup`.
-- **The stream buffer stays in memory.** It is a ring buffer of compressed bytes,
-  placed before the decoder. Never buffer the stream on the SD card, and never
-  buffer raw samples.
+- **The buffer of a live stream stays in memory.** It is a ring buffer of compressed
+  bytes, placed before the decoder. Never buffer a live stream on the SD card, and
+  never buffer raw samples anywhere. Such a buffer writes all the time, and that
+  shortens the life of the card.
+
+  **A podcast episode is not a live stream, and it goes on the card.** It is a finite
+  file, so this device writes it one time and then reads it. That is what makes the
+  audio correct and the resume exact: an episode arrives faster than its own audio,
+  and the demand of Membrane cannot pace a socket that Finch owns. See
+  `MyHiFi.Player.Download` and section 13 of the specification.
 
 ## Structure
 
