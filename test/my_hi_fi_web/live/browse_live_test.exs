@@ -357,6 +357,63 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       refute has_element?(view, ~s(button[aria-current="true"]), "RNZ Concert")
     end
 
+    test "the row of the entry that plays holds the bar and the level meter", %{conn: conn} do
+      playing = station(%{title: "RNZ National", country_code: "NZ"})
+      station(%{title: "RNZ Concert", country_code: "NZ"})
+
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+      open(view, "Countries")
+      open(view, "NZ")
+
+      Event.publish(:player, %Events.Started{
+        source: MyHiFi.Source.InternetRadio,
+        track: %{ref: {:station, playing.id}, title: "RNZ National"},
+        artwork_path: nil,
+        live?: true
+      })
+
+      assert has_element?(view, "#entry-1 span.led")
+      assert has_element?(view, "#play-1 span.meter")
+      assert render(element(view, "#play-1")) =~ "Playing"
+
+      refute has_element?(view, "#entry-0 span.led")
+      refute has_element?(view, "#play-0 span.meter")
+    end
+
+    test "a pause keeps the marker, and it names the pause", %{conn: conn} do
+      playing = station(%{title: "RNZ National", country_code: "NZ"})
+
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+      open(view, "Countries")
+      open(view, "NZ")
+
+      Event.publish(:player, %Events.Started{
+        source: MyHiFi.Source.InternetRadio,
+        track: %{ref: {:station, playing.id}, title: "RNZ National"},
+        artwork_path: nil,
+        live?: true
+      })
+
+      Event.publish(:player, %Events.Paused{position_ms: 1000})
+
+      assert has_element?(view, ~s(#play-0[aria-current="true"]))
+      assert render(element(view, "#play-0")) =~ "Paused"
+      refute has_element?(view, "#play-0 span.meter")
+    end
+
+    # A buffer names no track, so an event that arrives before a start marks nothing.
+    test "a buffer of an entry that holds no marker changes nothing", %{conn: conn} do
+      station(%{title: "RNZ National", country_code: "NZ"})
+
+      {:ok, view, _html} = live(conn, ~p"/browse/internet-radio")
+      open(view, "Countries")
+      open(view, "NZ")
+
+      Event.publish(:player, %Events.Buffering{percent: 10})
+
+      refute has_element?(view, ~s(#play-0[aria-current="true"]))
+    end
+
     test "a stop removes the marker", %{conn: conn} do
       playing = station(%{title: "RNZ National", country_code: "NZ"})
 

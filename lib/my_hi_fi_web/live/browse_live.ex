@@ -30,7 +30,7 @@ defmodule MyHiFiWeb.BrowseLive do
     {:ok,
      socket
      |> assign(:page_title, "Browse")
-     |> assign(:playing, playing(Playback.state!()))}
+     |> assign(:current, current(Playback.state!()))}
   end
 
   @impl Phoenix.LiveView
@@ -48,12 +48,21 @@ defmodule MyHiFiWeb.BrowseLive do
 
   @impl Phoenix.LiveView
   def handle_info(%Events.Started{source: source, track: %{ref: ref}}, socket) do
-    {:noreply, assign(socket, :playing, {source, ref})}
+    {:noreply, assign(socket, :current, %{source: source, ref: ref, status: :playing})}
   end
+
+  # A pause keeps the track selected, so the marker stays and it names the pause. A
+  # buffer holds the same place, and it makes no sound yet. Neither event names a
+  # track, so each one changes the state of the entry that the page already marks.
+  @impl Phoenix.LiveView
+  def handle_info(%Events.Paused{}, socket), do: {:noreply, put_status(socket, :paused)}
+
+  @impl Phoenix.LiveView
+  def handle_info(%Events.Buffering{}, socket), do: {:noreply, put_status(socket, :buffering)}
 
   @impl Phoenix.LiveView
   def handle_info(%event{}, socket) when event in [Events.Stopped, Events.Failed] do
-    {:noreply, assign(socket, :playing, nil)}
+    {:noreply, assign(socket, :current, nil)}
   end
 
   # The page ignores every other event of the player. A progress event arrives
@@ -204,8 +213,18 @@ defmodule MyHiFiWeb.BrowseLive do
           <li
             :for={{entry, index} <- Enum.with_index(@entries)}
             id={"entry-#{index}"}
-            class="flex items-center gap-2 border-b border-edge px-2 last:border-0"
+            class={[
+              "relative flex items-center gap-2 border-b border-edge px-2 last:border-0",
+              current_entry?(assigns, entry) && "bg-accent/12"
+            ]}
           >
+            <%!-- The bar down the left edge marks the row that plays, and the eye finds
+            it in a long list without a read of any title. --%>
+            <span
+              :if={current_entry?(assigns, entry)}
+              aria-hidden="true"
+              class="led absolute inset-y-0 left-0 w-[3px]"
+            />
             <%= case entry do %>
               <% {:container, container} -> %>
                 <button
@@ -228,41 +247,7 @@ defmodule MyHiFiWeb.BrowseLive do
                   />
                 </button>
               <% {:track, track} -> %>
-                <button
-                  type="button"
-                  id={"play-#{index}"}
-                  phx-click="play"
-                  phx-value-index={index}
-                  aria-current={playing?(assigns, track) && "true"}
-                  class="group flex grow items-center gap-3 py-3 text-left"
-                >
-                  <span class={[
-                    "control flex size-8 shrink-0 items-center justify-center rounded-full",
-                    if(playing?(assigns, track),
-                      do: "control-on",
-                      else: "group-hover:text-accent"
-                    )
-                  ]}>
-                    <.icon
-                      name={if playing?(assigns, track), do: "hero-speaker-wave", else: "hero-play-mini"}
-                      class="size-4"
-                    />
-                  </span>
-                  <span class="min-w-0 grow">
-                    <span class={[
-                      "block truncate",
-                      if(playing?(assigns, track),
-                        do: "text-accent",
-                        else: "text-ink group-hover:text-accent"
-                      )
-                    ]}>
-                      {track.title}
-                    </span>
-                    <span :if={track.subtitle} class="block truncate text-xs text-ink-faint">
-                      {track.subtitle}
-                    </span>
-                  </span>
-                </button>
+                <.track track={track} index={index} status={current_status(assigns, track)} />
             <% end %>
             <.favourite entry={entry} index={index} />
           </li>
@@ -279,6 +264,62 @@ defmodule MyHiFiWeb.BrowseLive do
         </button>
       </div>
     </div>
+    """
+  end
+
+  # The row of a track. `status` is `nil` for each track that the player does not
+  # hold, and the marker of the current one holds three parts: a level meter in the
+  # place of the play control, the state in words, and the title in the accent
+  # colour. A person then knows the row from a look, and a person who reads the
+  # screen with a reader gets `aria-current` and the same words.
+  attr :track, :any, required: true
+  attr :index, :integer, required: true
+  attr :status, :atom, required: true
+
+  defp track(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"play-#{@index}"}
+      phx-click="play"
+      phx-value-index={@index}
+      aria-current={@status && "true"}
+      class="group flex min-w-0 grow items-center gap-3 py-3 text-left"
+    >
+      <span class={[
+        "control flex size-8 shrink-0 items-center justify-center rounded-full",
+        if(@status, do: "control-on", else: "group-hover:text-accent")
+      ]}>
+        <span :if={@status == :playing} class="meter" aria-hidden="true">
+          <span /><span /><span />
+        </span>
+        <.icon :if={@status == :paused} name="hero-pause-mini" class="size-4" />
+        <.icon
+          :if={@status == :buffering}
+          name="hero-arrow-path-mini"
+          class="size-4 motion-safe:animate-spin"
+        />
+        <.icon :if={is_nil(@status)} name="hero-play-mini" class="size-4" />
+      </span>
+
+      <span class="min-w-0 grow">
+        <span
+          :if={@status}
+          class="block text-[0.65rem] uppercase tracking-[0.18em] text-accent"
+        >
+          {status_text(@status)}
+        </span>
+        <span class={[
+          "block truncate",
+          if(@status, do: "font-medium text-accent", else: "text-ink group-hover:text-accent")
+        ]}>
+          {@track.title}
+        </span>
+        <span :if={@track.subtitle} class="block truncate text-xs text-ink-faint">
+          {@track.subtitle}
+        </span>
+      </span>
+    </button>
     """
   end
 
@@ -311,14 +352,39 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   # The player holds the track, and the track holds its `ref`, so the list needs no
-  # knowledge of the source to find the entry that plays. A station that a start
-  # selected plays nothing yet, and it therefore holds no marker. See section 9 of
-  # the specification.
-  defp playing(%{playing?: true, source: source, track: %{ref: ref}}), do: {source, ref}
-  defp playing(_state), do: nil
+  # knowledge of the source to find the entry that plays. A pause holds the track as
+  # well, and a boot restores a paused track, so the marker must draw for that state
+  # too. See section 9 of the specification.
+  defp current(%{playing?: true, source: source, track: %{ref: ref}}) do
+    %{source: source, ref: ref, status: :playing}
+  end
 
-  defp playing?(%{playing: {source, ref}, source: source}, %{ref: ref}), do: true
-  defp playing?(_assigns, _track), do: false
+  defp current(%{paused?: true, source: source, track: %{ref: ref}}) do
+    %{source: source, ref: ref, status: :paused}
+  end
+
+  defp current(_state), do: nil
+
+  defp put_status(%{assigns: %{current: nil}} = socket, _status), do: socket
+
+  defp put_status(socket, status) do
+    assign(socket, :current, %{socket.assigns.current | status: status})
+  end
+
+  defp current_status(%{current: %{source: source, ref: ref, status: status}, source: source}, %{
+         ref: ref
+       }) do
+    status
+  end
+
+  defp current_status(_assigns, _track), do: nil
+
+  defp current_entry?(assigns, {:track, track}), do: not is_nil(current_status(assigns, track))
+  defp current_entry?(_assigns, _entry), do: false
+
+  defp status_text(:paused), do: "Paused"
+  defp status_text(:buffering), do: "Buffering"
+  defp status_text(_status), do: "Playing"
 
   defp first_source(socket) do
     case Source.enabled() do
@@ -397,7 +463,11 @@ defmodule MyHiFiWeb.BrowseLive do
     case Playback.play(socket.assigns.source, track.ref) do
       :ok ->
         socket
-        |> assign(:playing, {socket.assigns.source, track.ref})
+        |> assign(:current, %{
+          source: socket.assigns.source,
+          ref: track.ref,
+          status: :buffering
+        })
         |> put_flash(:info, "Playing #{track.title}.")
 
       {:error, reason} ->

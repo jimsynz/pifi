@@ -1138,10 +1138,14 @@ Under the faceplate the interface shows one of two pages:
   the page then shows the tree of that source. It gives a search field, and it draws
   no such field for a source with no `:search` in `capabilities/0`. It gives a control that marks a
   track as a favourite. The favourites are a container in the tree of the source,
-  so they need no page of their own. The entry that plays holds a marker: the page
+  so they need no page of their own. The entry of the player holds a marker: the page
   follows the `:player` topic, and it compares the `ref` of the track of the player
-  with the `ref` of each entry. A station that a start selected plays nothing yet,
-  so it holds no marker. See section 9.
+  with the `ref` of each entry. The marker is not one detail: the row holds a bar of
+  the accent colour down its left edge, and a wash of that colour, and the title in
+  it. A person then finds the row in a long list from a look. The control of the row
+  says the state as well. It holds a level meter for a track that plays, a pause
+  mark for a track that holds a pause, and it names that state in words above the
+  title. A restored track is a paused track, so a boot marks it. See section 9.
 - **Settings.** It is a nested menu. `/settings` holds one row for each section,
   and each row says what that section holds. A row opens the section at an address
   of its own, so a person can keep the address of one, and the back control of the
