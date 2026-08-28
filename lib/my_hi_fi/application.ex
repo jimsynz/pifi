@@ -108,12 +108,15 @@ defmodule MyHiFi.Application do
         MyHiFi.Radio.FirstSync,
         # The reports of the settings page arrive on the `:device` topic, and no page
         # asks for them on an interval. See `MyHiFi.Device.Monitor`.
-        MyHiFi.Device.Monitor,
-        # An upgrade formats the boot partition, so the boot configuration of a person
-        # is gone and this writes it again. It comes last, because it restarts the
-        # device when it writes. See `MyHiFi.Hardware`.
-        MyHiFi.Hardware
-      ]
+        MyHiFi.Device.Monitor
+      ] ++
+        MyHiFi.Peripheral.child_specs() ++
+        [
+          # An upgrade formats the boot partition, so the boot configuration of a person
+          # is gone and this writes it again. It comes last, because it restarts the
+          # device when it writes. See `MyHiFi.Hardware`.
+          MyHiFi.Hardware
+        ]
     end
   end
 end

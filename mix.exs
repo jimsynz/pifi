@@ -14,7 +14,14 @@ defmodule MyHiFi.MixProject do
   @bundlex_targets %{
     myhifi_rpi0_2: %{
       "TARGET_ARCH" => "aarch64",
-      "TARGET_VENDOR" => "nerves",
+      # `rustler_precompiled` reads these four as well, and it then looks for a NIF
+      # whose name holds the vendor. `emerge` publishes
+      # `aarch64-unknown-linux-gnu` and no `aarch64-nerves-linux-gnu`, so
+      # `"nerves"` here makes it compile Skia from source. Its documentation asks
+      # for `"unknown"` on Nerves. Bundlex puts the value in a map and reads it
+      # nowhere else, and `Membrane.PrecompiledDependencyProvider` matches the
+      # architecture, the operating system and the ABI, and never the vendor.
+      "TARGET_VENDOR" => "unknown",
       "TARGET_OS" => "linux",
       "TARGET_ABI" => "gnu"
     }
@@ -109,6 +116,10 @@ defmodule MyHiFi.MixProject do
       # sort, the page controls and the URL state. It is pure Elixir, and so is
       # `ash_phoenix`, which it needs.
       {:cinder, "~> 0.16"},
+      # `MyHiFi.Peripheral.PiTft` owns the SPI bus of the screen and the data line
+      # that goes with it.
+      {:circuits_gpio, "~> 2.1"},
+      {:circuits_spi, "~> 2.1"},
       # `membrane_core` needs `ratio`, and `ratio` names
       # `decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`, so the
       # two do not agree.
@@ -121,6 +132,16 @@ defmodule MyHiFi.MixProject do
       #
       # Remove it when a `ratio` release accepts version 3.
       {:decimal, "~> 3.0", override: true},
+      # `MyHiFi.Peripheral.PiTft` draws the device screen with this. It holds a
+      # Rust NIF that lays a tree out and draws it with Skia, and the firmware
+      # calls the raster part of it. That part opens no window and it drives no
+      # display: it gives the pixels back, and the peripheral writes them to the
+      # screen over SPI.
+      #
+      # `config/target.exs` names the backend, because `EmergeSkia.BuildConfig`
+      # sees `MIX_TARGET` and chooses the DRM one by itself. See section 3 of
+      # `docs/pitft-plan.md` for why the choice is what it is.
+      {:emerge, "~> 0.3"},
       {:membrane_aac_fdk_plugin, "~> 0.18"},
       {:membrane_aac_plugin, "~> 0.19"},
       {:membrane_core, "~> 1.0"},

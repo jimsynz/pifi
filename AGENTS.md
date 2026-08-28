@@ -110,10 +110,27 @@ Licence: Apache-2.0.
 - **Screens and controls share one behaviour.** Do not split them. On the PiTFT
   the ILI9341 screen and the STMPE610 touch controller share SPI0, so one process
   must own the bus. `MyHiFi.Peripheral.PiTft` draws and publishes touch events.
-- **No renderer is chosen for the device screen.** Do not name one in the code or
-  in the documentation until this is decided. The choice must draw a colour raster,
-  because the now playing screen shows cover art, and it must draw text from a
-  font. It must also be small enough for this board.
+- **Emerge draws the device screen, through its raster part alone.**
+  `EmergeSkia.render_to_pixels/2` gives the pixels back to the caller, and
+  `MyHiFi.Peripheral.PiTft` writes them to the ILI9341 over SPI. Do not call
+  `EmergeSkia.start/1` and do not add a display server: this firmware drives no
+  window and no DRM device. Three traps, and each one costs a build to find.
+  - **`mix.exs` sets `TARGET_VENDOR` to `"unknown"`, and it must stay that way.**
+    `rustler_precompiled` reads the same four variables that Bundlex reads. Emerge
+    publishes `aarch64-unknown-linux-gnu`, so `"nerves"` there makes it compile
+    Skia from source. Bundlex stores the value and reads it nowhere else, and
+    `Membrane.PrecompiledDependencyProvider` matches the architecture, the
+    operating system and the ABI, and never the vendor.
+  - **`config/target.exs` must name `compiled_backends`.**
+    `EmergeSkia.BuildConfig` sees `MIX_TARGET` and chooses `[:drm]` by itself, and
+    that variant names `libgbm`, which needs Mesa. `[]` is what this firmware wants,
+    and Emerge publishes no artefact for it, so `[:wayland]` is the choice and
+    nothing calls into it.
+  - **`nerves_system_myhifi_rpi0_2` holds `libxkbcommon` for the NIF and for
+    nothing else.** The dynamic loader reads the name when it opens the NIF. NBPR
+    cannot serve this: it sets `LD_LIBRARY_PATH` at boot, glibc reads that variable
+    one time when the process starts, and a NIF of the BEAM is not a program that a
+    port starts.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `MyHiFi.Application` calls

@@ -19,6 +19,20 @@ config :shoehorn, init: [:nerves_runtime, :nerves_pack]
 # way of validating that firmware is good.
 config :nerves_runtime, startup_guard_enabled: true
 
+# `MyHiFi.Peripheral.PiTft` uses the raster part of Emerge, which opens no window
+# and drives no display. Emerge publishes a precompiled NIF for each of three
+# backends, and none with no backend, so the firmware takes the smallest of the
+# three and calls nothing in it.
+#
+# `EmergeSkia.BuildConfig` sees `MIX_TARGET` and chooses `[:drm]` by itself. That
+# variant names `libgbm`, which needs Mesa. This one names `libxkbcommon`, which is
+# one small package, and `nerves_system_myhifi_rpi0_2` holds it for this reason.
+config :emerge, compiled_backends: [:wayland]
+
+# The hardware that a person sees and touches. A device with no screen and no knob
+# names none. See `MyHiFi.Peripheral.child_specs/0`.
+config :my_hi_fi, peripherals: [{MyHiFi.Peripheral.PiTft, []}]
+
 # Erlinit can be configured without a rootfs_overlay. See
 # https://github.com/nerves-project/erlinit/ for more information on
 # configuring erlinit.
