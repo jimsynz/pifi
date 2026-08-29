@@ -1,10 +1,14 @@
 defmodule MyHiFi.Podcast.RefreshTest do
   use MyHiFi.DataCase, async: false
 
+  alias MyHiFi.Event
+  alias MyHiFi.Playback
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Feed
+  alias MyHiFi.Podcast.Fill
   alias MyHiFi.Podcast.Refresh
   alias MyHiFi.Podcast.Show.RefreshAll
+  alias MyHiFi.Test.Podcasts
 
   setup do
     Application.put_env(:my_hi_fi, Feed, plug: {Req.Test, Feed})
@@ -37,23 +41,43 @@ defmodule MyHiFi.Podcast.RefreshTest do
   end
 
   defp show(overrides \\ %{}) do
-    Podcast.upsert_show_from_feed!(
-      Map.merge(
-        %{feed_url: "https://example.test/rss", title: "Road Work"},
-        overrides
-      )
-    )
+    Podcast.upsert_show_from_feed!(Map.merge(%{feed_url: "https://example.test/rss"}, overrides))
   end
 
+  # The episodes of a show are the children of its item.
+  defp episodes_of(show) do
+    {:ok, show} = Podcast.get_show(show.id)
+
+    case show.item_id do
+      nil -> []
+      item_id -> Playback.items_of_parent!(item_id)
+    end
+  end
+
+  defp item_of(show) do
+    {:ok, show} = Podcast.get_show(show.id)
+    {:ok, item} = Playback.get_item(show.item_id)
+
+    item
+  end
+
+  # An episode is a `MyHiFi.Playback.Item` under the container of the show.
   defp episode(show, number) do
-    Podcast.upsert_episode_from_feed!(%{
-      show_id: show.id,
-      guid: "old-#{number}",
-      title: "Old episode #{number}",
-      audio_url: "https://example.test/old-#{number}.mp3",
-      # The newest comes first, so a larger number is older.
-      published_at: DateTime.add(~U[2026-01-01 00:00:00Z], -number, :day)
-    })
+    item = Fill.show(%{feed_url: show.feed_url, title: "Road Work"})
+    {:ok, _show} = Podcast.set_show_item(show, %{item_id: item.id})
+
+    Fill.episodes(item, show.feed_url, [
+      %{
+        guid: "old-#{number}",
+        title: "An old episode",
+        audio_url: "https://example.test/old-#{number}.mp3",
+        mime_type: "audio/mpeg",
+        duration_ms: 600_000,
+        published_at: DateTime.add(~U[2020-01-01 00:00:00.000000Z], -number, :day),
+        description: nil,
+        artwork_url: nil
+      }
+    ])
   end
 
   # No action writes this, because nothing but a change should.
@@ -75,7 +99,7 @@ defmodule MyHiFi.Podcast.RefreshTest do
       refreshed = Refresh.run(created)
 
       assert refreshed.last_error == nil
-      assert length(Podcast.episodes_of_show!(created.id)) == 2
+      assert length(episodes_of(created)) == 2
     end
 
     test "a feed that fails keeps the episodes and holds the reason" do
@@ -86,7 +110,7 @@ defmodule MyHiFi.Podcast.RefreshTest do
       refreshed = Refresh.run(created)
 
       assert refreshed.last_error =~ "500"
-      assert length(Podcast.episodes_of_show!(created.id)) == 1
+      assert length(episodes_of(created)) == 1
     end
 
     test "a read that succeeds removes the reason of an older failure" do
@@ -106,61 +130,62 @@ defmodule MyHiFi.Podcast.RefreshTest do
       keep = Refresh.keep()
       for number <- 1..(keep + 5), do: episode(created, number)
 
-      assert length(Podcast.episodes_of_show!(created.id)) == keep + 5
+      assert length(episodes_of(created)) == keep + 5
 
-      Refresh.prune(created)
+      Refresh.prune(item_of(created))
 
-      episodes = Podcast.episodes_of_show!(created.id)
+      episodes = episodes_of(created)
       assert length(episodes) == keep
       # A larger number is older, so 1 stays and the last five go.
-      assert hd(episodes).guid == "old-1"
-      assert List.last(episodes).guid == "old-#{keep}"
+      assert hd(episodes).source_ref =~ "old-1"
+      assert List.last(episodes).source_ref =~ "old-#{keep}"
     end
 
     test "a show with few episodes loses none" do
       created = show()
       for number <- 1..3, do: episode(created, number)
 
-      Refresh.prune(created)
+      Refresh.prune(item_of(created))
 
-      assert length(Podcast.episodes_of_show!(created.id)) == 3
+      assert length(episodes_of(created)) == 3
     end
 
     test "it touches no episode of another show" do
       ours = show(%{feed_url: "https://example.test/a/rss"})
-      theirs = show(%{feed_url: "https://example.test/b/rss", title: "Another"})
+      episode(ours, 1)
+      theirs = show(%{feed_url: "https://example.test/b/rss"})
       episode(theirs, 1)
 
-      Refresh.prune(ours)
+      Refresh.prune(item_of(ours))
 
-      assert length(Podcast.episodes_of_show!(theirs.id)) == 1
+      assert length(episodes_of(theirs)) == 1
     end
   end
 
   describe "the scheduled action" do
     test "it reads the subscribed shows and no other" do
       stub_feed(item(1))
-      subscribed = show(%{feed_url: "https://example.test/a/rss", title: "Subscribed"})
-      {:ok, subscribed} = Podcast.subscribe(subscribed)
-      other = show(%{feed_url: "https://example.test/b/rss", title: "Not subscribed"})
+      subscribed = show(%{feed_url: "https://example.test/a/rss"})
+      subscribed = Podcasts.subscribe(subscribed)
+      other = show(%{feed_url: "https://example.test/b/rss"})
 
       assert {:ok, %{read: 1, failed: 0}} = Podcast.refresh_all_shows()
 
-      assert length(Podcast.episodes_of_show!(subscribed.id)) == 1
-      assert Podcast.episodes_of_show!(other.id) == []
+      assert length(episodes_of(subscribed)) == 1
+      assert episodes_of(other) == []
     end
 
     test "a feed that fails counts as one that failed" do
       Req.Test.stub(Feed, fn conn -> Plug.Conn.send_resp(conn, 500, "no") end)
       subscribed = show()
-      {:ok, _show} = Podcast.subscribe(subscribed)
+      _show = Podcasts.subscribe(subscribed)
 
       assert {:ok, %{read: 0, failed: 1}} = Podcast.refresh_all_shows()
     end
 
     test "it removes a show that no person subscribed to and nothing has touched" do
       stub_feed(item(1))
-      forgotten = show(%{feed_url: "https://example.test/old/rss", title: "Forgotten"})
+      forgotten = show(%{feed_url: "https://example.test/old/rss"})
       aged(forgotten, RefreshAll.stale_after_days() + 1)
 
       assert {:ok, %{removed: 1}} = Podcast.refresh_all_shows()
@@ -170,7 +195,7 @@ defmodule MyHiFi.Podcast.RefreshTest do
 
     test "it keeps a show that a search named lately" do
       stub_feed(item(1))
-      show(%{feed_url: "https://example.test/new/rss", title: "Looked at today"})
+      show(%{feed_url: "https://example.test/new/rss"})
 
       assert {:ok, %{removed: 0}} = Podcast.refresh_all_shows()
 
@@ -180,7 +205,7 @@ defmodule MyHiFi.Podcast.RefreshTest do
     test "it keeps a subscribed show however old it is" do
       stub_feed(item(1))
       subscribed = show()
-      {:ok, subscribed} = Podcast.subscribe(subscribed)
+      subscribed = Podcasts.subscribe(subscribed)
       aged(subscribed, RefreshAll.stale_after_days() * 10)
 
       assert {:ok, %{removed: 0}} = Podcast.refresh_all_shows()
@@ -188,16 +213,42 @@ defmodule MyHiFi.Podcast.RefreshTest do
       assert length(Podcast.list_shows!()) == 1
     end
 
-    test "the episodes of a show go before the show, because SQLite holds the key" do
+    test "the item of a show goes with the show, and it takes the episodes" do
       stub_feed(item(1))
-      forgotten = show(%{feed_url: "https://example.test/old/rss", title: "Forgotten"})
+      forgotten = show(%{feed_url: "https://example.test/old/rss"})
       episode(forgotten, 1)
       aged(forgotten, RefreshAll.stale_after_days() + 1)
 
       assert {:ok, %{removed: 1}} = Podcast.refresh_all_shows()
 
       assert Podcast.list_shows!() == []
-      assert Ash.count!(Podcast.Episode) == 0
+      assert Ash.count!(MyHiFi.Playback.Item) == 0
+    end
+  end
+
+  describe "what it tells the rest of the firmware" do
+    test "a read that succeeded says that the show changed" do
+      stub_feed(item(1))
+      created = show()
+      Event.subscribe(:source)
+
+      Refresh.run(created)
+
+      assert_receive %Event.Source.Changed{source: MyHiFi.Source.Podcasts, ref: {:show, id}}
+      assert id == created.id
+    end
+
+    # The episodes did not change, so nothing that shows them needs to read them
+    # again. `last_error` changed, and a page that shows the reason reads it when a
+    # person asks for it.
+    test "a read that failed says nothing" do
+      Req.Test.stub(Feed, fn conn -> Plug.Conn.send_resp(conn, 500, "no") end)
+      created = show()
+      Event.subscribe(:source)
+
+      Refresh.run(created)
+
+      refute_receive %Event.Source.Changed{}
     end
   end
 
@@ -206,10 +257,14 @@ defmodule MyHiFi.Podcast.RefreshTest do
       assert Code.ensure_loaded?(MyHiFi.Podcast.Show.Workers.RefreshAll)
     end
 
+    test "Oban holds a worker for the read of one show" do
+      assert Code.ensure_loaded?(MyHiFi.Podcast.Show.Workers.Refresh)
+    end
+
     test "it reads no feed when the podcast source is out of use" do
       stub_feed(item(1))
       subscribed = show()
-      {:ok, _show} = Podcast.subscribe(subscribed)
+      _show = Podcasts.subscribe(subscribed)
 
       MyHiFi.Source.enable(MyHiFi.Source.Podcasts, false)
 

@@ -35,6 +35,11 @@ config :nerves_runtime, startup_guard_enabled: true
 # `shutdown_report` names a file that erlinit writes when the VM exits in an
 # orderly way. A hard reset gives no chance to write it, and a crash of the VM
 # does.
+# `rootfs_overlay/etc/asound.conf` holds the `rate48` definition, so a target build
+# can name it and a host build cannot. See `MyHiFi.Output.Alsa.sink_spec/1` for the
+# fault of the USB controller that it works around.
+config :my_hi_fi, :alsa_rate48?, true
+
 config :nerves, :erlinit,
   update_clock: true,
   mount: "pstore:/sys/fs/pstore:pstore:nodev,noexec,nosuid:",

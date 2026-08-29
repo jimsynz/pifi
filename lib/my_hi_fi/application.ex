@@ -17,6 +17,7 @@ defmodule MyHiFi.Application do
     # eviction can see it. An interruption of the power leaves one behind, and this
     # is the only thing that reclaims it. See `MyHiFi.Player.Download`.
     Download.sweep()
+    make_queue_table()
 
     children =
       [
@@ -39,6 +40,14 @@ defmodule MyHiFi.Application do
 
     Supervisor.start_link(children, supervisor_options())
   end
+
+  # `MyHiFi.Playback.Queue` is on ETS, and the data layer makes the table when
+  # something first reads it. The process that owns the table registers its name
+  # before it makes the table, so a second caller in that moment is told that the
+  # table already exists and then finds none. The player and the web interface can
+  # both reach for the queue at once, so this reads it one time and the race cannot
+  # happen.
+  defp make_queue_table, do: Ash.read!(MyHiFi.Playback.Queue)
 
   # See https://elixir.hexdocs.pm/Supervisor.html
   # for other strategies and supported options
@@ -96,7 +105,14 @@ defmodule MyHiFi.Application do
 
     defp target_children do
       [
-        MyHiFi.Radio.FirstSync
+        MyHiFi.Radio.FirstSync,
+        # The reports of the settings page arrive on the `:device` topic, and no page
+        # asks for them on an interval. See `MyHiFi.Device.Monitor`.
+        MyHiFi.Device.Monitor,
+        # An upgrade formats the boot partition, so the boot configuration of a person
+        # is gone and this writes it again. It comes last, because it restarts the
+        # device when it writes. See `MyHiFi.Hardware`.
+        MyHiFi.Hardware
       ]
     end
   end

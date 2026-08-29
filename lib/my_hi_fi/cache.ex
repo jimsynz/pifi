@@ -8,7 +8,7 @@ defmodule MyHiFi.Cache do
   version holds `:download` and keys by the identifier of an episode.
 
   `MyHiFi.Cache.Entry` holds the data about one entry, and `AshStorage` writes the
-  file. See `docs/cache-plan.md`.
+  file.
 
   The cache grows to the free space of the partition, less a reserve, and the entry
   that a person used least recently goes first. An entry that a caller marks as one

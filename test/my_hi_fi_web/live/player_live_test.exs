@@ -305,11 +305,17 @@ defmodule MyHiFiWeb.PlayerLiveTest do
       refute player |> element("#previous") |> render() =~ "disabled"
     end
 
-    test "a source that a start did not name holds nothing", %{conn: conn} do
+    # The skip controls belong to the source, and next and previous belong to the queue,
+    # so a track with no source still steps through the list.
+    test "a source that a start did not name holds no skip", %{conn: conn} do
       player = expanded(conn, %Events.Started{track: track(), source: nil, artwork_path: nil})
 
-      for control <- ["#next", "#previous", "#back", "#forward"] do
+      for control <- ["#back", "#forward"] do
         assert player |> element(control) |> render() =~ "disabled"
+      end
+
+      for control <- ["#next", "#previous"] do
+        refute player |> element(control) |> render() =~ "disabled"
       end
     end
 

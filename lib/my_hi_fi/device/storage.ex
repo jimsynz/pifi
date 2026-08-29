@@ -19,7 +19,9 @@ defmodule MyHiFi.Device.Storage do
       Report the writable partition and the size of the database.
 
       `used_bytes` is the space of the whole partition that is in use, and not the
-      space that this firmware uses.
+      space that this firmware uses. `full?` is the alarm of `os_mon`, so it says
+      that a write is near to failing and not that a threshold of this firmware
+      passed.
       """
 
       # A generic action does not cast what it returns. These fields therefore
@@ -30,7 +32,8 @@ defmodule MyHiFi.Device.Storage do
                     total_bytes: [type: :integer, allow_nil?: false],
                     free_bytes: [type: :integer, allow_nil?: false],
                     used_bytes: [type: :integer, allow_nil?: false],
-                    database_bytes: [type: :integer, allow_nil?: false]
+                    database_bytes: [type: :integer, allow_nil?: false],
+                    full?: [type: :boolean, allow_nil?: false]
                   ]
 
       run MyHiFi.Device.Storage.Report

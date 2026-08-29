@@ -8,20 +8,28 @@ defmodule MyHiFi.Playback.Player do
   Read the name with care. `MyHiFi.Player` is the process, and this module is the
   resource in front of it.
 
-  `play` takes the `ref` of a source as it is, and a `ref` is a term of that
-  source. An external API needs the name of a `ref` instead, and
-  `MyHiFi.Source.ref_from_string/1` reads one. That step belongs to the API and not
-  to this resource: a source names the tracks only, and a user interface must play
-  what it browses.
+  ## A reader of the state waits for nothing
+
+  The player is one process, and a pipeline that crashes holds it for as long as six
+  seconds: `Membrane.Pipeline.terminate/2` waits five, and the silence before it waits
+  one. A `GenServer.call` waits five seconds and then the **caller** stops.
+
+  Every page reads the state when it opens, so a pipeline that crashed took each page
+  that a person opened in that moment with it. `state/0` therefore answers `idle/0`
+  when the player is busy or absent, and the next event of the player corrects the
+  page. A screen that says the wrong thing for a moment is better than a screen that
+  is not there.
   """
 
   use Ash.Resource, otp_app: :my_hi_fi, domain: MyHiFi.Playback
+
+  require Logger
 
   # A generic action does not cast what it returns. These fields therefore describe
   # the shape for a reader and for an API extension, and they enforce nothing.
   @state_fields [
     source: [type: :atom, allow_nil?: true],
-    track: [type: :map, allow_nil?: true],
+    item: [type: :map, allow_nil?: true],
     stream_title: [type: :string, allow_nil?: true],
     artwork_path: [type: :string, allow_nil?: true],
     playing?: [type: :boolean, allow_nil?: false],
@@ -34,26 +42,41 @@ defmodule MyHiFi.Playback.Player do
     default_accept []
 
     action :state, :map do
-      description "What the player is doing."
+      description """
+      What the player is doing.
+
+      **A reader of this never waits for the player and never dies with it.** See
+      `idle/0`.
+      """
 
       constraints fields: @state_fields
 
-      run fn _input, _context -> {:ok, MyHiFi.Player.state()} end
+      run fn _input, _context -> {:ok, state()} end
     end
 
     action :play, :atom do
       description """
-      Play one track of one source.
+      Put a list in the queue and play one row of it.
 
-      The `ref` comes from `browse/2` or from `search/2` of that source.
+      A person who presses a track of a list means "play this, and then the rest of the
+      list", so `item_ids` is the list that they were looking at and `playing_index`
+      names the row that they pressed. Next and previous then move through it. See
+      `MyHiFi.Playback.Queue`.
       """
 
-      argument :source, :atom, allow_nil?: false
-      argument :ref, :term, allow_nil?: false
+      argument :item_ids, {:array, :uuid}, allow_nil?: false
+      argument :playing_index, :integer, allow_nil?: false, default: 0
 
       run fn input, _context ->
-        case MyHiFi.Player.play(input.arguments.source, input.arguments.ref) do
-          :ok -> {:ok, :ok}
+        with {:ok, _rows} <-
+               MyHiFi.Playback.replace_queue(input.arguments.item_ids, %{
+                 playing_index: input.arguments.playing_index
+               }),
+             {:ok, row} <- playing_row(),
+             {:ok, item} <- MyHiFi.Playback.get_item(row.item_id, load: [:artwork]),
+             :ok <- MyHiFi.Player.play(item) do
+          {:ok, :ok}
+        else
           {:error, reason} -> {:error, reason}
         end
       end
@@ -86,10 +109,9 @@ defmodule MyHiFi.Playback.Player do
 
     action :next, :atom do
       description """
-      Play the track after the one that plays now.
+      Play the row after the one that plays now.
 
-      The source holds the order, and `MyHiFi.Source.capabilities/0` says whether it
-      holds one at all.
+      The queue holds the order. The end of it gives `{:error, :no_more}`.
       """
 
       run fn _input, _context ->
@@ -101,7 +123,11 @@ defmodule MyHiFi.Playback.Player do
     end
 
     action :previous, :atom do
-      description "Play the track before the one that plays now."
+      description """
+      Play the row before the one that plays now.
+
+      A track that reached its end stays in the queue, so a person can go back to it.
+      """
 
       run fn _input, _context ->
         case MyHiFi.Player.previous() do
@@ -200,6 +226,51 @@ defmodule MyHiFi.Playback.Player do
           {:error, reason} -> {:error, reason}
         end
       end
+    end
+  end
+
+  @doc """
+  What the player is doing, or `idle/0` when it cannot say.
+
+  A pipeline that crashes holds the player, and a caller that waited would stop with
+  it. This waits one second, which is long enough for a player that is working and
+  short enough that a person does not notice.
+  """
+  @spec state() :: map()
+  def state do
+    MyHiFi.Player.state(:timer.seconds(1))
+  catch
+    :exit, reason ->
+      Logger.warning("The player did not say what it is doing: #{inspect(reason)}")
+
+      idle()
+  end
+
+  @doc """
+  The state of a player that plays nothing.
+
+  A page draws this while the player is busy, and the next event of the player
+  corrects it.
+  """
+  @spec idle() :: map()
+  def idle do
+    %{
+      source: nil,
+      item: nil,
+      stream_title: nil,
+      artwork_path: nil,
+      playing?: false,
+      paused?: false,
+      standby?: false,
+      position_ms: 0
+    }
+  end
+
+  # An empty queue plays nothing, and `queue_playing` reads that as no row at all.
+  defp playing_row do
+    case MyHiFi.Playback.queue_playing!() do
+      nil -> {:error, :nothing_to_play}
+      row -> {:ok, row}
     end
   end
 end

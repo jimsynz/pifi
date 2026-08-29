@@ -26,6 +26,31 @@ defmodule MyHiFi.CacheTest do
 
   defp on_disk(entry), do: Path.join(Cache.directory(), entry.key)
 
+  # `MyHiFi.Device.Monitor` is the one subscriber, and it is a target module, so this
+  # tests the wire that carries the notification to it. Free space moves when the cache
+  # writes and when it removes, and a page shows that figure. See `MyHiFi.Cache.Entry`.
+  describe "what the cache tells the rest of the firmware" do
+    setup do
+      :ok = Phoenix.PubSub.subscribe(MyHiFi.PubSub, "cache_entry:written")
+    end
+
+    test "a write publishes" do
+      entry = put("artwork", "abc123", "hello world")
+
+      assert_receive %Ash.Notifier.Notification{action: %{name: :put}, data: %{id: id}}
+      assert id == entry.id
+    end
+
+    test "a removal publishes" do
+      entry = put("artwork", "abc123", "hello world")
+      assert_receive %Ash.Notifier.Notification{action: %{type: :create}}
+
+      Cache.purge!(entry)
+
+      assert_receive %Ash.Notifier.Notification{action: %{type: :destroy}}
+    end
+  end
+
   defp keys, do: Cache.list_entries!() |> Enum.map(& &1.entry_key) |> Enum.sort()
 
   defp held_files do
@@ -461,10 +486,14 @@ defmodule MyHiFi.CacheTest do
   end
 
   describe "attachments" do
+    # A show and an episode are both `MyHiFi.Playback.Item` now, and `"item"` is the
+    # one record type that the catalogue attaches under.
     setup do
       show =
-        MyHiFi.Podcast.upsert_show_from_feed!(%{
-          feed_url: "https://a.test/rss",
+        MyHiFi.Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "https://a.test/rss",
+          kind: :container,
           title: "A show"
         })
 
@@ -474,19 +503,22 @@ defmodule MyHiFi.CacheTest do
     test "one entry serves many records, and it holds one file", %{show: show} do
       cover = put("artwork", "shared", String.duplicate("c", 400))
 
-      {:ok, _} = Cache.attach(%{entry_id: cover.id, record_type: "show", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: cover.id, record_type: "item", record_id: show.id})
 
       episode_ids =
         for number <- 1..5 do
           episode =
-            MyHiFi.Podcast.upsert_episode_from_feed!(%{
-              show_id: show.id,
-              guid: "e#{number}",
-              audio_url: "https://a.test/#{number}.mp3"
+            MyHiFi.Playback.upsert_item!(%{
+              source: "podcasts",
+              source_ref: "https://a.test/rss e#{number}",
+              kind: :track,
+              parent_id: show.id,
+              title: "Episode #{number}",
+              url: "https://a.test/#{number}.mp3"
             })
 
           {:ok, _} =
-            Cache.attach(%{entry_id: cover.id, record_type: "episode", record_id: episode.id})
+            Cache.attach(%{entry_id: cover.id, record_type: "item", record_id: episode.id})
 
           episode.id
         end
@@ -496,15 +528,15 @@ defmodule MyHiFi.CacheTest do
       assert length(Ash.read!(Cache.Attachment)) == 6
       assert length(held_files()) == 1
 
-      assert Cache.usage_of("show", show.id) == %{count: 1, bytes: 400}
-      assert Cache.usage_of("episode", hd(episode_ids)) == %{count: 1, bytes: 400}
+      assert Cache.usage_of("item", show.id) == %{count: 1, bytes: 400}
+      assert Cache.usage_of("item", hd(episode_ids)) == %{count: 1, bytes: 400}
     end
 
     test "saying it twice writes one row", %{show: show} do
       entry = put("artwork", "a", "x")
 
-      {:ok, first} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
-      {:ok, second} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
+      {:ok, first} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
+      {:ok, second} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
 
       assert second.id == first.id
       assert length(Ash.read!(Cache.Attachment)) == 1
@@ -512,7 +544,7 @@ defmodule MyHiFi.CacheTest do
 
     test "a record reads its entries through the join", %{show: show} do
       entry = put("artwork", "a", "x")
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
 
       loaded = Ash.load!(show, [:cached_files, :cache_attachments])
 
@@ -526,13 +558,13 @@ defmodule MyHiFi.CacheTest do
       {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "episode", record_id: show.id})
 
       assert Ash.load!(show, :cached_files).cached_files == []
-      assert Cache.usage_of("show", show.id) == %{count: 0, bytes: 0}
+      assert Cache.usage_of("item", show.id) == %{count: 0, bytes: 0}
       assert Cache.usage_of("episode", show.id) == %{count: 1, bytes: 1}
     end
 
     test "an eviction takes the join rows with the entry", %{show: show} do
       entry = put("artwork", "a", String.duplicate("x", 800))
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
 
       # A record that names a file must not hold it against an eviction, or the cache
       # would fill with entries that nothing may remove. The record keeps its address
@@ -547,37 +579,39 @@ defmodule MyHiFi.CacheTest do
 
     test "a host that goes takes its own join rows", %{show: show} do
       entry = put("artwork", "a", "x")
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
 
-      assert :ok = MyHiFi.Podcast.destroy_show(show)
+      assert :ok = MyHiFi.Playback.destroy_item(show)
 
       assert Ash.read!(Cache.Attachment) == []
     end
 
     test "a host that goes leaves the entry, because another record may name it", %{show: show} do
       other =
-        MyHiFi.Podcast.upsert_show_from_feed!(%{
-          feed_url: "https://b.test/rss",
+        MyHiFi.Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "https://b.test/rss",
+          kind: :container,
           title: "Another show"
         })
 
       # One picture, named by two shows.
       entry = put("artwork", "shared", "x")
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: other.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: other.id})
 
-      assert :ok = MyHiFi.Podcast.destroy_show(show)
+      assert :ok = MyHiFi.Playback.destroy_item(show)
 
       # A cascade to the entries would have taken the picture that `other` still uses.
-      assert Cache.usage_of("show", other.id) == %{count: 1, bytes: 1}
+      assert Cache.usage_of("item", other.id) == %{count: 1, bytes: 1}
       assert File.exists?(on_disk(entry))
     end
 
     test "an entry that no record names any more waits for the eviction", %{show: show} do
       entry = put("artwork", "a", String.duplicate("x", 800))
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
 
-      assert :ok = MyHiFi.Podcast.destroy_show(show)
+      assert :ok = MyHiFi.Playback.destroy_item(show)
 
       # Nothing names it, and it is still here: a cache reclaims when it needs the
       # room, and it is then the coldest thing to take.
@@ -592,26 +626,29 @@ defmodule MyHiFi.CacheTest do
       entry = put("artwork", "shared", "x")
 
       episode =
-        MyHiFi.Podcast.upsert_episode_from_feed!(%{
-          show_id: show.id,
-          guid: "one",
-          audio_url: "https://a.test/1.mp3"
+        MyHiFi.Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "https://a.test/rss one",
+          kind: :track,
+          parent_id: show.id,
+          title: "An episode",
+          url: "https://a.test/1.mp3"
         })
 
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
 
       {:ok, _} =
-        Cache.attach(%{entry_id: entry.id, record_type: "episode", record_id: episode.id})
+        Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: episode.id})
 
-      assert :ok = MyHiFi.Podcast.destroy_episode(episode)
+      assert :ok = MyHiFi.Playback.destroy_item(episode)
 
-      assert Cache.usage_of("episode", episode.id) == %{count: 0, bytes: 0}
-      assert Cache.usage_of("show", show.id) == %{count: 1, bytes: 1}
+      assert Cache.usage_of("item", episode.id) == %{count: 0, bytes: 0}
+      assert Cache.usage_of("item", show.id) == %{count: 1, bytes: 1}
     end
 
     test "a purge takes the join rows with the entry", %{show: show} do
       entry = put("artwork", "a", "x")
-      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "show", record_id: show.id})
+      {:ok, _} = Cache.attach(%{entry_id: entry.id, record_type: "item", record_id: show.id})
 
       assert :ok = Cache.purge(entry)
 

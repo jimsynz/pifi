@@ -10,12 +10,22 @@ defmodule MyHiFi.Podcast.Refresh do
   A read that fails writes `last_error` and leaves the episodes alone. A person with
   no network still sees what they had, and a page can say why there is nothing
   newer.
+
+  A read that succeeds publishes `MyHiFi.Event.Source.Changed`. Both callers run
+  behind the page, so a person can be looking at the episodes of the show while this
+  writes newer ones.
   """
 
+  require Ash.Query
   require Logger
 
+  alias MyHiFi.Event
+  alias MyHiFi.Playback
+  alias MyHiFi.Playback.Item
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Feed
+  alias MyHiFi.Podcast.Fill
+  alias MyHiFi.Source
 
   # A person with a knob moves through a list, and no person moves through 2955
   # episodes. One feed of the measurement holds that many. The database is on an SD
@@ -36,9 +46,11 @@ defmodule MyHiFi.Podcast.Refresh do
   def run(show) do
     case Feed.read(show.feed_url, max_items: @keep) do
       {:ok, %{show: attrs, episodes: episodes}} ->
-        {:ok, show} = Podcast.upsert_show_from_feed(Map.put(attrs, :feed_url, show.feed_url))
-        Enum.each(episodes, &Podcast.upsert_episode_from_feed!(Map.put(&1, :show_id, show.id)))
-        prune(show)
+        # A show holds the address of the feed and what the read gave. The title, the
+        # description and the picture go to the item, so this takes what it owns.
+        {:ok, show} = Podcast.upsert_show_from_feed(%{feed_url: show.feed_url})
+        fill(show, attrs, episodes)
+        announce(show)
         show
 
       {:error, reason} ->
@@ -51,17 +63,49 @@ defmodule MyHiFi.Podcast.Refresh do
   @doc """
   Remove the episodes of one show past the newest #{@keep}.
 
-  A feed that drops an old episode leaves the row behind, and a publisher who
-  writes one each day adds a row each day. Neither one should fill the card.
+  A feed that drops an old episode leaves the item behind, and a publisher who writes
+  one each day adds an item each day. Neither one should fill the card.
 
-  The place of a person goes with the episode. An episode that a feed no longer
-  holds cannot play, so there is nothing to keep a place in.
+  The place of a person goes with the episode. An episode that a feed no longer holds
+  cannot play, so there is nothing to keep a place in.
   """
-  @spec prune(MyHiFi.Podcast.Show.t()) :: :ok
-  def prune(show) do
-    show.id
-    |> Podcast.episodes_of_show!()
+  @spec prune(MyHiFi.Playback.Item.t()) :: :ok
+  def prune(item) do
+    Item
+    |> Ash.Query.filter(parent_id == ^item.id)
+    |> Ash.Query.sort(published_at: :desc)
+    |> Ash.read!()
     |> Enum.drop(@keep)
-    |> Enum.each(&Podcast.destroy_episode!/1)
+    |> Enum.each(&Playback.destroy_item!/1)
+  end
+
+  # The catalogue keeps the newest #{@keep} in the same way that `prune/1` does, so a
+  # feed that grows leaves nothing behind.
+  defp fill(show, attributes, episodes) do
+    item = Fill.show(Map.put(attributes, :feed_url, show.feed_url))
+
+    # The show and its item meet at this key. Without it `MyHiFi.Source.Podcasts`
+    # cannot find the show behind a container, so it never reads a feed that is old.
+    {:ok, _show} = Podcast.set_show_item(show, %{item_id: item.id})
+
+    Fill.episodes(item, show.feed_url, newest(episodes))
+    prune(item)
+  end
+
+  # An item of a feed can hold no date, and `DateTime.compare/2` refuses a nil. Such an
+  # episode is the oldest one, so a person sees the dated ones first.
+  defp newest(episodes) do
+    episodes
+    |> Enum.sort_by(&(&1[:published_at] || ~U[1970-01-01 00:00:00.000000Z]), {:desc, DateTime})
+    |> Enum.take(@keep)
+  end
+
+  # A read that failed changes no episode, so it announces nothing. `last_error`
+  # changed, and a page that shows the reason reads it when a person asks for it.
+  defp announce(show) do
+    Event.publish(:source, %Event.Source.Changed{
+      source: Source.Podcasts,
+      ref: {:show, show.id}
+    })
   end
 end

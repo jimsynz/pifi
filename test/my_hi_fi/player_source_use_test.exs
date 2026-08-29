@@ -11,20 +11,30 @@ defmodule MyHiFi.PlayerSourceUseTest do
 
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
+  alias MyHiFi.Playback
   alias MyHiFi.Player
   alias MyHiFi.Settings
   alias MyHiFi.Source
   alias MyHiFi.Test.PlayingPipeline
 
   defmodule Station do
-    @moduledoc "One live track, and nothing else."
+    @moduledoc "One live track in the catalogue, and nothing else."
 
     @behaviour MyHiFi.Source
 
-    @ref {:station, 1}
+    alias MyHiFi.Playback
+
+    @slug "station"
 
     @impl MyHiFi.Source
     def title, do: "A station"
+
+    # This source is one that the player uses, and no page browses it.
+    @impl MyHiFi.Source
+    def kinds, do: [track: "Stations"]
+
+    @impl MyHiFi.Source
+    def roots, do: []
 
     @impl MyHiFi.Source
     def icon, do: :radio
@@ -33,21 +43,7 @@ defmodule MyHiFi.PlayerSourceUseTest do
     def capabilities, do: []
 
     @impl MyHiFi.Source
-    def root, do: :root
-
-    @impl MyHiFi.Source
-    def browse(:root, _options), do: {:ok, %{entries: [{:track, entry()}], cursor: nil}}
-
-    @impl MyHiFi.Source
-    def search(_query, _options), do: {:error, :not_supported}
-
-    @impl MyHiFi.Source
-    def track(@ref), do: {:ok, entry()}
-
-    def track(ref), do: {:error, {:not_a_track, ref}}
-
-    @impl MyHiFi.Source
-    def resolve(@ref) do
+    def resolve(_item) do
       {:ok,
        %{
          uri: "https://example.test/stream.mp3",
@@ -62,45 +58,16 @@ defmodule MyHiFi.PlayerSourceUseTest do
        }}
     end
 
-    def resolve(ref), do: {:error, {:not_a_track, ref}}
-
-    @impl MyHiFi.Source
-    def next(_ref), do: {:error, :not_supported}
-
-    @impl MyHiFi.Source
-    def previous(_ref), do: {:error, :not_supported}
-
-    @impl MyHiFi.Source
-    def ref_to_string(@ref), do: {:ok, "station:1"}
-
-    def ref_to_string(_ref), do: {:error, :cannot_name}
-
-    @impl MyHiFi.Source
-    def ref_from_string("station:1"), do: {:ok, @ref}
-
-    def ref_from_string(_name), do: {:error, :not_a_name}
-
-    @impl MyHiFi.Source
-    def favourite(_ref, _true?), do: {:error, :not_supported}
-
-    @impl MyHiFi.Source
-    def store_position(_ref, _place), do: :ok
-
-    @impl MyHiFi.Source
-    def finished(_ref), do: :ok
-
-    @doc "The one track of this source."
-    def ref, do: @ref
-
-    defp entry do
-      %{
-        ref: @ref,
+    @doc "The one station of this source, in the catalogue."
+    @spec item() :: MyHiFi.Playback.Item.t()
+    def item do
+      Playback.upsert_item!(%{
+        source: @slug,
+        source_ref: "one",
         title: "A station",
-        subtitle: nil,
-        artwork: nil,
-        duration_ms: nil,
-        favourite?: nil
-      }
+        kind: :track,
+        live?: true
+      })
     end
   end
 
@@ -113,7 +80,7 @@ defmodule MyHiFi.PlayerSourceUseTest do
       Player.stop()
       Application.delete_env(:my_hi_fi, :sources)
 
-      for key <- ["last_source", "last_ref", Source.enabled_key(Station)] do
+      for key <- ["last_item", Source.enabled_key(Station)] do
         case Settings.fetch(key) do
           {:ok, setting} -> Settings.delete!(setting)
           {:error, _reason} -> :ok
@@ -125,7 +92,7 @@ defmodule MyHiFi.PlayerSourceUseTest do
   end
 
   defp playing do
-    assert :ok = Player.play(Station, Station.ref())
+    assert {:ok, :ok} = Playback.play([Station.item().id])
     assert_receive %Events.Started{}, 2000
     :ok
   end
@@ -152,7 +119,7 @@ defmodule MyHiFi.PlayerSourceUseTest do
     test "the player refuses to play it" do
       assert :ok = Player.enable_source(Station, false)
 
-      assert {:error, :source_not_in_use} = Player.play(Station, Station.ref())
+      assert {:error, _reason} = Playback.play([Station.item().id])
     end
 
     test "a restart does not select it again" do
@@ -161,19 +128,18 @@ defmodule MyHiFi.PlayerSourceUseTest do
 
       # The name of the last track goes with it, so nothing points at a source that
       # a person put away.
-      assert {:error, _reason} = Settings.fetch("last_source")
-      assert {:error, _reason} = Settings.fetch("last_ref")
+      assert {:error, _reason} = Settings.fetch("last_item")
     end
 
     test "a name in the settings that points at it selects nothing" do
       playing()
       assert :ok = Player.stop()
-      assert {:ok, %{value: _name}} = Settings.fetch("last_source")
+      assert {:ok, %{value: _id}} = Settings.fetch("last_item")
 
       Source.enable(Station, false)
       restart_player()
 
-      assert %{source: nil, track: nil} = Player.state()
+      assert %{source: nil, item: nil} = Player.state()
     end
 
     test "a name in the settings that points at a source in use comes back" do

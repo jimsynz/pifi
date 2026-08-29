@@ -1,8 +1,8 @@
 # MyHiFi
 
 MyHiFi is Nerves firmware for a home audio player. It connects to a home stereo
-and behaves like a normal stereo component. `docs/spec.md` holds the
-specification. Read it before you make a design decision.
+and behaves like a normal stereo component. The code is the specification: read
+the moduledoc of the part that you change before you make a design decision.
 
 Licence: Apache-2.0.
 
@@ -75,6 +75,13 @@ Licence: Apache-2.0.
   `HLS.Storage.Req` exists in a build or does not, and the answer depends on the
   order that the dependencies compile in. `MyHiFi.Player.Hls.Storage` is ours, and
   it holds the timeouts of this firmware. Do not use the one from `kim_hls`.
+- **Two traps of SQLite, and each one cost a debugging cycle.** `ago/2` gives no
+  answer on AshSqlite: a filter on it matches no row, and a calculation of it gives
+  `nil` for a row that holds a date. Use `datetime_add(now(), -n, :unit)` instead.
+  And Oban cannot make a job unique when one argument holds `nil`, because its
+  SQLite engine compares the arguments as JSON. AshOban always puts `tenant: nil` in
+  them, so no trigger job of this firmware is unique. Give the trigger a `where`
+  instead, and let the second job cancel itself.
 - **If a later version needs another binary, use NBPR**, not a Nerves system
   fork. See <https://github.com/jimsynz/nbpr>. NBPR ships binaries and shared
   libraries, and no header files.
@@ -167,10 +174,13 @@ The software has four layers. They talk through Phoenix PubSub.
    owns the selected index and the list, because the knob needs a detent count
    and only `MyHiFi.DeviceUi` knows the length of the list.
 
-Every message is a struct from `MyHiFi.Event`, on one of four topics: `:player`,
-`:view`, `:input`, and `:hint`. Never send a bare tuple or a map. A part never
-calls another part directly. A peripheral declares its topics with
+Every message is a struct from `MyHiFi.Event`, on one of five topics: `:player`,
+`:source`, `:view`, `:input`, and `:hint`. Never send a bare tuple or a map. A part
+never calls another part directly. A peripheral declares its topics with
 `subscriptions/0`, so a knob does not wake once a second for a progress event.
+`:source` carries `Source.Changed`, which says that the entries inside one
+container changed. A source that reads a service behind the page sends it, and a
+user interface that shows that container reads it again.
 
 Ash with SQLite holds the data, on the application data partition. That
 partition mounts at `/root` on a Nerves target, and it is the only writable
@@ -180,7 +190,7 @@ background work.
 ## Rules for this project
 
 - Write every text artefact in ASD-STE100 Simplified Technical English. That
-  covers `docs/`, `README.md`, this file, module and function documentation, code
+  covers `README.md`, this file, module and function documentation, code
   comments, commit messages, issue titles and bodies, pull request descriptions,
   and messages to the user. See the STE section below.
 - Use New Zealand English spelling. Write "licence" for the noun and "colour",
@@ -192,8 +202,11 @@ background work.
 - A Hex package does not always work on `myhifi_rpi0_2`. Check the Nerves
   system, and
   look for native code, before you add the package.
-- Keep the specification current. If a decision changes, change `docs/spec.md`
-  in the same commit.
+- **The code is the specification, and this repository holds no `docs/`.** A
+  specification in prose goes out of date, and then it lies. Put the reason for a
+  decision in the moduledoc of the module that holds the decision, and put the
+  reason for a change in the commit message. Do not write a plan document, and do
+  not restore `docs/`.
 
 ## Simplified Technical English
 

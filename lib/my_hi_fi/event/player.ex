@@ -43,8 +43,8 @@ defmodule MyHiFi.Event.Player do
     leaves the track in front of the person, so a user interface keeps the title and it
     draws a play control.
 
-    `position_ms` is where the audio stopped. The player writes that place through
-    `MyHiFi.Source.store_position/2` as well, so a play begins there.
+    `position_ms` is where the audio stopped. The player writes that place on to the
+    item as well, so a play begins there. See `MyHiFi.Playback.Item`.
     """
 
     @type t :: %__MODULE__{position_ms: non_neg_integer()}
@@ -102,11 +102,54 @@ defmodule MyHiFi.Event.Player do
   end
 
   defmodule Failed do
-    @moduledoc "The player could not play, or it stopped with a fault."
+    @moduledoc """
+    The player could not play, or it stopped with a fault.
+
+    `reason` is what the source or the player gave, so a part that acts on a fault can
+    match on it. `message/1` turns it into a sentence. The words live here and not in
+    each interface, because the web page and the screen of the device must say the same
+    thing about the same fault, and no person reads a tuple.
+    """
 
     @type t :: %__MODULE__{reason: term()}
 
     defstruct [:reason]
+
+    @doc """
+    The fault, in words that a person reads.
+
+    A reason that this does not name gives the reason as it stands. That text is for a
+    person who reports a fault, and each one that a person meets earns a sentence here.
+
+        iex> MyHiFi.Event.Player.Failed.message(:no_output_device)
+        "No output is in use. Choose one in the settings."
+    """
+    @spec message(term()) :: String.t()
+    def message({:not_read_yet, title}) do
+      "The device holds no address for #{title} yet. It reads the source again by itself."
+    end
+
+    def message({:unsupported_format, title}) do
+      "This device cannot play the sound format of #{title}."
+    end
+
+    def message({:not_a_track, _id}), do: "That entry is not a track, and only a track plays."
+
+    def message({:no_such_show, _ref}), do: "The device holds no show for that entry."
+
+    def message({:cannot_read_playlist, text}) do
+      "The device could not read the playlist: #{text}"
+    end
+
+    def message({:playlist_status, status}) do
+      "The server answered the playlist with the status #{status}."
+    end
+
+    def message({:status, status}), do: "The server answered with the status #{status}."
+
+    def message(:no_output_device), do: "No output is in use. Choose one in the settings."
+
+    def message(reason), do: "The player stopped: #{inspect(reason)}"
   end
 
   defmodule Standby do

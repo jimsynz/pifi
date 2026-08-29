@@ -43,30 +43,60 @@ defmodule MyHiFi.Output.Alsa do
   """
   @impl MyHiFi.Output
   def devices do
-    case File.read(@cards_path) do
-      {:ok, contents} -> contents |> parse_cards() |> Enum.flat_map(&playback_devices/1)
-      {:error, _reason} -> []
-    end
+    Enum.flat_map(cards(), &playback_devices/1)
   end
 
   @doc """
   Give a sink that plays to one device.
 
-  The `id` of a device is its ALSA hardware name, and this names the `rate48`
-  definition of `/etc/asound.conf` in its place. That definition holds the `plug`
-  layer, so ALSA converts the sample format, and it holds the card at 48000 Hz.
+  The `id` of a device is its ALSA hardware name. A card that needs the 48000 Hz
+  workaround gets the `rate48` definition of `/etc/asound.conf` in its place. That
+  definition holds the `plug` layer, so ALSA converts the sample format, and it holds
+  the card at 48000 Hz.
 
-  **The rate is not a preference.** USB audio sends one isochronous packet in each
-  1 ms frame, so 44100 Hz needs 44.1 samples in a packet and a controller must
-  alternate the size of them. The dwc2 controller of this board handles that badly.
-  A 440 Hz tone straight to `aplay` on 2026-08-24 was rough at 44100 Hz and clean at
-  24000 Hz and at 48000 Hz, and the level of the tone decided nothing. Almost every
-  podcast holds 44100 Hz MP3, and both RNZ streams hold 24000 Hz, so internet radio
-  never met this.
+  **The rate is not a preference, and it is not a fact about every card.** USB audio
+  sends one isochronous packet in each 1 ms frame, so 44100 Hz needs 44.1 samples in a
+  packet and a controller must alternate the size of them. The dwc2 controller of this
+  board handles that badly. A 440 Hz tone straight to `aplay` on 2026-08-24 was rough
+  at 44100 Hz and clean at 24000 Hz and at 48000 Hz, and the level of the tone decided
+  nothing. Almost every podcast holds 44100 Hz MP3, and both RNZ streams hold 24000 Hz,
+  so internet radio never met this.
+
+  The fault is in the USB controller of the board, so it reaches USB cards and no
+  other kind. A card on the I2S pins plays 44100 Hz as it arrives, and forcing 48000 Hz
+  there would resample every podcast for no reason.
+
+  `:alsa_rate48?` says whether the definition is there to name. `rootfs_overlay` holds
+  it, so a target build has it and a host does not. Naming a definition that no
+  configuration holds gives `Unknown PCM rate48:...` and no sound at all.
   """
   @impl MyHiFi.Output
   def sink_spec(device_id) do
-    %MyHiFi.Output.APlaySink{device: String.replace_prefix(device_id, "hw:", "rate48:")}
+    if forced_48k?(device_id) do
+      %MyHiFi.Output.APlaySink{device: String.replace_prefix(device_id, "hw:", "rate48:")}
+    else
+      %MyHiFi.Output.APlaySink{device: device_id}
+    end
+  end
+
+  defp forced_48k?(device_id) do
+    Application.get_env(:my_hi_fi, :alsa_rate48?, false) and usb?(device_id)
+  end
+
+  # The identifier holds the name of the card, and `/proc/asound/cards` says which
+  # driver holds it.
+  defp usb?(device_id) do
+    case Regex.run(~r/CARD=([^,]+)/, device_id) do
+      [_whole, name] -> Enum.any?(cards(), &(&1.id == name and &1.usb?))
+      nil -> false
+    end
+  end
+
+  defp cards do
+    case File.read(@cards_path) do
+      {:ok, contents} -> parse_cards(contents)
+      {:error, _reason} -> []
+    end
   end
 
   @doc """

@@ -2,9 +2,12 @@ defmodule MyHiFi.Player do
   @moduledoc """
   Plays one track at a time.
 
-  A caller gives a source and a reference to a track, and the player asks the
-  source to resolve it, builds a pipeline, and plays it. It holds one pipeline at a
-  time, and it stops the old one first.
+  A caller gives one `MyHiFi.Playback.Item`, and the player asks the source of it to
+  resolve it, builds a pipeline, and plays it. It holds one pipeline at a time, and it
+  stops the old one first.
+
+  `MyHiFi.Playback.play/2` is what a page calls. It puts the list that a person saw in
+  `MyHiFi.Playback.Queue` and then calls this with the row that they pressed.
 
   It tells the rest of the firmware what it does on the `:player` topic. See
   `MyHiFi.Event.Player`. Nothing reads the state of this process directly, apart
@@ -13,16 +16,16 @@ defmodule MyHiFi.Player do
   ## The controls
 
   A pause stops the pipeline and it keeps the track selected, so a play starts the
-  pipeline again at the place that the source holds. That is the resume of section 9 of
-  the specification, and a pause therefore needs no mechanism of its own.
+  pipeline again at the place that the item holds. A pause therefore needs no mechanism
+  of its own.
 
   A skip keeps the pipeline. It moves the byte that `MyHiFi.Player.FileSource` reads,
   because a start of a pipeline opens the sound card again and holds a silence of about
   one second. See `MyHiFi.Player.Skip`.
 
-  Next and previous ask the source, which owns the order that a person sees. See
-  `MyHiFi.Source.next/1`, and `MyHiFi.Source.capabilities/0` for the control that each
-  source holds.
+  Next and previous move the mark of `MyHiFi.Playback.Queue`, which holds the order
+  that a person saw. A track that reaches its end moves the mark as well, and the row
+  stays, so a person can go back to what they heard.
 
   A live stream ends when the network fails, and a person expects the music to
   come back. The player therefore starts the stream again after a short wait, and
@@ -37,6 +40,7 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Output
+  alias MyHiFi.Playback
   alias MyHiFi.Player.Pipeline
   alias MyHiFi.Settings
   alias MyHiFi.Source
@@ -54,8 +58,7 @@ defmodule MyHiFi.Player do
   # this is a pipeline that is already wedged.
   @skip_timeout :timer.seconds(5)
   @output_device_key "output_device"
-  @last_source_key "last_source"
-  @last_ref_key "last_ref"
+  @last_item_key "last_item"
   @standby_key "standby"
 
   defmodule State do
@@ -63,8 +66,7 @@ defmodule MyHiFi.Player do
 
     @type t :: %__MODULE__{
             source: module() | nil,
-            ref: term() | nil,
-            track: map() | nil,
+            item: MyHiFi.Playback.Item.t() | nil,
             playable: map() | nil,
             pipeline: pid() | nil,
             monitor: reference() | nil,
@@ -80,8 +82,7 @@ defmodule MyHiFi.Player do
           }
 
     defstruct source: nil,
-              ref: nil,
-              track: nil,
+              item: nil,
               playable: nil,
               pipeline: nil,
               monitor: nil,
@@ -103,12 +104,13 @@ defmodule MyHiFi.Player do
   end
 
   @doc """
-  Play one track of one source.
+  Play one item of the catalogue.
 
-  The `ref` comes from `browse/2` or `search/2` of that source.
+  `MyHiFi.Playback.play/2` puts the list in the queue and calls this with the row that
+  a person pressed. See `MyHiFi.Playback.Queue`.
   """
-  @spec play(module(), term()) :: :ok | {:error, term()}
-  def play(source, ref), do: GenServer.call(__MODULE__, {:play, source, ref}, :timer.seconds(30))
+  @spec play(MyHiFi.Playback.Item.t()) :: :ok | {:error, term()}
+  def play(item), do: GenServer.call(__MODULE__, {:play, item}, :timer.seconds(30))
 
   @doc "Stop the music."
   @spec stop() :: :ok
@@ -129,17 +131,17 @@ defmodule MyHiFi.Player do
   def pause(paused?), do: GenServer.call(__MODULE__, {:pause, paused?}, :timer.seconds(30))
 
   @doc """
-  Play the track after the one that plays now.
+  Play the row after the one that plays now.
 
-  The source holds the order. See `MyHiFi.Source.next/1`.
+  The queue holds the order. See `MyHiFi.Playback.Queue`.
   """
   @spec next() :: :ok | {:error, term()}
   def next, do: GenServer.call(__MODULE__, {:move, :next}, :timer.seconds(30))
 
   @doc """
-  Play the track before the one that plays now.
+  Play the row before the one that plays now.
 
-  The source holds the order. See `MyHiFi.Source.previous/1`.
+  A track that reached its end stays in the queue, so a person can go back to it.
   """
   @spec previous() :: :ok | {:error, term()}
   def previous, do: GenServer.call(__MODULE__, {:move, :previous}, :timer.seconds(30))
@@ -168,9 +170,14 @@ defmodule MyHiFi.Player do
   @spec standby(boolean()) :: :ok | {:error, term()}
   def standby(entered?), do: GenServer.call(__MODULE__, {:standby, entered?}, :timer.seconds(30))
 
-  @doc "What the player is doing, for a person at the console."
-  @spec state() :: map()
-  def state, do: GenServer.call(__MODULE__, :state)
+  @doc """
+  What the player is doing, for a person at the console.
+
+  A caller that must not wait gives a timeout and catches the exit.
+  `MyHiFi.Playback.Player.state/0` does that, and every page reads it through there.
+  """
+  @spec state(timeout()) :: map()
+  def state(timeout \\ 5000), do: GenServer.call(__MODULE__, :state, timeout)
 
   @doc """
   The output devices, and the one that the player uses.
@@ -247,11 +254,17 @@ defmodule MyHiFi.Player do
   # The place of the track that plays now goes to its source first. A person who picks
   # another episode, or the next one, must find this one where they left it.
   @impl GenServer
-  def handle_call({:play, source, ref}, _from, %State{} = state) do
-    if Source.enabled?(source) do
-      play_now(source, ref, state)
-    else
-      {:reply, {:error, :source_not_in_use}, state}
+  def handle_call({:play, item}, _from, %State{} = state) do
+    case Source.from_slug(item.source) do
+      {:ok, source} ->
+        if Source.enabled?(source) do
+          play_now(source, item, state)
+        else
+          {:reply, {:error, :source_not_in_use}, state}
+        end
+
+      {:error, _reason} ->
+        {:reply, {:error, :no_such_source}, state}
     end
   end
 
@@ -263,7 +276,7 @@ defmodule MyHiFi.Player do
   # A pause holds a track for a person, so a device with nothing selected has nothing
   # to pause.
   @impl GenServer
-  def handle_call({:pause, true}, _from, %State{source: nil} = state) do
+  def handle_call({:pause, true}, _from, %State{item: nil} = state) do
     {:reply, :ok, state}
   end
 
@@ -286,7 +299,7 @@ defmodule MyHiFi.Player do
   end
 
   @impl GenServer
-  def handle_call({:pause, false}, _from, %State{source: nil} = state) do
+  def handle_call({:pause, false}, _from, %State{item: nil} = state) do
     {:reply, {:error, :nothing_selected}, %State{state | paused?: false}}
   end
 
@@ -300,26 +313,19 @@ defmodule MyHiFi.Player do
   def handle_call({:pause, false}, _from, %State{} = state) do
     state = waking(state)
 
-    case start(state.source, state.ref, state) do
+    case start(state.source, state.item, state) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
   end
 
-  @impl GenServer
-  def handle_call({:move, _direction}, _from, %State{source: nil} = state) do
-    {:reply, {:error, :nothing_selected}, state}
-  end
-
-  # A move is a play of another track of the same source, so this gives the work to the
-  # clause that plays one. That clause writes the place of this track, it stops the
-  # pipeline, and it keeps the new track in the settings.
+  # A move is a play of another row of the queue, so this gives the work to the clause
+  # that plays one. That clause writes the place of this track, it stops the pipeline,
+  # and it keeps the new track in the settings.
   @impl GenServer
   def handle_call({:move, direction}, from, %State{} = state) do
-    with :ok <- held(state.source, direction),
-         {:ok, ref} <- beside(state, direction) do
-      handle_call({:play, state.source, ref}, from, waking(state))
-    else
+    case moved(direction) do
+      {:ok, item} -> handle_call({:play, item}, from, waking(state))
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
@@ -365,7 +371,7 @@ defmodule MyHiFi.Player do
   def handle_call({:standby, false}, _from, %State{} = state) do
     state = waking(state)
 
-    case start(state.source, state.ref, state) do
+    case start(state.source, state.item, state) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
@@ -376,7 +382,7 @@ defmodule MyHiFi.Player do
     {:reply,
      %{
        source: state.source,
-       track: state.track,
+       item: state.item,
        stream_title: state.stream_title,
        artwork_path: state.artwork_path,
        playing?: state.started_at != nil,
@@ -390,14 +396,15 @@ defmodule MyHiFi.Player do
   @impl GenServer
   def handle_call(:output, _from, %State{} = state) do
     devices = Output.module().devices()
+    chosen = chosen_device()
 
     in_use =
-      case device_in_use(devices) do
+      case device_in_use(devices, chosen) do
         %{id: id} -> id
         nil -> nil
       end
 
-    {:reply, %{devices: devices, selected: chosen_device(), in_use: in_use}, state}
+    {:reply, %{devices: devices, selected: chosen, in_use: in_use}, state}
   end
 
   # A person who takes a source away expects the sound of it to go as well, and they
@@ -432,7 +439,7 @@ defmodule MyHiFi.Player do
   def handle_info(:progress, %State{} = state) do
     Event.publish(:player, %Events.Progress{
       position_ms: position_ms(state),
-      duration_ms: state.track && state.track.duration_ms
+      duration_ms: state.item && state.item.duration_ms
     })
 
     schedule_progress()
@@ -441,11 +448,11 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_info({:pipeline_playing, pipeline}, %State{pipeline: pipeline} = state) do
-    artwork_path = artwork_path(state.track)
+    artwork_path = artwork_path(state.item)
 
     Event.publish(:player, %Events.Started{
       source: state.source,
-      track: state.track,
+      track: state.item,
       artwork_path: artwork_path,
       live?: live?(state),
       position_ms: position_ms(state)
@@ -488,7 +495,7 @@ defmodule MyHiFi.Player do
 
     Event.publish(:player, %Events.Progress{
       position_ms: position_ms(state),
-      duration_ms: state.track && state.track.duration_ms
+      duration_ms: state.item && state.item.duration_ms
     })
 
     {:noreply, state}
@@ -524,9 +531,9 @@ defmodule MyHiFi.Player do
   end
 
   @impl GenServer
-  def handle_info(:restart, %State{source: source, ref: ref} = state)
-      when source != nil and ref != nil do
-    case start(source, ref, state) do
+  def handle_info(:restart, %State{source: source, item: item} = state)
+      when source != nil and item != nil do
+    case start(source, item, state) do
       {:ok, state} -> {:noreply, state}
       {:error, _reason, state} -> {:noreply, state}
     end
@@ -538,11 +545,10 @@ defmodule MyHiFi.Player do
     {:noreply, state}
   end
 
-  defp start(source, ref, %State{} = state) do
+  defp start(source, item, %State{} = state) do
     state = cancel_restart(state)
 
-    with {:ok, playable} <- source.resolve(ref),
-         {:ok, track} <- source.track(ref),
+    with {:ok, playable} <- source.resolve(item),
          {:ok, sink} <- sink(state) do
       Event.publish(:player, %Events.Buffering{percent: 0})
 
@@ -558,8 +564,7 @@ defmodule MyHiFi.Player do
            %State{
              state
              | source: source,
-               ref: ref,
-               track: track,
+               item: item,
                playable: playable,
                pipeline: pipeline,
                monitor: monitor,
@@ -621,8 +626,12 @@ defmodule MyHiFi.Player do
   # `sink/1` and the report of `output/0` both read this, because a settings page
   # must mark the card that the sound comes out of, and the rule is here and not
   # there.
-  defp device_in_use(devices) do
-    Enum.find(devices, List.first(devices), &(&1.id == chosen_device()))
+  defp device_in_use(devices), do: device_in_use(devices, chosen_device())
+
+  # The choice comes in, because `Enum.find/3` runs the test for each card and a read
+  # of the settings is a query. A board with five cards made six of the same query.
+  defp device_in_use(devices, chosen) do
+    Enum.find(devices, List.first(devices), &(&1.id == chosen))
   end
 
   # A page shows the local copy of a logo, and never the address of the station.
@@ -654,16 +663,6 @@ defmodule MyHiFi.Player do
     %State{state | standby?: false}
   end
 
-  # The source owns the order, and `capabilities/0` says whether it holds one at all.
-  # A user interface reads the same list, so a control that gives this error is a
-  # control that the interface drew dead.
-  defp held(source, direction) do
-    if direction in source.capabilities(), do: :ok, else: {:error, :not_supported}
-  end
-
-  defp beside(%State{source: source, ref: ref}, :next), do: source.next(ref)
-  defp beside(%State{source: source, ref: ref}, :previous), do: source.previous(ref)
-
   # A skip needs four things: a source that holds one, a track with an end, a file to
   # read, and a format that `MyHiFi.Player.Skip` reads. `:download` is the transport
   # that gives the file, and `MyHiFi.Player.FileSource` is the element that moves. All
@@ -693,15 +692,15 @@ defmodule MyHiFi.Player do
     end
   end
 
-  defp play_now(source, ref, %State{} = state) do
+  defp play_now(source, item, %State{} = state) do
     store_position(state)
     state = stop_pipeline(state)
 
-    case start(source, ref, state) do
+    case start(source, item, state) do
       {:ok, state} ->
         # Only a new choice goes to the settings. Leaving standby and starting the
         # stream again both use the choice that is already there.
-        store_station(source, ref)
+        Settings.put(@last_item_key, item.id)
         {:reply, :ok, state}
 
       {:error, reason, state} ->
@@ -709,56 +708,42 @@ defmodule MyHiFi.Player do
     end
   end
 
-  # A source names its own ref, so nothing here turns stored bytes back into a
-  # term. See `MyHiFi.Source.ref_to_string/1`.
-  defp store_station(source, ref) do
-    case source.ref_to_string(ref) do
-      {:ok, name} ->
-        Settings.put(@last_source_key, inspect(source))
-        Settings.put(@last_ref_key, name)
-        :ok
-
-      {:error, _reason} ->
-        :ok
+  # The queue holds the order, so the row after this one is the row that plays next.
+  # An empty queue, and either end of it, both mean the same thing to a person: there
+  # is nothing that way. The code interface of Ash wraps the reason, and no caller
+  # reads inside it.
+  defp moved(direction) do
+    case Playback.move_queue(direction) do
+      {:ok, row} -> item(row.item_id)
+      {:error, _reason} -> {:error, :no_more}
     end
   end
 
+  defp item(id), do: Playback.get_item(id, load: [:artwork])
+
   # A restored track is a paused track. A person then reads the name of the station
-  # and a play control, and section 9 asks for that: the device selects the station and
-  # plays nothing.
+  # and a play control: the device selects the station and plays nothing. A stereo
+  # that starts to play by itself after a power cut is a surprise.
+  #
+  # The queue is in ETS and a restart empties it, so the device comes back with one
+  # track selected and no list behind it.
   defp restore_station(%State{} = state) do
-    with {:ok, source} <- stored_source(),
-         {:ok, name} <- stored_value(@last_ref_key),
-         {:ok, ref} <- source.ref_from_string(name),
-         {:ok, track} <- source.track(ref) do
-      %State{state | source: source, ref: ref, track: track, paused?: true}
+    with {:ok, id} <- stored_value(@last_item_key),
+         {:ok, item} <- item(id),
+         {:ok, source} <- Source.from_slug(item.source),
+         true <- Source.enabled?(source) do
+      %State{state | source: source, item: item, paused?: true}
     else
       _other -> state
     end
   end
 
-  # Only a source that this firmware holds and that a person left in use can come
-  # back. A name from the settings therefore never makes an atom, a source that a
-  # later version removes leaves the device with nothing selected, and a source
-  # that a person took out of use does the same.
-  defp stored_source do
-    with {:ok, name} <- stored_value(@last_source_key),
-         source when not is_nil(source) <-
-           Enum.find(Source.enabled(), &(inspect(&1) == name)) do
-      {:ok, source}
-    else
-      _other -> :error
-    end
-  end
-
-  # A source out of use must not come back after a restart, and the name of the
-  # last track of it is no longer of use to any part.
+  # A source out of use must not come back after a restart, and the item that it
+  # played is no longer of use to any part.
   defp forget_station(%State{} = state) do
-    for key <- [@last_source_key, @last_ref_key] do
-      case Settings.fetch(key) do
-        {:ok, setting} -> Settings.delete(setting)
-        {:error, _reason} -> :ok
-      end
+    case Settings.fetch(@last_item_key) do
+      {:ok, setting} -> Settings.delete(setting)
+      {:error, _reason} -> :ok
     end
 
     state
@@ -781,7 +766,7 @@ defmodule MyHiFi.Player do
     store_position(state)
     state = stop_pipeline(state)
 
-    case start(state.source, state.ref, state) do
+    case start(state.source, state.item, state) do
       {:ok, state} -> state
       {:error, _reason, state} -> state
     end
@@ -801,8 +786,7 @@ defmodule MyHiFi.Player do
     %State{
       state
       | source: nil,
-        ref: nil,
-        track: nil,
+        item: nil,
         playable: nil,
         stream_title: nil,
         artwork_path: nil,
@@ -852,7 +836,7 @@ defmodule MyHiFi.Player do
     store_position(state)
     Logger.error("The stream failed #{restarts} times. Giving up.")
     Event.publish(:player, %Events.Failed{reason: :too_many_restarts})
-    %State{stop_pipeline(state) | restarts: 0, source: nil, ref: nil}
+    %State{stop_pipeline(state) | restarts: 0, source: nil, item: nil}
   end
 
   defp restart(%State{} = state) do
@@ -897,35 +881,63 @@ defmodule MyHiFi.Player do
     offset + System.monotonic_time(:millisecond) - at
   end
 
-  # A track ended by itself. The source holds what that means: a podcast marks the
-  # episode played, and a station never reaches this.
-  defp finish(%State{source: source, ref: ref} = state) do
+  # A track ended by itself. A podcast marks the episode played, and a station never
+  # reaches this, because a live stream that ends is a network that failed.
+  #
+  # The row stays in the queue and the mark moves past it, so a person can go back to
+  # what they heard.
+  defp finish(%State{source: source, item: item} = state) do
     state = stop_pipeline(state)
-    source.finished(ref)
+    Playback.mark_played(item)
+    finished(source, item)
     Event.publish(:player, %Events.Stopped{reason: :finished})
 
-    %State{
+    advance(%State{
       state
-      | track: nil,
-        playable: nil,
+      | playable: nil,
         stream_title: nil,
         artwork_path: nil,
         offset_ms: 0,
         position_bytes: nil
-    }
+    })
   end
 
-  # The source decides what a place means, and this process holds no knowledge of
-  # that. It gives the number and moves on, and a source that keeps no place gives
-  # `:ok`. Nothing waits on the answer, because a stop must be quick.
+  # The end of one track is the start of the next one. A queue that holds no more
+  # leaves the device with the track that ended still selected, so a person reads what
+  # they heard last and a play control starts it again.
+  defp advance(%State{} = state) do
+    with {:ok, item} <- moved(:next),
+         {:ok, source} <- Source.from_slug(item.source),
+         true <- Source.enabled?(source),
+         {:ok, state} <- start(source, item, state) do
+      Settings.put(@last_item_key, item.id)
+      state
+    else
+      _other -> state
+    end
+  end
+
+  # A source that must do something of its own when a track ends says so. Podcasts
+  # release the file of the episode, so an eviction may take it.
+  defp finished(source, item) do
+    if function_exported?(source, :finished, 1), do: source.finished(item), else: :ok
+  end
+
+  # `keeps_place?` of the item decides whether the place is written at all, so a
+  # station keeps none and an episode keeps one. See
+  # `MyHiFi.Playback.Item.Changes.KeepPlaceOnly`.
   #
   # A track that never began has no place to keep, and writing 0 would lose the
   # place that a person already had.
   defp store_position(%State{started_at: nil}), do: :ok
-  defp store_position(%State{source: nil}), do: :ok
+  defp store_position(%State{item: nil}), do: :ok
 
-  defp store_position(%State{source: source, ref: ref} = state) do
-    source.store_position(ref, %{ms: position_ms(state), bytes: state.position_bytes})
+  defp store_position(%State{item: item} = state) do
+    Playback.store_position(item, %{
+      position_ms: position_ms(state),
+      position_bytes: state.position_bytes
+    })
+
     :ok
   end
 

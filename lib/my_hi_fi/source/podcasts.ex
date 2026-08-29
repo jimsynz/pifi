@@ -31,25 +31,30 @@ defmodule MyHiFi.Source.Podcasts do
   a person looked at once, and it holds `index_id` for a later call to the index.
 
   The cost is a row for each answer of each search. A row is small, and a device
-  serves one household. A job removes an old show that no person subscribed to. See
-  section 4 of `docs/podcasts-plan.md`.
+  serves one household. A job removes an old show that no person subscribed to.
   """
 
   @behaviour MyHiFi.Source
 
+  require Ash.Query
+  require Logger
+
+  alias MyHiFi.Playback.Facet
+  alias MyHiFi.Playback.Item
   alias MyHiFi.Player.Download
   alias MyHiFi.Podcast
+  alias MyHiFi.Podcast.Fill
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Podcast.Refresh
+  alias MyHiFi.Podcast.Show
+  alias MyHiFi.Podcast.Trending
   alias MyHiFi.Settings
 
-  @default_limit 100
-
-  # A feed changes when a publisher writes an episode, and no publisher writes one
-  # each minute. An hour is short enough that a person who opens a show twice in a
-  # day sees the new episode, and long enough that moving through the tree reads no
-  # feed twice.
-  @stale_after_seconds 3600
+  # The index answers with the shows that match best first, and a person who looks for a
+  # show by its name finds it near the top. More than this is a list that no person
+  # reads.
+  @search_limit 50
+  @source "podcasts"
 
   @impl MyHiFi.Source
   def title, do: "Podcasts"
@@ -61,128 +66,96 @@ defmodule MyHiFi.Source.Podcasts do
   # `MyHiFi.Player.Skip` reads MP3 frames, and 8771 of the 8773 episodes of the
   # measurement hold `audio/mpeg`.
   @impl MyHiFi.Source
-  def capabilities, do: [:next, :previous, :search, :skip]
+  def capabilities, do: [:refresh, :search, :skip]
 
   @impl MyHiFi.Source
-  def root, do: :root
+  def kinds, do: [container: "Shows", track: "Episodes"]
 
   @impl MyHiFi.Source
-  def browse(ref, options \\ [])
-
-  def browse(:root, _options) do
-    {:ok,
-     page([
-       {:container,
-        %{ref: :subscriptions, title: "Subscriptions", artwork: nil, favourite?: nil}},
-       {:container, %{ref: :trending, title: "Trending", artwork: nil, favourite?: nil}},
-       {:container, %{ref: :categories, title: "Categories", artwork: nil, favourite?: nil}}
-     ])}
+  # The index gives the categories of each show that it names, so a device learns them
+  # from the reads that it already makes and asks for no list of its own. A person sees
+  # the categories of the shows that the device holds.
+  def roots do
+    [
+      {"Subscriptions", %{query: subscriptions_query(), kind: :item}},
+      {"Trending", %{query: Trending.query(), kind: :item, order: Trending.order()}},
+      {"Categories",
+       %{query: Ash.Query.for_read(Facet, :by_key, %{key: "category"}), kind: :facet}}
+    ]
   end
 
-  def browse(:subscriptions, options) do
-    {:ok, shows(Podcast.subscribed_shows!(), options)}
+  defp subscriptions_query do
+    Item
+    |> Ash.Query.filter(source == ^@source and kind == :container and favourite? == true)
+    |> Ash.Query.sort(title: :asc)
   end
 
-  def browse(:trending, options) do
-    with {:ok, found} <- Index.trending(limit: limit(options)) do
-      {:ok, shows(store(found), options)}
-    end
-  end
-
-  def browse(:categories, options) do
-    with {:ok, categories} <- Index.categories() do
-      containers =
-        Enum.map(
-          categories,
-          &{:container,
-           %{ref: {:category, &1.name}, title: &1.name, artwork: nil, favourite?: nil}}
-        )
-
-      {:ok, paginate(containers, options)}
-    end
-  end
-
-  def browse({:category, name}, options) do
-    with {:ok, found} <- Index.trending(category: name, limit: limit(options)) do
-      {:ok, shows(store(found), options)}
-    end
-  end
-
-  def browse({:show, id}, options) do
-    with {:ok, show} <- Podcast.get_show(id) do
-      show = refresh_if_stale(show)
-
-      {:ok, tracks(Podcast.episodes_of_show!(show.id), show, options)}
-    end
-  end
-
-  def browse(ref, _options), do: {:error, {:no_such_container, ref}}
-
+  # A person opening a show whose local copy is old must not wait for the network, so
+  # the read goes to a job. See `read_feed_if_needed/1`.
   @impl MyHiFi.Source
-  def search(query, options \\ []) do
-    with {:ok, found} <- Index.search(query, limit: limit(options)) do
-      {:ok, shows(store(found), options)}
-    end
+  # It runs for its effect, and the behaviour asks for `:ok`. `read_feed_if_needed/1`
+  # gives the show, or the job, or nothing at all, and no caller reads any of that.
+  def opened(item) do
+    read_feed_if_needed(item)
+
+    :ok
   end
 
   @impl MyHiFi.Source
-  def track({:episode, id}) do
-    with {:ok, episode} <- Podcast.get_episode(id, load: [:show]) do
-      {:ok, to_track(episode, episode.show)}
-    end
-  end
+  # `opened/1` reads a feed whose local copy is old, and the schedule reads each one
+  # every six hours. A person who knows that a publisher wrote an episode a moment ago
+  # waits for neither, so this reads it whatever the age of the copy.
+  def refresh(item) do
+    with {:ok, show} <- show_of(item) do
+      read_feed_behind(show)
 
-  def track(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def resolve({:episode, id}) do
-    with {:ok, episode} <- Podcast.get_episode(id), do: playable(episode)
-  end
-
-  def resolve(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def next({:episode, id}), do: sibling(id, 1)
-
-  def next(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def previous({:episode, id}), do: sibling(id, -1)
-
-  def previous(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def favourite({:show, id}, true?) do
-    with {:ok, show} <- Podcast.get_show(id),
-         {:ok, _show} <- mark(show, true?) do
       :ok
     end
   end
 
-  def favourite(ref, _true?), do: {:error, {:not_a_show, ref}}
-
   @impl MyHiFi.Source
-  def store_position({:episode, id}, %{ms: ms, bytes: bytes}) do
-    with {:ok, episode} <- Podcast.get_episode(id),
-         {:ok, _episode} <-
-           Podcast.store_position(episode, %{position_ms: ms, position_bytes: bytes}) do
-      :ok
+  # The index holds millions of shows, and this device holds the ones that it has read:
+  # the trending list, the subscriptions, and what an earlier search named. A person
+  # looks for a show by its name, so this asks the index and writes what it names. The
+  # query then finds it.
+  #
+  # It gives the shows and the episodes. A person looks for a show to subscribe to it,
+  # and for an episode of a show that they hold, and `MyHiFiWeb.SearchLive` draws a
+  # control to choose between the two. See `c:MyHiFi.Source.kinds/0`.
+  def search(text) do
+    read_index(text)
+
+    Item
+    |> Ash.Query.filter(source == ^@source)
+    |> Ash.Query.sort(title: :asc)
+  end
+
+  # A device with no key, and an index that does not answer, both leave the catalogue as
+  # it is. A person still gets what the device holds.
+  defp read_index(text) do
+    case String.trim(text) do
+      "" ->
+        :ok
+
+      trimmed ->
+        case Index.search(trimmed, limit: @search_limit) do
+          {:ok, found} -> store(found)
+          {:error, _reason} -> :ok
+        end
     end
   end
 
-  def store_position(_ref, _place), do: :ok
-
   @impl MyHiFi.Source
-  def finished({:episode, id}) do
-    with {:ok, episode} <- Podcast.get_episode(id),
-         {:ok, _episode} <- Podcast.mark_played(episode) do
-      # The file held `keep?` while the person was in the middle of it. They reached
-      # the end, so an eviction may take it now.
-      Download.release(id)
-    end
-  end
+  def resolve(%{kind: :track} = item), do: playable(item)
 
-  def finished(_ref), do: :ok
+  def resolve(item), do: {:error, {:not_a_track, item.id}}
+
+  # `MyHiFi.Player` marks the item played. The file held `keep?` while the person was
+  # in the middle of it, and they reached the end, so an eviction may take it now.
+  @impl MyHiFi.Source
+  def finished(%{kind: :track} = item), do: Download.release(item.id)
+
+  def finished(_item), do: :ok
 
   @impl MyHiFi.Source
   def settings do
@@ -230,6 +203,14 @@ defmodule MyHiFi.Source.Podcasts do
     if Index.configured?() do
       [
         %{
+          name: "read_index",
+          title: "Read the index again",
+          description:
+            "Trending comes from the Podcast Index. A read happens each day, and this " <>
+              "one happens now.",
+          icon: :refresh
+        },
+        %{
           name: "remove_key",
           title: "Remove the key",
           description: "Your subscriptions stay, and the index finds nothing new.",
@@ -241,7 +222,16 @@ defmodule MyHiFi.Source.Podcasts do
     end
   end
 
+  # The read reaches a service, and a person must not wait for it on a settings page.
+  # `MyHiFi.Podcast.Trending` publishes `MyHiFi.Event.Source.Changed` when it finishes,
+  # and a page that shows Trending reads the list again.
   @impl MyHiFi.Source
+  def run_settings_action("read_index") do
+    AshOban.schedule(Show, :read_trending)
+
+    {:ok, "The device reads the index now. Trending changes when the read finishes."}
+  end
+
   def run_settings_action("remove_key") do
     for key <- [Index.key_setting(), Index.secret_setting()] do
       case Settings.fetch(key) do
@@ -255,175 +245,91 @@ defmodule MyHiFi.Source.Podcasts do
 
   def run_settings_action(_name), do: {:error, "Podcasts hold no such control."}
 
-  # An episode holds a UUID, and a UUID holds no colon. A container needs no name,
-  # because the player stores the tracks only. See `MyHiFi.Source.ref_to_string/1`.
-  @impl MyHiFi.Source
-  def ref_to_string({:episode, id}), do: {:ok, "episode:" <> id}
-
-  def ref_to_string(_ref), do: {:error, :cannot_name}
-
-  @impl MyHiFi.Source
-  def ref_from_string("episode:" <> id) do
-    case Ash.Type.cast_input(Ash.Type.UUID, id) do
-      {:ok, id} when is_binary(id) -> {:ok, {:episode, id}}
-      _other -> {:error, :not_a_name}
+  # The feed of the publisher decides what the episodes are, so a device reads it when
+  # the local copy is old. See the `stale?` calculation of `MyHiFi.Podcast.Show`.
+  #
+  # A show that no read reached holds no episode, and a person who opened one would see
+  # an empty list, so that read happens now. Every other read takes seconds while a
+  # person waits for a list, so it goes to the job instead. The job publishes
+  # `MyHiFi.Event.Source.Changed`, and a page that shows the show reads it again.
+  defp read_feed_if_needed(item) do
+    case show_of(item) do
+      {:ok, %{last_fetched_at: nil} = show} -> Refresh.run(show)
+      {:ok, %{stale?: true} = show} -> read_feed_behind(show)
+      _other -> :ok
     end
   end
 
-  def ref_from_string(_name), do: {:error, :not_a_name}
-
-  # The feed of the publisher decides what the episodes are, so this reads it when
-  # the local copy is old. A read that fails keeps the episodes that the device
-  # already holds: a person with no network still sees what they had, and
-  # `last_error` says why there is nothing newer.
-  defp refresh_if_stale(show) do
-    if stale?(show), do: refresh(show), else: show
+  # A show holds the address of the feed, and the item holds what a person sees. The
+  # two meet at `item_id`.
+  defp show_of(item) do
+    Show
+    |> Ash.Query.filter(item_id == ^item.id)
+    |> Ash.Query.load([:stale?])
+    |> Ash.read_one()
+    |> case do
+      {:ok, nil} -> {:error, {:no_such_show, item.source_ref}}
+      other -> other
+    end
   end
 
-  defp stale?(%{last_fetched_at: nil}), do: true
-
-  defp stale?(%{last_fetched_at: fetched_at}) do
-    DateTime.diff(DateTime.utc_now(), fetched_at, :second) > @stale_after_seconds
+  # A person asked for a list, and they get it whether the job arrives or not. The
+  # schedule reads the same feed each six hours, so a lost job costs a person nothing
+  # but the newest episode until then.
+  defp read_feed_behind(show) do
+    AshOban.run_trigger(show, :refresh)
+  rescue
+    error ->
+      Logger.warning("Could not ask for a read of #{show.feed_url}: #{inspect(error)}")
   end
-
-  # `MyHiFi.Podcast.Refresh` holds this, because the job that runs on a schedule
-  # must read a feed in the same way that a person opening a show does.
-  defp refresh(show), do: Refresh.run(show)
 
   # The index gives a show, and a row gives it a `ref` that survives a restart.
-  defp store(found), do: Enum.map(found, &Podcast.upsert_show_from_index!/1)
+  # A row of `MyHiFi.Podcast.Show` holds the feed and the index, and an item holds what
+  # a person sees. A search writes both, and it links them.
+  defp store(found) do
+    Enum.map(found, fn attributes ->
+      show = Podcast.upsert_show_from_index!(Map.take(attributes, [:feed_url, :index_id]))
+      item = Fill.show(attributes)
+      {:ok, _show} = Podcast.set_show_item(show, %{item_id: item.id})
+
+      item
+    end)
+  end
 
   # The episodes of `browse/2`, and in the same order, so this list is the list that a
   # person sees. It holds the newest episode first, and it has two ends.
-  defp sibling(id, step) do
-    with {:ok, episode} <- Podcast.get_episode(id),
-         episodes = Podcast.episodes_of_show!(episode.show_id),
-         index when is_integer(index) <- Enum.find_index(episodes, &(&1.id == id)) do
-      at(episodes, index + step)
-    else
-      _other -> {:error, :no_more}
-    end
+  # `MyHiFi.Podcast.Fill` reads the type of the enclosure, so this holds no mime type to
+  # name. The title is what tells a person which episode cannot play.
+  # An episode that no read of the feed has filled holds the place of a person and
+  # nothing to play. `MyHiFi.Podcast.CarryPlaces` writes one, and the next read of the
+  # feed fills it.
+  defp playable(%{url: url, format: format} = item) when is_nil(url) or is_nil(format) do
+    {:error, {:not_read_yet, item.title}}
   end
 
-  # `Enum.at/2` reads a negative place from the end of a list, and the list of a show
-  # does not move round, so the newest episode has nothing before it.
-  defp at(_episodes, place) when place < 0, do: {:error, :no_more}
+  defp playable(%{format: :unknown} = item), do: {:error, {:unsupported_format, item.title}}
 
-  defp at(episodes, place) do
-    case Enum.at(episodes, place) do
-      nil -> {:error, :no_more}
-      %{id: id} -> {:ok, {:episode, id}}
-    end
+  defp playable(item) do
+    {:ok,
+     %{
+       uri: item.url,
+       headers: [],
+       transport: :download,
+       container: :none,
+       format: item.format,
+       live?: false,
+       position_ms: item.position_ms,
+       # `MyHiFi.Player.Download` holds the file under this name. It is the identifier
+       # of the item now, so a file that an older release wrote is unreachable and the
+       # eviction of the cache reclaims it.
+       key: item.id,
+       position_bytes: item.position_bytes || 0
+     }}
   end
 
-  defp playable(episode) do
-    case format(episode.mime_type) do
-      nil ->
-        {:error, {:unsupported_format, episode.mime_type}}
-
-      format ->
-        {:ok,
-         %{
-           uri: episode.audio_url,
-           headers: [],
-           transport: :download,
-           container: :none,
-           format: format,
-           live?: false,
-           position_ms: episode.position_ms,
-           key: episode.id,
-           position_bytes: episode.position_bytes || 0
-         }}
-    end
-  end
-
-  # 8771 of the 8773 episodes of the measurement hold `audio/mpeg`, and 2 hold
-  # `audio/x-m4a`. MP4 needs a demultiplexer that this firmware does not hold, so
-  # an m4a episode gives an error and a person reads the reason. See section 9 of
-  # `docs/podcasts-plan.md`.
-  defp format("audio/mpeg"), do: :mp3
-  defp format("audio/mp3"), do: :mp3
-  defp format("audio/mpeg3"), do: :mp3
-  defp format("audio/x-mpeg"), do: :mp3
-  defp format("audio/aac"), do: :aac
-  defp format("audio/aacp"), do: :aac
-  defp format(_other), do: nil
-
-  defp mark(show, true), do: Podcast.subscribe(show)
-  defp mark(show, false), do: Podcast.unsubscribe(show)
-
-  defp shows(shows, options) do
-    shows
-    |> Enum.map(&{:container, to_container(&1)})
-    |> paginate(options)
-  end
-
-  defp to_container(show) do
-    %{
-      ref: {:show, show.id},
-      title: show.title,
-      artwork: show.artwork_url,
-      favourite?: show.subscribed?
-    }
-  end
-
-  defp tracks(episodes, show, options) do
-    episodes
-    |> Enum.map(&{:track, to_track(&1, show)})
-    |> paginate(options)
-  end
-
-  defp to_track(episode, show) do
-    %{
-      ref: {:episode, episode.id},
-      title: episode.title || "An episode",
-      subtitle: subtitle(episode),
-      # A publisher writes artwork for the episode of 70% of the measurement. The
-      # cover of the show serves the rest, so every episode holds a picture.
-      artwork: episode.artwork_url || artwork_of(show),
-      duration_ms: episode.duration_ms,
-      # An episode carries no mark. A person subscribes to the show, which is the
-      # container, and `favourite?` there holds that.
-      favourite?: nil
-    }
-  end
-
-  defp artwork_of(%{artwork_url: url}), do: url
-  defp artwork_of(_show), do: nil
-
-  # The date tells a person which episode is new, and the length tells them whether
-  # they have time for it.
-  defp subtitle(%{published_at: nil, duration_ms: nil}), do: nil
-  defp subtitle(%{published_at: nil, duration_ms: duration}), do: minutes(duration)
-  defp subtitle(%{published_at: at, duration_ms: nil}), do: date(at)
-
-  defp subtitle(%{published_at: at, duration_ms: duration}),
-    do: "#{date(at)}, #{minutes(duration)}"
-
-  defp date(at), do: Calendar.strftime(at, "%-d %b %Y")
-
-  defp minutes(duration) do
-    case div(duration, 60_000) do
-      0 -> "under a minute"
-      1 -> "1 min"
-      minutes -> "#{minutes} min"
-    end
-  end
-
-  defp limit(options), do: Keyword.get(options, :limit, @default_limit)
-
-  defp page(entries, cursor \\ nil), do: %{entries: entries, cursor: cursor}
-
-  defp paginate(entries, options) do
-    limit = limit(options)
-    offset = Keyword.get(options, :cursor, 0)
-
-    taken = entries |> Enum.drop(offset) |> Enum.take(limit)
-    next = offset + length(taken)
-
-    if next < length(entries), do: page(taken, next), else: page(taken)
-  end
-
+  # The subtitle and the picture are columns of the item that `MyHiFi.Podcast.Fill`
+  # wrote, so a page draws a list with no join for each row. `artwork` of the item is
+  # its own picture, or the cover of the show that holds it.
   # A person learns now whether the key works, and not when a search fails. The
   # category list is the smallest read of the index.
   defp confirmation do

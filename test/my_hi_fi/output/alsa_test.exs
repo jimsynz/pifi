@@ -102,18 +102,36 @@ defmodule MyHiFi.Output.AlsaTest do
     end
   end
 
+  # 44100 Hz is rough on this board and 48000 Hz is clean, because USB audio needs a
+  # whole number of samples in each 1 ms packet and the dwc2 controller handles the
+  # alternation of 44.1 badly. The fault is in the USB controller, so it reaches USB
+  # cards and no other kind.
   describe "sink_spec/1" do
-    # 44100 Hz is rough on this board and 48000 Hz is clean, because USB audio needs
-    # a whole number of samples in each 1 ms packet and the dwc2 controller handles
-    # the alternation of 44.1 badly. `rate48` of `/etc/asound.conf` holds the card at
-    # 48000 Hz and converts the format as `plughw` did.
-    test "it names the definition that holds the card at 48000 Hz" do
-      assert %MyHiFi.Output.APlaySink{device: "rate48:CARD=Audio,DEV=0"} =
-               Alsa.sink_spec("hw:CARD=Audio,DEV=0")
+    setup do
+      Application.put_env(:my_hi_fi, :alsa_rate48?, true)
+      on_exit(fn -> Application.delete_env(:my_hi_fi, :alsa_rate48?) end)
+      :ok
     end
 
-    test "a name that holds no hardware prefix goes through as it is" do
+    # `/proc/asound/cards` says which driver holds a card, and a host that runs this
+    # test holds whatever cards it holds. The name below is one that no machine has.
+    test "a card that this machine does not hold is not a USB card" do
+      assert %MyHiFi.Output.APlaySink{device: "hw:CARD=Nothing,DEV=0"} =
+               Alsa.sink_spec("hw:CARD=Nothing,DEV=0")
+    end
+
+    test "a name that holds no card goes through as it is" do
       assert %MyHiFi.Output.APlaySink{device: "default"} = Alsa.sink_spec("default")
+    end
+
+    # Naming a definition that no configuration holds gives `Unknown PCM rate48:...`
+    # and no sound at all. `rootfs_overlay` holds it, so a host build must not name it.
+    test "a build with no such definition names the card itself" do
+      Application.put_env(:my_hi_fi, :alsa_rate48?, false)
+
+      for %{id: id} <- Alsa.devices() do
+        assert %MyHiFi.Output.APlaySink{device: ^id} = Alsa.sink_spec(id)
+      end
     end
   end
 end

@@ -5,26 +5,40 @@ defmodule MyHiFi.Source.InternetRadio do
   The tree has three branches under the root.
 
       Favourites          the stations that a person marked
-      Countries           one container for each country in the table
+      Countries           one container for each country in the catalogue
         NZ                the stations of that country
-      Tags                one container for each tag in the table
+      Tags                one container for each tag in the catalogue
         classic rock      the stations that carry that tag
 
   A station is a track, and it has no length, because a radio stream is live.
 
-  `MyHiFi.Radio.Station.SyncFromRemote` fills the table, so this module reaches no
-  network. A search works when the internet does not.
+  `MyHiFi.Radio.Fill` writes the stations into `MyHiFi.Playback`, so this module holds
+  no table of its own and it reaches no network to browse. A search works when the
+  internet does not.
+
+  A `ref` is `{:station, id}`, and the id is the id of a `MyHiFi.Playback.Item`. A
+  country and a tag are containers, and each one names a `MyHiFi.Playback.Facet`.
+
+  ## The one place that needs the network
+
+  `resolve/1` reads it. An HLS address gives a playlist, and the playlist holds the
+  container and the codec. Ogg is a container, and the service reports the codec `OGG`
+  for each codec inside it, so the first page of the stream names the true one.
+  `transport` and `format` of an item hold what the service claims, and this function
+  gives what is true.
   """
 
   @behaviour MyHiFi.Source
 
+  require Ash.Query
+
+  alias MyHiFi.Playback.Facet
+  alias MyHiFi.Playback.Item
   alias MyHiFi.Player.Hls
   alias MyHiFi.Player.Ogg
-  alias MyHiFi.Radio
-  alias MyHiFi.Radio.Station
-  alias MyHiFi.Radio.Station.SyncFromRemote
+  alias MyHiFi.Radio.Sync.FromRemote
 
-  @default_limit 100
+  @source "internet-radio"
 
   @impl MyHiFi.Source
   def title, do: "Internet radio"
@@ -36,98 +50,58 @@ defmodule MyHiFi.Source.InternetRadio do
   # Next and previous move through the favourites, in the way that the preset controls
   # of a stereo do.
   @impl MyHiFi.Source
-  def capabilities, do: [:next, :previous, :search]
+  def capabilities, do: [:search]
+
+  # A station plays, and no station holds another one.
+  @impl MyHiFi.Source
+  def kinds, do: [track: "Stations"]
 
   @impl MyHiFi.Source
-  def root, do: :root
+  def roots do
+    [
+      {"Favourites", %{query: favourites_query(), kind: :item}},
+      {"Countries", %{query: facet_query("country"), kind: :facet}},
+      {"Tags", %{query: facet_query("tag"), kind: :facet}}
+    ]
+  end
 
+  defp favourites_query do
+    Item
+    |> Ash.Query.filter(source == ^@source and favourite? == true)
+    |> Ash.Query.sort(title: :asc)
+  end
+
+  defp facet_query(key) do
+    Facet
+    |> Ash.Query.for_read(:by_key, %{key: key})
+  end
+
+  # A sync writes every station on to the card, so the catalogue is the whole list and
+  # this reaches no service. The text is therefore not needed here.
   @impl MyHiFi.Source
-  def browse(ref, options \\ [])
-
-  def browse(:root, _options) do
-    {:ok,
-     page([
-       {:container, %{ref: :favourites, title: "Favourites", artwork: nil, favourite?: nil}},
-       {:container, %{ref: :countries, title: "Countries", artwork: nil, favourite?: nil}},
-       {:container, %{ref: :tags, title: "Tags", artwork: nil, favourite?: nil}}
-     ])}
-  end
-
-  def browse(:favourites, options) do
-    {:ok, tracks(Radio.favourite_stations!(), options)}
-  end
-
-  def browse(:countries, options) do
-    containers =
-      Radio.list_stations!(query: [select: [:country_code]])
-      |> Enum.map(& &1.country_code)
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.uniq()
-      |> Enum.sort()
-      |> Enum.map(&{:container, %{ref: {:country, &1}, title: &1, artwork: nil, favourite?: nil}})
-
-    {:ok, paginate(containers, options)}
-  end
-
-  def browse({:country, code}, options) do
-    {:ok, tracks(Radio.stations_by_country!(code), options)}
-  end
-
-  def browse(:tags, options) do
-    containers =
-      Radio.list_stations!(query: [select: [:tags]])
-      |> Enum.flat_map(& &1.tags)
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.uniq()
-      |> Enum.sort()
-      |> Enum.map(&{:container, %{ref: {:tag, &1}, title: &1, artwork: nil, favourite?: nil}})
-
-    {:ok, paginate(containers, options)}
-  end
-
-  def browse({:tag, tag}, options) do
-    {:ok, tracks(Radio.stations_by_tag!(tag), options)}
-  end
-
-  def browse(ref, _options), do: {:error, {:no_such_container, ref}}
-
-  @impl MyHiFi.Source
-  def search(query, options \\ []) do
-    {:ok, tracks(Radio.search_stations!(query), options)}
+  def search(_text) do
+    Item
+    |> Ash.Query.filter(source == ^@source)
+    |> Ash.Query.sort(rank: :desc, title: :asc)
   end
 
   @impl MyHiFi.Source
-  def track({:station, id}) do
-    case Radio.get_station(id) do
-      {:ok, station} -> {:ok, to_track(station)}
-      {:error, reason} -> {:error, reason}
-    end
+  def resolve(%{kind: :track} = item), do: playable(item)
+
+  def resolve(item), do: {:error, {:not_a_track, item.id}}
+
+  # A station that no read of the service has filled holds the mark of a person and
+  # nothing to play. `MyHiFi.Radio.CarryFavourites` writes one, and the next sync
+  # fills it. This is first, because an address of `nil` reaches the network below.
+  defp playable(%{url: url, format: format} = item) when is_nil(url) or is_nil(format) do
+    {:error, {:not_read_yet, item.title}}
   end
-
-  def track(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def resolve({:station, id}) do
-    with {:ok, station} <- Radio.get_station(id), do: playable(station)
-  end
-
-  def resolve(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def next({:station, id}), do: preset(id, 1)
-
-  def next(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def previous({:station, id}), do: preset(id, -1)
-
-  def previous(ref), do: {:error, {:not_a_track, ref}}
 
   # An HLS address gives a playlist, and the playlist holds the container and the
   # codec. `MyHiFi.Player.Hls` reads it. This is the one function of this module
   # that needs the network.
-  defp playable(%{hls?: true} = station) do
-    case Hls.resolve(station.stream_url, hls_codec(station)) do
+  defp playable(%{transport: :hls} = item) do
+    case Hls.resolve(item.url, hls_codec(item)) do
       {:ok, hls} ->
         {:ok,
          %{
@@ -148,22 +122,22 @@ defmodule MyHiFi.Source.InternetRadio do
   # Ogg is a container, and the service reports the codec `OGG` for each codec
   # inside it. The first page of the stream names the codec, so this reads it. See
   # `MyHiFi.Player.Ogg`.
-  defp playable(%{codec: codec} = station) when codec in ["OGG", "ogg", "FLAC", "flac"] do
-    case Ogg.codec(station.stream_url) do
+  defp playable(%{format: format} = item) when format in [:vorbis, :flac] do
+    case Ogg.codec(item.url) do
       {:ok, inside} ->
-        {:ok, http_playable(station, :ogg, inside)}
+        {:ok, http_playable(item, :ogg, inside)}
 
       # A station that names FLAC and holds no Ogg container sends FLAC as it is.
       {:error, _reason} ->
-        {:ok, http_playable(station, :none, format(station))}
+        {:ok, http_playable(item, :none, item.format)}
     end
   end
 
-  defp playable(station), do: {:ok, http_playable(station, :none, format(station))}
+  defp playable(item), do: {:ok, http_playable(item, :none, item.format)}
 
-  defp http_playable(station, container, format) do
+  defp http_playable(item, container, format) do
     %{
-      uri: station.stream_url,
+      uri: item.url,
       headers: [],
       transport: :http,
       container: container,
@@ -176,54 +150,8 @@ defmodule MyHiFi.Source.InternetRadio do
 
   # The playlist names the codec in almost every case, and this answer applies
   # only when it does not. HLS radio carries AAC far more often than MP3.
-  defp hls_codec(%{codec: codec}) do
-    case codec_format(codec) do
-      :mp3 -> :mp3
-      _other -> :aac
-    end
-  end
-
-  # A station holds a UUID, and a UUID holds no colon, so this name needs no
-  # escape rule. A tag holds any character, so a container ref would need one, and
-  # the player stores the tracks only.
-  @impl MyHiFi.Source
-  def ref_to_string({:station, id}), do: {:ok, "station:" <> id}
-
-  def ref_to_string(_ref), do: {:error, :cannot_name}
-
-  @impl MyHiFi.Source
-  def ref_from_string("station:" <> id) do
-    # Ash reads an empty string as `nil`, and a name with no UUID must not give a
-    # ref that names no station.
-    case Ash.Type.cast_input(Ash.Type.UUID, id) do
-      {:ok, id} when is_binary(id) -> {:ok, {:station, id}}
-      _other -> {:error, :not_a_name}
-    end
-  end
-
-  def ref_from_string(_name), do: {:error, :not_a_name}
-
-  @impl MyHiFi.Source
-  def favourite({:station, id}, true?) do
-    with {:ok, station} <- Radio.get_station(id),
-         {:ok, _station} <- mark(station, true?) do
-      :ok
-    end
-  end
-
-  def favourite(ref, _true?), do: {:error, {:not_a_track, ref}}
-
-  # A radio stream is live, so it holds no position and there is nothing to keep.
-  # This is why the behaviour asks for `:ok` here and not for an error: the player
-  # tells every source where a person stopped, and a source that cannot use that
-  # says nothing about it.
-  @impl MyHiFi.Source
-  def store_position(_ref, _place), do: :ok
-
-  # A station never ends by itself. The player starts a stream that stops again, so
-  # this never runs, and it exists because the behaviour asks every source for it.
-  @impl MyHiFi.Source
-  def finished(_ref), do: :ok
+  defp hls_codec(%{format: :mp3}), do: :mp3
+  defp hls_codec(_item), do: :aac
 
   @impl MyHiFi.Source
   def settings do
@@ -233,10 +161,10 @@ defmodule MyHiFi.Source.InternetRadio do
         title: "Station countries",
         description:
           "Name each country by its two letter code, and put a comma between them. " <>
-            "The station list holds #{stations(Ash.count!(Station))}.",
+            "The station list holds #{stations(count())}.",
         link: nil,
         type: :text,
-        value: Enum.join(SyncFromRemote.configured_countries(), ", "),
+        value: Enum.join(FromRemote.configured_countries(), ", "),
         write_only?: false
       }
     ]
@@ -249,7 +177,7 @@ defmodule MyHiFi.Source.InternetRadio do
         {:error, "Name at least one country, such as NZ."}
 
       codes ->
-        MyHiFi.Settings.put!(SyncFromRemote.countries_key(), Enum.join(codes, ","))
+        MyHiFi.Settings.put!(FromRemote.countries_key(), Enum.join(codes, ","))
 
         {:ok, "The station list covers #{Enum.join(codes, ", ")}."}
     end
@@ -271,22 +199,18 @@ defmodule MyHiFi.Source.InternetRadio do
 
   @impl MyHiFi.Source
   def run_settings_action("sync") do
-    AshOban.schedule(Station, :sync_from_remote)
+    AshOban.schedule(MyHiFi.Radio.Sync, :sync_from_remote)
 
     {:ok, "The device asks for the station list of each country now."}
   end
 
   def run_settings_action(_name), do: {:error, "Internet radio holds no such control."}
 
-  @doc """
-  The codec that a station names.
+  defp count, do: Ash.count!(Ash.Query.filter(Item, source == ^@source))
 
-  This is what the service reports, and it is a guess for an HLS station: the
-  playlist of such a station holds the codec, and `MyHiFi.Player.Hls` reads it.
-  """
-  @spec format(MyHiFi.Radio.Station.t()) :: :mp3 | :aac | :flac | :ogg | :unknown
-  def format(%{codec: codec}), do: codec_format(codec)
-
+  # The station list is in the order that a person elsewhere chose. `rank` holds the
+  # click count of the service, and it is a column because no data layer sorts on a
+  # facet.
   defp codes(text) do
     text
     |> String.split(",")
@@ -298,83 +222,6 @@ defmodule MyHiFi.Source.InternetRadio do
   defp stations(1), do: "1 station"
   defp stations(count), do: "#{count} stations"
 
-  defp codec_format(nil), do: :unknown
-
-  defp codec_format(codec) do
-    case String.upcase(codec) do
-      "MP3" -> :mp3
-      "AAC" -> :aac
-      "AAC+" -> :aac
-      "FLAC" -> :flac
-      "OGG" -> :ogg
-      _other -> :unknown
-    end
-  end
-
-  # The favourites of `browse/2`, and in the same order, so this list is the list that
+  # The favourites, and in the same order, so this list is the list that
   # a person sees. The presets of a stereo have no end, so it moves round.
-  defp preset(id, step) do
-    case Radio.favourite_stations!() do
-      [] ->
-        {:error, :no_more}
-
-      stations ->
-        found = moved(stations, Enum.find_index(stations, &(&1.id == id)), step)
-
-        {:ok, {:station, found.id}}
-    end
-  end
-
-  # A station that is not a favourite gives the first station of the list, or the last
-  # one for a step back. A person who presses a preset control wants a preset.
-  defp moved(stations, nil, step) when step > 0, do: List.first(stations)
-
-  defp moved(stations, nil, _step), do: List.last(stations)
-
-  defp moved(stations, index, step) do
-    Enum.at(stations, rem(index + step + length(stations), length(stations)))
-  end
-
-  defp tracks(stations, options) do
-    stations
-    |> Enum.map(&{:track, to_track(&1)})
-    |> paginate(options)
-  end
-
-  defp mark(station, true), do: Radio.set_favourite(station)
-  defp mark(station, false), do: Radio.clear_favourite(station)
-
-  defp to_track(station) do
-    %{
-      ref: {:station, station.id},
-      title: station.title,
-      subtitle: subtitle(station),
-      artwork: station.artwork_url,
-      # A radio stream is live, so it has no length.
-      duration_ms: nil,
-      favourite?: station.favourite?
-    }
-  end
-
-  # The codec and the bitrate tell a person what to expect of the sound.
-  defp subtitle(%{codec: nil, bitrate: _bitrate}), do: nil
-  defp subtitle(%{codec: codec, bitrate: nil}), do: codec
-  defp subtitle(%{codec: codec, bitrate: 0}), do: codec
-  defp subtitle(%{codec: codec, bitrate: bitrate}), do: "#{codec}, #{bitrate} kbps"
-
-  defp page(entries, cursor \\ nil), do: %{entries: entries, cursor: cursor}
-
-  defp paginate(entries, options) do
-    limit = Keyword.get(options, :limit, @default_limit)
-    offset = Keyword.get(options, :cursor, 0)
-
-    taken = entries |> Enum.drop(offset) |> Enum.take(limit)
-    next = offset + length(taken)
-
-    if next < length(entries) do
-      page(taken, next)
-    else
-      page(taken)
-    end
-  end
 end

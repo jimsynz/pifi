@@ -19,8 +19,7 @@ defmodule MyHiFi.Cache.Attachment do
   that key and removes the join rows with the entry.
 
   **A record that goes therefore leaves its rows behind.** A host that removes itself
-  must remove them, because only the host knows its own type. No host does that yet,
-  and section 6.1 of `docs/cache-plan.md` records it.
+  must remove them, because only the host knows its own type. No host does that yet.
   """
 
   use Ash.Resource,

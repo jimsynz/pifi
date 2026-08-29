@@ -2,12 +2,12 @@ defmodule MyHiFi.Radio.FirstSyncTest do
   use MyHiFi.DataCase, async: false
   use Oban.Testing, repo: MyHiFi.Repo
 
-  alias MyHiFi.Radio
   alias MyHiFi.Radio.FirstSync
-  alias MyHiFi.Radio.Station.Workers.SyncFromRemote
+  alias MyHiFi.Radio.Sync.Workers.FromRemote
+  alias MyHiFi.Test.Stations
 
   defp station do
-    Radio.upsert_station_from_remote!(%{
+    Stations.create(%{
       remote_id: "remote-#{System.unique_integer([:positive])}",
       title: "A station",
       stream_url: "http://example.test/stream.mp3",
@@ -25,14 +25,14 @@ defmodule MyHiFi.Radio.FirstSyncTest do
       # A new device would hold no station until the weekly run, and that run comes
       # at the end of the week.
       assert FirstSync.run() == :ok
-      assert_enqueued(worker: SyncFromRemote)
+      assert_enqueued(worker: FromRemote)
     end
 
     test "asks for nothing when the table holds a station" do
       station()
 
       assert FirstSync.run() == :ok
-      refute_enqueued(worker: SyncFromRemote)
+      refute_enqueued(worker: FromRemote)
     end
   end
 

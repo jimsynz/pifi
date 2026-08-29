@@ -21,38 +21,11 @@ defmodule MyHiFi.Test.PlainSource do
   def capabilities, do: []
 
   @impl MyHiFi.Source
-  def root, do: :root
+  def roots, do: []
 
   @impl MyHiFi.Source
-  def browse(_ref, _options \\ []), do: {:ok, %{entries: [], cursor: nil}}
+  def kinds, do: [track: "Tracks"]
 
   @impl MyHiFi.Source
-  def search(_query, _options \\ []), do: {:error, :not_supported}
-
-  @impl MyHiFi.Source
-  def track(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def resolve(ref), do: {:error, {:not_a_track, ref}}
-
-  @impl MyHiFi.Source
-  def next(_ref), do: {:error, :not_supported}
-
-  @impl MyHiFi.Source
-  def previous(_ref), do: {:error, :not_supported}
-
-  @impl MyHiFi.Source
-  def ref_to_string(_ref), do: {:error, :cannot_name}
-
-  @impl MyHiFi.Source
-  def ref_from_string(_name), do: {:error, :not_a_name}
-
-  @impl MyHiFi.Source
-  def favourite(_ref, _true?), do: {:error, :not_supported}
-
-  @impl MyHiFi.Source
-  def store_position(_ref, _place), do: :ok
-
-  @impl MyHiFi.Source
-  def finished(_ref), do: :ok
+  def resolve(item), do: {:error, {:not_a_track, item.id}}
 end

@@ -24,45 +24,66 @@ defmodule MyHiFiWeb.SettingsLive do
 
   The network state and the storage state are reports, and a person changes neither
   one here. The Wi-Fi details belong to the setup wizard. See `MyHiFi.Setup`.
+
+  **The reports arrive, and this page asks for none of them.** A DAC arrives, Wi-Fi
+  connects, and a download fills the card, so the three reports change without a
+  person. This page read all three every five seconds before, which was eleven queries
+  each time for an answer that almost never moved. `MyHiFi.Device.Monitor` owns the
+  three sources of truth now and publishes on the `:device` topic. This page reads once
+  when a person opens it, because no event has arrived yet, and after that it draws what
+  it is told.
   """
 
   use MyHiFiWeb, :live_view
 
   alias MyHiFi.Device
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Device, as: Events
+  alias MyHiFi.Hardware
   alias MyHiFi.Source
 
-  # The reports change without a person: a DAC arrives, Wi-Fi connects, and the
-  # sync job fills the station table. The sections that show a report read them
-  # again on this interval.
-  @refresh_interval :timer.seconds(5)
-
-  # A source page holds a form, and a person may be in the middle of typing in it.
-  # Nothing on that page changes by itself, so it needs no interval.
-  @refreshing_sections [:menu, :output, :network, :storage]
-
   @impl Phoenix.LiveView
-  def mount(_params, _session, socket), do: {:ok, refresh(socket)}
+  def mount(_params, _session, socket) do
+    if connected?(socket), do: Event.subscribe(:device)
+
+    {:ok, refresh(socket)}
+  end
 
   @impl Phoenix.LiveView
   def handle_params(%{"source" => slug}, _uri, socket) do
     case Source.from_slug(slug) do
-      {:ok, module} -> {:noreply, socket |> enter() |> load_source(module)}
+      {:ok, module} -> {:noreply, socket |> title() |> load_source(module)}
       {:error, :not_a_source} -> {:noreply, push_navigate(socket, to: ~p"/settings/sources")}
     end
   end
 
   @impl Phoenix.LiveView
-  def handle_params(_params, _uri, socket), do: {:noreply, enter(socket)}
+  def handle_params(_params, _uri, socket), do: {:noreply, title(socket)}
+
+  # Each event carries the whole report, so this draws it and reads nothing. The page
+  # keeps the plain map that `refresh/1` assigns, so no part below here knows whether
+  # the answer came from a read or from an event.
+  @impl Phoenix.LiveView
+  def handle_info(%Events.NetworkChanged{interfaces: interfaces}, socket) do
+    {:noreply, assign(socket, :interfaces, interfaces)}
+  end
 
   @impl Phoenix.LiveView
-  def handle_info(:refresh, socket) do
-    if socket.assigns.live_action in @refreshing_sections do
-      schedule_refresh()
-      {:noreply, refresh(socket)}
-    else
-      {:noreply, socket}
-    end
+  def handle_info(%Events.OutputChanged{} = event, socket) do
+    {:noreply, assign(socket, :output, Map.take(event, [:devices, :selected, :in_use]))}
   end
+
+  @impl Phoenix.LiveView
+  def handle_info(%Events.StorageChanged{} = event, socket) do
+    fields = [:path, :total_bytes, :free_bytes, :used_bytes, :database_bytes, :full?]
+
+    {:noreply, assign(socket, :storage, Map.take(event, fields))}
+  end
+
+  # The player publishes on this topic as well, and no report of this page changes with
+  # it.
+  @impl Phoenix.LiveView
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl Phoenix.LiveView
   def handle_event("enable_source", %{"slug" => slug, "enabled" => enabled}, socket) do
@@ -72,6 +93,22 @@ defmodule MyHiFiWeb.SettingsLive do
     else
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+    end
+  end
+
+  # The device restarts when the write succeeds, so a person reads no answer at all in
+  # that case. A write that failed leaves them on this page with the reason.
+  @impl Phoenix.LiveView
+  def handle_event("choose_hardware", %{"id" => id}, socket) do
+    case Hardware.choose(id) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:profile, Hardware.chosen())
+         |> put_flash(:info, "The device restarts to use that.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "That did not work: #{inspect(reason)}")}
     end
   end
 
@@ -154,6 +191,60 @@ defmodule MyHiFiWeb.SettingsLive do
             in_use?={device.id == @output.in_use}
             by_default?={is_nil(@output.selected)}
           />
+        </li>
+      </ul>
+
+      <.link
+        navigate={~p"/settings/output/hardware"}
+        id="hardware-link"
+        class="mt-4 flex items-center gap-2 border-t border-edge pt-4 text-sm text-ink-dim hover:text-accent"
+      >
+        <.icon name="hero-question-mark-circle" class="size-4 shrink-0" />
+        Do you not see your audio device?
+      </.link>
+    </.section>
+    """
+  end
+
+  # A DAC on the I2S pins answers to nothing until the bootloader loads an overlay for
+  # it, so no list of cards holds one and no control of this page finds one. A person
+  # names what they added instead. See `MyHiFi.Hardware`.
+  @impl Phoenix.LiveView
+  def render(%{live_action: :hardware} = assigns) do
+    ~H"""
+    <.section id="settings-hardware" title="Audio hardware" back={~p"/settings/output"}>
+      <p class="mb-4 text-sm text-ink-dim">
+        A DAC on the pins of the board needs a driver that starts before the rest of the
+        firmware. Name what you added, and the device restarts to use it.
+      </p>
+
+      <ul class="divide-y divide-edge">
+        <li :for={profile <- @profiles} class="py-3">
+          <button
+            type="button"
+            id={"profile-#{profile.id}"}
+            phx-click="choose_hardware"
+            phx-value-id={profile.id}
+            disabled={profile.id == @profile.id}
+            class="group flex w-full items-center gap-3 text-left"
+          >
+            <.icon
+              name={if profile.id == @profile.id, do: "hero-check-circle-solid", else: "hero-circle-stack"}
+              class={[
+                "size-5 shrink-0",
+                if(profile.id == @profile.id, do: "text-accent", else: "text-ink-faint")
+              ]}
+            />
+            <span class="min-w-0 grow">
+              <span class={[
+                "block",
+                if(profile.id == @profile.id, do: "text-accent", else: "text-ink group-hover:text-accent")
+              ]}>
+                {profile.title}
+              </span>
+              <span class="block text-sm text-ink-faint">{profile.description}</span>
+            </span>
+          </button>
         </li>
       </ul>
     </.section>
@@ -306,6 +397,10 @@ defmodule MyHiFiWeb.SettingsLive do
           <dd id="database-size" class="numerals text-ink-dim">{size(@storage.database_bytes)}</dd>
         </div>
       </dl>
+
+      <p :if={@storage.full?} id="storage-warning" class="mt-3 text-sm text-red-300">
+        This partition is nearly full.
+      </p>
     </.section>
     """
   end
@@ -421,13 +516,7 @@ defmodule MyHiFiWeb.SettingsLive do
     """
   end
 
-  defp enter(socket) do
-    if connected?(socket) and socket.assigns.live_action in @refreshing_sections do
-      schedule_refresh()
-    end
-
-    assign(socket, :page_title, "Settings")
-  end
+  defp title(socket), do: assign(socket, :page_title, "Settings")
 
   # A source reads its own current values, and a description of one holds a count
   # or a state, so both come again after each change. See `MyHiFi.Source`.
@@ -457,15 +546,17 @@ defmodule MyHiFiWeb.SettingsLive do
     end
   end
 
+  # A person who opens the page has had no event yet, and a person who changed
+  # something wants to see the answer of that change now.
   defp refresh(socket) do
     socket
+    |> assign(:profiles, Hardware.profiles())
+    |> assign(:profile, Hardware.chosen())
     |> assign(:output, MyHiFi.Playback.output!())
     |> assign(:interfaces, Device.network!())
     |> assign(:storage, Device.storage!())
     |> assign(:source_list, source_list())
   end
-
-  defp schedule_refresh, do: Process.send_after(self(), :refresh, @refresh_interval)
 
   # `:sources` belongs to `MyHiFiWeb.Shell`, and the top row of the faceplate draws
   # it. That list holds the sources in use, and this one holds every source and the

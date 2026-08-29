@@ -2,25 +2,11 @@ defmodule MyHiFi.PlaybackTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Playback
-  alias MyHiFi.Radio
   alias MyHiFi.Settings
   alias MyHiFi.Test.NoCardOutput
+  alias MyHiFi.Test.Stations
 
-  defp station(overrides) do
-    defaults = %{
-      remote_id: "remote-#{System.unique_integer([:positive])}",
-      title: "Station #{System.unique_integer([:positive])}",
-      stream_url: "http://example.test/stream.mp3",
-      codec: "MP3",
-      bitrate: 128,
-      hls?: false,
-      country_code: "NZ",
-      tags: ["news"],
-      click_count: 0
-    }
-
-    Radio.upsert_station_from_remote!(Map.merge(defaults, overrides))
-  end
+  defp station(overrides), do: Stations.create(overrides)
 
   setup do
     reset = fn ->
@@ -46,7 +32,7 @@ defmodule MyHiFi.PlaybackTest do
 
       assert %{
                source: _source,
-               track: _track,
+               item: _item,
                stream_title: _title,
                artwork_path: _path,
                playing?: playing?,
@@ -63,7 +49,7 @@ defmodule MyHiFi.PlaybackTest do
   describe "stop/0" do
     test "gives :ok, and the player then plays nothing" do
       assert Playback.stop!() == :ok
-      assert %{playing?: false, track: nil} = Playback.state!()
+      assert %{playing?: false, item: nil} = Playback.state!()
     end
   end
 
@@ -89,12 +75,27 @@ defmodule MyHiFi.PlaybackTest do
 
       created = station(%{})
 
-      assert {:error, _reason} =
-               Playback.play(MyHiFi.Source.InternetRadio, {:station, created.id})
+      assert {:error, _reason} = Playback.play([created.id])
     end
 
-    test "needs both arguments" do
-      assert_raise Ash.Error.Invalid, fn -> Playback.play!(nil, {:station, "x"}) end
+    test "it needs a list of items" do
+      assert_raise Ash.Error.Invalid, fn -> Playback.play!(nil) end
+    end
+
+    # A person who presses a track of a list means "play this, and then the rest of the
+    # list", so the whole list goes in the queue and the row that they pressed takes the
+    # mark.
+    test "the list goes in the queue, and the row that a person pressed takes the mark" do
+      NoCardOutput.use_it()
+      first = station(%{title: "First"})
+      second = station(%{title: "Second"})
+
+      Playback.play([first.id, second.id], %{playing_index: 1})
+
+      assert [one, two] = Playback.queue!()
+      assert one.item_id == first.id
+      assert two.item_id == second.id
+      assert two.playing? == true
     end
   end
 

@@ -16,7 +16,7 @@ defmodule MyHiFi.Source do
 
   See `c:capabilities/0`.
   """
-  @type capability :: :next | :previous | :search | :skip
+  @type capability :: :refresh | :search | :skip
 
   @typedoc """
   One value of a source that a person can change.
@@ -192,10 +192,12 @@ defmodule MyHiFi.Source do
   be dead. A user interface cannot work that out, and it must not hold a list of the
   sources, so the source says it.
 
-  - `:next` and `:previous` name the order that `next/1` and `previous/1` move
-    through.
-  - `:search` names `search/2`.
+  - `:refresh` names `refresh/1`.
+  - `:search` names `search/1`.
   - `:skip` names a track that a person can move inside.
+
+  Next and previous are not in this list. `MyHiFi.Playback.Queue` holds the order, so
+  every track that plays holds them and no source takes part.
 
   `MyHiFi.Player` reads this list as well. A skip of a source with no `:skip` gives
   `{:error, :cannot_skip}` and it reaches no pipeline, so the list is one fact and not
@@ -210,130 +212,121 @@ defmodule MyHiFi.Source do
   """
   @callback capabilities() :: [capability()]
 
-  @doc "The entry at the top of the tree."
-  @callback root() :: ref()
+  @typedoc """
+  A read that a user interface runs, pages through and draws.
+
+  `query` is over `MyHiFi.Playback.Item` or over `MyHiFi.Playback.Facet`, and `kind`
+  says which. A page gives it to `Cinder`, which holds the loading state, the sort, the
+  filters and the page controls.
+
+  Below the roots the tree needs no source at all. A row of `Facet` opens into the
+  items that link to it, and an item of the kind `:container` opens into the items whose
+  `parent_id` names it. Those two rules serve every source.
+
+  ## `order`, and why a sort of the query is not enough
+
+  **Cinder keeps only the sorts of `query` that name a column that the page draws, and
+  it drops the rest.** A query that sorts by `rank` and then by `title` therefore loses
+  the rank, because the page draws a column of the title alone, and a list of the most
+  popular stations comes back in the order of the alphabet.
+
+  `order` is how a listing says that it holds a second order. It is a name and a field,
+  such as `{"Popularity", "rank"}`, and the page draws a sort control for it. Cinder
+  then keeps that sort, and a person can change it. A listing that sorts by the title
+  and nothing else leaves `order` out.
+  """
+  @type listing :: %{
+          required(:query) => Ash.Query.t(),
+          required(:kind) => :item | :facet,
+          optional(:order) => {String.t(), String.t()}
+        }
 
   @doc """
-  List the entries inside one container.
+  The branches at the top of the tree, in the order that a person reads them.
 
-  Options: `:limit` for the size of a page, and `:cursor` for the page to read.
+  Each pair is a name and the read behind it. A source names its own branches, and
+  everything below them is generic.
   """
-  @callback browse(ref(), keyword()) :: {:ok, page()} | {:error, term()}
+  @callback roots() :: [{String.t(), listing()}]
 
   @doc """
-  Find entries that match some text.
+  A person opened one container.
 
-  A source with no search gives `{:error, :not_supported}`.
+  A source that must reach a service when that happens implements this.
+  `MyHiFi.Source.Podcasts` reads the feed of a show whose local copy is old.
+
+  It runs for its effect, and a page draws what the catalogue holds whether it answers
+  or not.
   """
-  @callback search(String.t(), keyword()) :: {:ok, page()} | {:error, term()}
+  @callback opened(MyHiFi.Playback.Item.t()) :: :ok
 
   @doc """
-  Describe one track.
+  A person asked for the service to be read again, for one container.
 
-  The now playing screen needs the title and the artwork of the track that plays,
-  and it holds a `ref` and nothing else. Without this a caller would have to walk
-  the tree again to find what it already had.
+  `c:opened/1` reads a feed whose local copy is old, and a schedule reads it as well.
+  Neither one answers a person who knows that a publisher wrote something a moment ago,
+  so this reads it now.
+
+  It runs for its effect, and it may give the work to a job. A source that finishes the
+  read publishes `MyHiFi.Event.Source.Changed`, and a page that shows that container
+  reads it again.
+
+  `capabilities/0` names `:refresh` for a source that holds this.
   """
-  @callback track(ref()) :: {:ok, track()} | {:error, term()}
-
-  @doc "Turn a track into something that the player can play."
-  @callback resolve(ref()) :: {:ok, playable()} | {:error, term()}
+  @callback refresh(MyHiFi.Playback.Item.t()) :: :ok | {:error, term()}
 
   @doc """
-  The track after this one.
+  What a person calls the items of this source, for each kind that it holds.
 
-  The order is the one that a person sees in the browse list, because that is the
-  order that they asked for. Podcasts move through the episodes of the same show, and
-  internet radio moves through the favourite stations.
+  `:container` names an item that holds other items, and `:track` names one that plays.
+  A source that holds no container leaves that kind out: internet radio gives
+  `[track: "Stations"]`, and podcasts gives `[container: "Shows", track: "Episodes"]`.
 
-  A list of stations moves round, in the way that the presets of a stereo do. A list
-  of episodes ends, and the last one gives `{:error, :no_more}`.
+  A user interface reads the name of a kind, and it draws no control at all for a source
+  that holds one kind. There is nothing to choose between.
 
-  `{:error, :no_more}` and `{:error, :not_supported}` are different answers. A source
-  with no order gives the second one, and `capabilities/0` says so before a caller
-  asks.
+  The words are plural, because each one names a list and not one row.
   """
-  @callback next(ref()) :: {:ok, ref()} | {:error, term()}
+  @callback kinds() :: [{:container | :track, String.t()}]
 
   @doc """
-  The track before this one.
+  The items that a search reads.
 
-  See `next/1` for the order, and for the two errors.
+  It gives a query in the way that `c:roots/0` gives one, and `MyHiFiWeb.SearchLive`
+  matches the text of the person against it. The query therefore names the items of the
+  source, and it holds no text of its own.
+
+  **A source may reach a service before it answers.** The catalogue holds what a device
+  has read, and a service holds more than that. `MyHiFi.Source.Podcasts` asks the
+  Podcast Index, and it writes what the index names, so the query then finds it. This is
+  why the callback gets the text.
+
+  `capabilities/0` names `:search` for a source that holds this.
   """
-  @callback previous(ref()) :: {:ok, ref()} | {:error, term()}
+  @callback search(String.t()) :: Ash.Query.t()
 
   @doc """
-  Give a `ref` a name that a caller can store.
+  Turn an item into something that the player can play.
 
-  The player keeps the last station in the settings, and a setting holds a string.
-  A source therefore names its own `ref`, and it reads that name back with
-  `ref_from_string/1`.
-
-  The player could store the term itself instead. It does not, for three reasons.
-  A name is readable when a person looks in the database. Nothing turns stored
-  bytes back into a term, so a changed row cannot make an atom or run a function.
-  A source that changes the shape of its `ref` also keeps the old name working,
-  and a stored term gives it no way to do that.
-
-  A source gives `{:error, :cannot_name}` for a `ref` that it does not name. The
-  player needs the tracks, and a source needs no more than that.
+  This is the one thing that only a source can do. A station gives the address of a
+  stream, and an episode gives the file that the cache holds, so the shape of the
+  answer is the same and the way to it is not. See `t:playable/0`.
   """
-  @callback ref_to_string(ref()) :: {:ok, String.t()} | {:error, term()}
-
-  @doc """
-  Read a `ref` back from its name.
-
-  The name comes from `ref_to_string/1` of the same source. A source gives an
-  error for a name that it does not know, so an old setting cannot break a start.
-  """
-  @callback ref_from_string(String.t()) :: {:ok, ref()} | {:error, term()}
-
-  @doc """
-  Make one entry a favourite, or remove that mark.
-
-  A source with no favourites gives `{:error, :not_supported}`, in the same way
-  that `search/2` does. Each service holds its own idea of this mark, and a user
-  interface therefore never reads or writes the mark itself.
-
-  The entry is a track or a container. Internet radio marks a station, and
-  podcasts subscribe to a show. A source that marks one kind gives
-  `{:error, :not_supported}` for the other.
-  """
-  @callback favourite(ref(), boolean()) :: :ok | {:error, term()}
-
-  @doc """
-  Note where a person stopped inside a track.
-
-  The player calls this when it stops, when it enters standby, and when a track
-  reaches its end. A live stream has no position, so internet radio does nothing.
-
-  This is a notice and not a question, so a source that keeps no position gives
-  `:ok` and not an error. `search/2` and `favourite/2` give
-  `{:error, :not_supported}` instead, and the reason for the difference is the user
-  interface: it must know whether to draw a search field and a star, and it draws
-  no control at all for a position.
-
-  The player holds no knowledge of what a position means to a service. It gives the
-  place that it saw, and the source decides whether to keep it.
-
-  A place holds two numbers, and `bytes` is the reason that a resume is exact. A
-  time alone needs a bitrate to become a byte offset, and 11 of 46 real episodes
-  hold more than one bitrate. `bytes` is nil for a stream that no reader counts
-  bytes of, such as a live station.
-  """
-  @callback store_position(ref(), place()) :: :ok | {:error, term()}
+  @callback resolve(MyHiFi.Playback.Item.t()) :: {:ok, playable()} | {:error, term()}
 
   @doc """
   Note that a track reached its end.
 
-  The player calls this in place of `store_position/2` when a track ends by itself.
-  A source that holds a played mark writes it here.
+  `MyHiFi.Player` marks the item played by itself, so a source implements this only
+  for something of its own. Podcasts release the file of the episode, so an eviction
+  of the cache may take it.
 
-  The player starts a live stream again when it ends, because a person expects the
-  music to come back. This therefore never reaches a source of live streams, and
-  internet radio implements it and does nothing.
+  A live stream that ends is a network that failed, and the player starts it again, so
+  this never runs for a source of live streams.
+
+  A source with nothing of its own to do leaves it out.
   """
-  @callback finished(ref()) :: :ok | {:error, term()}
+  @callback finished(MyHiFi.Playback.Item.t()) :: :ok | {:error, term()}
 
   @doc """
   The values that a person can change for this source.
@@ -381,7 +374,13 @@ defmodule MyHiFi.Source do
   """
   @callback run_settings_action(String.t()) :: {:ok, String.t()} | {:error, String.t()}
 
-  @optional_callbacks settings: 0,
+  # A source with no search leaves `search/1` out, and it names no `:search` in
+  # `c:capabilities/0`.
+  @optional_callbacks finished: 1,
+                      opened: 1,
+                      refresh: 1,
+                      search: 1,
+                      settings: 0,
                       put_settings: 1,
                       settings_actions: 0,
                       run_settings_action: 1
@@ -478,6 +477,21 @@ defmodule MyHiFi.Source do
       module.put_settings(values)
     else
       {:error, "#{module.title()} holds nothing to change."}
+    end
+  end
+
+  @doc """
+  Read the service of one container again.
+
+  See `c:refresh/1`. A source that reads no service gives an error, so a page that
+  draws no control also runs none.
+  """
+  @spec refresh(module(), MyHiFi.Playback.Item.t()) :: :ok | {:error, term()}
+  def refresh(module, item) do
+    if implements?(module, :refresh, 1) do
+      module.refresh(item)
+    else
+      {:error, "#{module.title()} reads nothing again."}
     end
   end
 

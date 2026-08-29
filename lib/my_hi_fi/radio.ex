@@ -2,24 +2,19 @@ defmodule MyHiFi.Radio do
   @moduledoc """
   Internet radio.
 
-  The station list comes from the public Radio Browser service. `MyHiFi.Radio.Station`
-  holds the local copy, and each function here calls one action of that resource.
+  The station list comes from the public Radio Browser service.
+  `MyHiFi.Radio.RadioBrowser` reads it, and `MyHiFi.Radio.Fill` writes each station
+  into the catalogue of `MyHiFi.Playback`.
+
+  This domain holds no station of its own. Every playable thing of this firmware is a
+  `MyHiFi.Playback.Item`, so a user interface reads one resource and it needs no
+  knowledge of any source.
   """
 
   use Ash.Domain, otp_app: :my_hi_fi
 
   resources do
-    resource MyHiFi.Radio.Station do
-      define :list_stations, action: :read
-      define :get_station, action: :read, get_by: [:id]
-      define :search_stations, action: :search, args: [:query]
-      define :favourite_stations, action: :favourites
-      define :stations_by_country, action: :by_country, args: [:country_code]
-      define :stations_by_tag, action: :by_tag, args: [:tag]
-      define :upsert_station_from_remote, action: :upsert_from_remote
-      define :set_favourite, action: :set_favourite
-      define :clear_favourite, action: :clear_favourite
-      define :record_play, action: :record_play
+    resource MyHiFi.Radio.Sync do
       define :sync_stations_from_remote, action: :sync_from_remote
     end
   end

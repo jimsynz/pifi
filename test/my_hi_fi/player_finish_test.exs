@@ -10,43 +10,43 @@ defmodule MyHiFi.PlayerFinishTest do
 
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
+  alias MyHiFi.Playback
   alias MyHiFi.Player
   alias MyHiFi.Test.EndingPipeline
 
   defmodule Recorder do
     @moduledoc """
-    A source that writes down what the player tells it.
+    A source of one track, and a note of what the player told it.
 
-    The player must call `finished/1` for a track that ends, and `store_position/2`
-    for one that a person stops. This keeps each call in the application
-    environment, because the player is another process.
+    `MyHiFi.Player` writes the place and the played mark on to the item itself, so the
+    tests read the catalogue for those. This source records `finished/1` alone, which
+    is the one thing that a source still hears about the end of a track.
     """
 
     @behaviour MyHiFi.Source
 
+    alias MyHiFi.Playback
+
+    @slug "recorder"
+
     @impl MyHiFi.Source
     def title, do: "Recorder"
+
+    # This source is one that the player uses, and no page browses it.
+    @impl MyHiFi.Source
+    def kinds, do: [track: "Tracks"]
+
+    @impl MyHiFi.Source
+    def roots, do: []
 
     @impl MyHiFi.Source
     def icon, do: :library
 
     @impl MyHiFi.Source
-    def capabilities, do: [:next, :previous, :skip]
+    def capabilities, do: [:skip]
 
     @impl MyHiFi.Source
-    def root, do: :root
-
-    @impl MyHiFi.Source
-    def browse(:root, _options), do: {:ok, %{entries: [{:track, track()}], cursor: nil}}
-
-    @impl MyHiFi.Source
-    def search(_query, _options), do: {:error, :not_supported}
-
-    @impl MyHiFi.Source
-    def track(:only), do: {:ok, track()}
-
-    @impl MyHiFi.Source
-    def resolve(:only) do
+    def resolve(_item) do
       {:ok,
        %{
          uri: "http://example.test/episode.mp3",
@@ -60,28 +60,20 @@ defmodule MyHiFi.PlayerFinishTest do
     end
 
     @impl MyHiFi.Source
-    def next(:only), do: {:error, :no_more}
+    def finished(item), do: record({:finished, item.id})
 
-    @impl MyHiFi.Source
-    def previous(:only), do: {:error, :no_more}
-
-    @impl MyHiFi.Source
-    def favourite(_ref, _true?), do: {:error, :not_supported}
-
-    @impl MyHiFi.Source
-    def store_position(ref, position_ms) do
-      record({:store_position, ref, position_ms})
+    @doc "The one episode of this source, in the catalogue."
+    @spec episode() :: MyHiFi.Playback.Item.t()
+    def episode do
+      Playback.upsert_item!(%{
+        source: @slug,
+        source_ref: "only",
+        title: "One episode",
+        kind: :track,
+        duration_ms: 600_000,
+        keeps_place?: true
+      })
     end
-
-    @impl MyHiFi.Source
-    def finished(ref), do: record({:finished, ref})
-
-    @impl MyHiFi.Source
-    def ref_to_string(:only), do: {:ok, "only"}
-
-    @impl MyHiFi.Source
-    def ref_from_string("only"), do: {:ok, :only}
-    def ref_from_string(_name), do: {:error, :not_a_name}
 
     @doc "Say whether the next resolve gives a live stream."
     def live!(live?), do: Application.put_env(:my_hi_fi, :recorder_live?, live?)
@@ -105,21 +97,18 @@ defmodule MyHiFi.PlayerFinishTest do
       Application.put_env(:my_hi_fi, :recorder_calls, [call | calls])
       :ok
     end
+  end
 
-    defp track do
-      %{
-        ref: :only,
-        title: "One episode",
-        subtitle: nil,
-        artwork: nil,
-        duration_ms: 600_000,
-        favourite?: nil
-      }
-    end
+  defp play_it do
+    one = Recorder.episode()
+    assert {:ok, :ok} = Playback.play([one.id])
+
+    one
   end
 
   setup do
     EndingPipeline.use_it()
+    Playback.clear_queue!()
     Application.put_env(:my_hi_fi, :sources, [Recorder])
     Recorder.forget()
     Recorder.live!(false)
@@ -128,6 +117,7 @@ defmodule MyHiFi.PlayerFinishTest do
 
     on_exit(fn ->
       Player.stop()
+      Playback.clear_queue!()
 
       for key <- [:sources, :recorder_live?, :recorder_position_ms, :recorder_calls] do
         Application.delete_env(:my_hi_fi, key)
@@ -139,7 +129,7 @@ defmodule MyHiFi.PlayerFinishTest do
 
   describe "a track that reaches its end" do
     test "the player stops, and it does not start the track again" do
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
 
       # Every play publishes this once, before there is anything to hear.
       assert_receive %Events.Buffering{}, 2000
@@ -152,29 +142,31 @@ defmodule MyHiFi.PlayerFinishTest do
       assert %{playing?: false} = Player.state()
     end
 
-    test "it tells the source that the track ended" do
-      assert :ok = Player.play(Recorder, :only)
+    test "it marks the item played, and it tells the source" do
+      one = play_it()
       assert_receive %Events.Stopped{reason: :finished}, 2000
 
-      assert {:finished, :only} in Recorder.calls()
+      assert {:finished, one.id} in Recorder.calls()
+      assert Playback.get_item!(one.id).played? == true
     end
 
     test "it writes no place for a track that ended" do
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
       assert_receive %Events.Stopped{reason: :finished}, 2000
 
-      # The source marks the episode played, and that returns the place to the
-      # start. A place written here would fight with that.
-      refute Enum.any?(Recorder.calls(), &match?({:store_position, _ref, _ms}, &1))
+      # The played mark returns the place to the start, and a place written here would
+      # fight with that.
+      assert Playback.get_item!(one.id).position_ms == 0
     end
 
+    # The queue holds one row, so there is nothing after it. A person reads what they
+    # heard last, and a play control starts it again.
     test "it keeps the track for a person to see" do
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
       assert_receive %Events.Stopped{reason: :finished}, 2000
 
-      # `MyHiFi.Player` holds the source and the ref, so leaving standby plays this
-      # again. It holds no track, because nothing plays.
-      assert %{track: nil, playing?: false} = Player.state()
+      assert %{item: %{id: id}, playing?: false} = Player.state()
+      assert id == one.id
     end
   end
 
@@ -182,7 +174,7 @@ defmodule MyHiFi.PlayerFinishTest do
     test "the player starts it again" do
       Recorder.live!(true)
 
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
 
       assert_receive %Events.Buffering{}, 2000
       assert_receive %Events.Started{live?: true}, 2000
@@ -197,12 +189,13 @@ defmodule MyHiFi.PlayerFinishTest do
     test "it tells the source no place, because a live stream holds none" do
       Recorder.live!(true)
 
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
       assert_receive %Events.Buffering{}, 2000
       assert_receive %Events.Started{}, 2000
       assert_receive %Events.Buffering{}, 2000
 
-      refute Enum.any?(Recorder.calls(), &match?({:finished, _ref}, &1))
+      refute Enum.any?(Recorder.calls(), &match?({:finished, _id}, &1))
+      refute Playback.get_item!(one.id).played?
     end
   end
 
@@ -210,26 +203,26 @@ defmodule MyHiFi.PlayerFinishTest do
     test "a stop writes where the person stopped" do
       Recorder.live!(true)
 
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
       assert_receive %Events.Started{}, 2000
 
       assert :ok = Player.stop()
 
-      assert [{:store_position, :only, position_ms}] =
-               Enum.filter(Recorder.calls(), &match?({:store_position, _ref, _ms}, &1))
-
+      # A live stream holds no byte count, so `position_bytes` stays nil and the time
+      # is what says that the place was written.
+      assert %{position_ms: position_ms} = Playback.get_item!(one.id)
       assert position_ms >= 0
     end
 
     test "standby writes where the person stopped" do
       Recorder.live!(true)
 
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
       assert_receive %Events.Started{}, 2000
 
       assert :ok = Player.standby(true)
 
-      assert Enum.any?(Recorder.calls(), &match?({:store_position, :only, _ms}, &1))
+      assert Playback.get_item!(one.id).position_ms >= 0
 
       Player.standby(false)
     end
@@ -238,7 +231,7 @@ defmodule MyHiFi.PlayerFinishTest do
       Recorder.live!(true)
       Recorder.begins_at!(300_000)
 
-      assert :ok = Player.play(Recorder, :only)
+      one = play_it()
       assert_receive %Events.Started{}, 2000
 
       # The stream holds the bytes from 5 minutes in, so the place in the whole
@@ -249,11 +242,13 @@ defmodule MyHiFi.PlayerFinishTest do
     end
 
     test "a track that never began writes no place" do
-      # Nothing played, so there is no place, and writing 0 would lose the place
-      # that the person already had.
+      # Nothing played, so there is no place, and writing 0 would lose the place that
+      # the person already had. `position_bytes` is nil until a write.
+      one = Recorder.episode()
+
       assert :ok = Player.stop()
 
-      assert Recorder.calls() == []
+      assert Playback.get_item!(one.id).position_bytes == nil
     end
   end
 end

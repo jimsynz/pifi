@@ -90,7 +90,10 @@ defmodule MyHiFi.Podcast.IndexTest do
                title: "The Rest Is History",
                author: "Goalhanger",
                description: "History.",
-               artwork_url: "https://example.test/large.jpg"
+               artwork_url: "https://example.test/large.jpg",
+               # `MyHiFi.Podcast.Fill` writes each one as a facet, so the Categories
+               # branch needs no read of its own.
+               categories: []
              }
     end
 
@@ -99,10 +102,15 @@ defmodule MyHiFi.Podcast.IndexTest do
       stub(%{"feeds" => [feed()]})
 
       assert {:ok, [attrs]} = Index.search("history")
-      assert {:ok, show} = MyHiFi.Podcast.upsert_show_from_index(attrs)
+      # A show holds the address of the feed and the identifier of the index. The
+      # title and the picture go to `MyHiFi.Playback.Item`.
+      assert {:ok, show} =
+               MyHiFi.Podcast.upsert_show_from_index(Map.take(attrs, [:feed_url, :index_id]))
 
-      assert show.title == "The Rest Is History"
+      assert show.feed_url == "https://example.test/rss"
       assert show.index_id == 920_666
+      # The index gives the title, and the fill writes it to the item.
+      assert attrs.title == "The Rest Is History"
     end
 
     test "it sends the term and the limit" do

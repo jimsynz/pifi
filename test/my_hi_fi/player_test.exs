@@ -1,28 +1,14 @@
 defmodule MyHiFi.PlayerTest do
   use MyHiFi.DataCase, async: false
 
-  alias MyHiFi.Radio
   alias MyHiFi.Settings
   alias MyHiFi.Source.InternetRadio
   alias MyHiFi.Test.NoCardOutput
+  alias MyHiFi.Test.Stations
 
-  @keys ["last_source", "last_ref", "standby", "output_device"]
+  @keys ["last_item", "standby", "output_device"]
 
-  defp station(overrides) do
-    defaults = %{
-      remote_id: "remote-#{System.unique_integer([:positive])}",
-      title: "Station #{System.unique_integer([:positive])}",
-      stream_url: "http://example.test/stream.mp3",
-      codec: "MP3",
-      bitrate: 128,
-      hls?: false,
-      country_code: "NZ",
-      tags: ["news"],
-      click_count: 0
-    }
-
-    Radio.upsert_station_from_remote!(Map.merge(defaults, overrides))
-  end
+  defp station(overrides), do: Stations.create(overrides)
 
   defp clear_settings do
     for key <- @keys do
@@ -64,7 +50,7 @@ defmodule MyHiFi.PlayerTest do
       MyHiFi.Player.standby(true)
 
       assert :ok = MyHiFi.Player.standby(false)
-      assert %{playing?: false, track: nil} = MyHiFi.Player.state()
+      assert %{playing?: false, item: nil} = MyHiFi.Player.state()
     end
   end
 
@@ -77,22 +63,22 @@ defmodule MyHiFi.PlayerTest do
 
       created = station(%{})
 
-      assert {:error, _reason} = MyHiFi.Player.play(InternetRadio, {:station, created.id})
-      assert {:error, _reason} = Settings.fetch("last_ref")
+      assert {:error, _reason} = MyHiFi.Player.play(created)
+      assert {:error, _reason} = Settings.fetch("last_item")
     end
 
-    test "a name in the settings comes back as a selected station" do
+    test "an item in the settings comes back as a selected station" do
       created = station(%{title: "RNZ Concert"})
 
-      Settings.put!("last_source", inspect(InternetRadio))
-      Settings.put!("last_ref", "station:" <> created.id)
+      Settings.put!("last_item", created.id)
 
       state = restarted_state()
 
       assert state.source == InternetRadio
-      assert state.track.title == "RNZ Concert"
+      assert state.item.title == "RNZ Concert"
 
-      # Section 9 asks for silence at a start, so the station is selected only.
+      # A stereo that starts to play by itself after a power cut is a surprise, so
+      # the station is selected only.
       assert state.playing? == false
     end
 
@@ -103,30 +89,31 @@ defmodule MyHiFi.PlayerTest do
     end
 
     test "a station that has left the table selects nothing" do
-      Settings.put!("last_source", inspect(InternetRadio))
-      Settings.put!("last_ref", "station:" <> Ash.UUID.generate())
+      Settings.put!("last_item", Ash.UUID.generate())
 
-      assert restarted_state().track == nil
+      assert restarted_state().item == nil
     end
 
-    test "a name that no source of this firmware wrote selects nothing" do
+    # A source that a person took out of use must not come back, and neither must one
+    # that a later version of the firmware removed.
+    test "an item of a source that is not in use selects nothing" do
       created = station(%{})
+      Settings.put!("last_item", created.id)
+      MyHiFi.Playback.enable_source(InternetRadio, false)
 
-      Settings.put!("last_source", "MyHiFi.Source.SomethingRemoved")
-      Settings.put!("last_ref", "station:" <> created.id)
+      assert restarted_state().item == nil
 
-      assert restarted_state().track == nil
+      MyHiFi.Playback.enable_source(InternetRadio, true)
     end
 
-    test "a ref that the source cannot read selects nothing" do
-      Settings.put!("last_source", inspect(InternetRadio))
-      Settings.put!("last_ref", "rubbish")
+    test "a value that names no item at all selects nothing" do
+      Settings.put!("last_item", "rubbish")
 
-      assert restarted_state().track == nil
+      assert restarted_state().item == nil
     end
 
     test "no settings at all selects nothing" do
-      assert restarted_state().track == nil
+      assert restarted_state().item == nil
       assert restarted_state().standby? == false
     end
   end

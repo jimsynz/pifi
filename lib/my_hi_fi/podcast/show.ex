@@ -7,9 +7,12 @@ defmodule MyHiFi.Podcast.Show do
   `feed_url` identifies the show in both, so the two never make a second row for
   the same podcast.
 
-  A show that a person subscribed to holds `subscribed?`. The refresh job reads
-  those alone, so a search costs the device nothing later.
+  A subscription is a mark on the item of the show, because that is what a person did.
+  The refresh job reads the subscribed shows alone, so a search costs the device
+  nothing later.
   """
+
+  alias MyHiFi.Podcast.Trending
 
   use Ash.Resource,
     otp_app: :my_hi_fi,
@@ -17,13 +20,46 @@ defmodule MyHiFi.Podcast.Show do
     data_layer: AshSqlite.DataLayer,
     extensions: [AshOban]
 
+  # A feed changes when a publisher writes an episode, and no publisher writes one
+  # each minute. An hour is short enough that a person who opens a show twice in a day
+  # sees the new episode, and long enough that moving through the tree reads no feed
+  # twice.
+  @stale_after_hours 1
+
   sqlite do
     table "podcast_shows"
     repo MyHiFi.Repo
   end
 
   oban do
+    triggers do
+      # A person opening a show whose local copy is old must not wait for the
+      # network, so the read happens here. `scheduler_cron false` means that nothing
+      # looks for work: `AshOban.run_trigger/2` is the one way that this job arrives.
+      #
+      # Two opens of one show ask twice, and `where` is what holds the reads to one.
+      # The job reads the show again, and a copy that the first job made new cancels
+      # the second.
+      trigger :refresh do
+        action :refresh
+        where expr(stale?)
+        scheduler_cron false
+        worker_module_name MyHiFi.Podcast.Show.Workers.Refresh
+        queue :default
+        max_attempts 1
+      end
+    end
+
     scheduled_actions do
+      # A person browses Trending, and that must not wait for the network. The list of
+      # the index moves slowly, so one read each day is enough.
+      schedule :read_trending, "0 5 * * *" do
+        action :read_trending
+        worker_module_name MyHiFi.Podcast.Show.Workers.ReadTrending
+        queue :default
+        max_attempts 3
+      end
+
       # A publisher writes an episode, and no publisher writes one each hour. Four
       # reads of each feed in a day is often enough for a person who listens each
       # day, and it reads the subscribed shows only.
@@ -40,8 +76,7 @@ defmodule MyHiFi.Podcast.Show do
     default_accept []
 
     # A search writes a show that a person may never open again, so something must
-    # be able to remove one. Section 7 of `docs/podcasts-plan.md` decides whether a
-    # search writes a row at all.
+    # be able to remove one.
     defaults [:read]
 
     destroy :destroy do
@@ -59,10 +94,15 @@ defmodule MyHiFi.Podcast.Show do
     end
 
     read :subscriptions do
-      description "List the shows that a person subscribed to."
+      description """
+      List the shows that a person subscribed to.
 
-      filter expr(subscribed? == true)
-      prepare build(sort: [title: :asc])
+      The mark is on the item and not here, because a subscription is what a person did
+      and `MyHiFi.Playback.Item` holds all of that. This read joins to it, so one row
+      holds the answer.
+      """
+
+      filter expr(item.favourite? == true)
     end
 
     create :upsert_from_feed do
@@ -72,14 +112,13 @@ defmodule MyHiFi.Podcast.Show do
       `last_fetched_at` and `last_error` say that this read succeeded, so a page can
       show a feed that stopped working.
 
-      It leaves `subscribed?` and `index_id` alone. The first belongs to the person,
-      and the second belongs to the index.
+      It leaves `index_id` alone, because that belongs to the index.
       """
 
       upsert? true
       upsert_identity :feed_url
 
-      accept [:feed_url, :title, :author, :description, :artwork_url]
+      accept [:feed_url]
 
       change set_attribute(:last_fetched_at, &DateTime.utc_now/0)
       change set_attribute(:last_error, nil)
@@ -99,23 +138,42 @@ defmodule MyHiFi.Podcast.Show do
       upsert_identity :feed_url
       upsert_fields [:index_id]
 
-      accept [:feed_url, :index_id, :title, :author, :description, :artwork_url]
+      accept [:feed_url, :index_id]
     end
 
-    update :subscribe do
-      description "Subscribe to a show. The refresh job then reads its feed."
-      change set_attribute(:subscribed?, true)
+    update :set_item do
+      description "Name the item of the catalogue that holds this show."
+      accept [:item_id]
     end
 
-    update :unsubscribe do
+    update :refresh do
       description """
-      Remove the subscription.
+      Read the feed of this show and write what it holds.
 
-      The episodes stay, and so does the position inside each one. A person who
-      subscribes again finds their place.
+      The action changes no attribute of its own. `MyHiFi.Podcast.Refresh` writes the
+      show and the episodes through their own actions, so a trigger has one record to
+      name and one job to run.
       """
 
-      change set_attribute(:subscribed?, false)
+      require_atomic? false
+
+      change MyHiFi.Podcast.Show.Changes.Refresh
+    end
+
+    action :read_trending, :integer do
+      description """
+      Read the popular shows of the Podcast Index, and mark them.
+
+      See `MyHiFi.Podcast.Trending`. It gives the number of shows that it marked, and 0
+      for a device that holds no key of the index.
+      """
+
+      run fn _input, _context ->
+        case Trending.run() do
+          {:ok, count} -> {:ok, count}
+          {:error, _reason} -> {:ok, 0}
+        end
+      end
     end
 
     action :refresh_all, :map do
@@ -159,34 +217,6 @@ defmodule MyHiFi.Podcast.Show do
       public? true
     end
 
-    attribute :title, :string do
-      allow_nil? false
-      public? true
-      constraints min_length: 1
-    end
-
-    attribute :author, :string do
-      description "From `itunes:author` of the channel."
-      public? true
-    end
-
-    attribute :description, :string do
-      public? true
-    end
-
-    attribute :artwork_url, :string do
-      description "The cover of the show. The artwork cache holds a copy."
-      public? true
-    end
-
-    attribute :subscribed?, :boolean do
-      description "A person subscribed to this show. The refresh job reads these alone."
-      source :subscribed
-      allow_nil? false
-      default false
-      public? true
-    end
-
     attribute :last_fetched_at, :utc_datetime_usec do
       description "When a read of the feed last succeeded."
       public? true
@@ -201,7 +231,14 @@ defmodule MyHiFi.Podcast.Show do
   end
 
   relationships do
-    has_many :episodes, MyHiFi.Podcast.Episode do
+    belongs_to :item, MyHiFi.Playback.Item do
+      description """
+      The container of the catalogue that a person browses.
+
+      A show holds the address of the feed and what a read of it gave. Everything that
+      a person sees and does is on the item.
+      """
+
       public? true
     end
 
@@ -218,6 +255,27 @@ defmodule MyHiFi.Podcast.Show do
       source_attribute_on_join_resource :record_id
       destination_attribute_on_join_resource :entry_id
       join_relationship :cache_attachments
+      public? true
+    end
+  end
+
+  calculations do
+    # `ago/2` gives no answer on AshSqlite. A filter on it matches no row, and a
+    # calculation of it gives `nil` for a row that holds a date. `datetime_add/3`
+    # gives the right answer in both.
+    calculate :stale?,
+              :boolean,
+              expr(
+                is_nil(last_fetched_at) or
+                  last_fetched_at < datetime_add(now(), ^(-1 * @stale_after_hours), :hour)
+              ) do
+      description """
+      The local copy of the feed is old, so a device reads it again.
+
+      `MyHiFi.Source.Podcasts` asks for a read when a person opens the show, and the
+      `refresh` trigger asks again when the job runs. One rule answers both.
+      """
+
       public? true
     end
   end

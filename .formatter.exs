@@ -6,6 +6,7 @@
     "rootfs_overlay/etc/iex.exs"
   ],
   import_deps: [
+    :cinder,
     :ash_state_machine,
     :ash_oban,
     :oban,

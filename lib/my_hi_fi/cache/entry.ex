@@ -27,7 +27,8 @@ defmodule MyHiFi.Cache.Entry do
     otp_app: :my_hi_fi,
     domain: MyHiFi.Cache,
     data_layer: AshSqlite.DataLayer,
-    extensions: [AshStorage.BlobResource]
+    extensions: [AshStorage.BlobResource],
+    notifiers: [Ash.Notifier.PubSub]
 
   sqlite do
     table "cache_entries"
@@ -186,6 +187,26 @@ defmodule MyHiFi.Cache.Entry do
 
       run MyHiFi.Cache.Entry.Prune
     end
+  end
+
+  # The cache is the only part of this firmware that writes a file that stays, so a
+  # write here is the one thing that moves the free space of the card. A download of an
+  # episode grows outside the cache and `MyHiFi.Cache.put_file/3` moves it in when it is
+  # whole, so the free space settles at that moment.
+  #
+  # `MyHiFi.Device.Monitor` is the one subscriber, and it turns this into
+  # `MyHiFi.Event.Device.StorageChanged` on the `:device` topic. A part of this firmware
+  # reads that typed event and never this one. See `MyHiFi.Event`.
+  pub_sub do
+    # `module` is the module that holds `broadcast/3`, and `name` is the process that
+    # runs the pub sub. `MyHiFi.PubSub` is a name and not a module, so it belongs in the
+    # second one. See `Ash.Notifier.PubSub`.
+    module Phoenix.PubSub
+    name MyHiFi.PubSub
+    prefix "cache_entry"
+
+    publish_all :create, "written"
+    publish_all :destroy, "written"
   end
 
   attributes do

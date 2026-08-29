@@ -2,42 +2,84 @@ defmodule MyHiFiWeb.BrowseLive do
   @moduledoc """
   Find something to play.
 
-  The address names the source, and the top row of the faceplate holds one control
-  for each source. The page then moves through the tree of that source. It holds
-  no knowledge of any particular service: it reads `title`, `artwork` and
-  `favourite?` from each entry, and it gives the `ref` back untouched. See
-  `MyHiFi.Source`.
+  The address names the source, and the top row of the faceplate holds one control for
+  each source. `MyHiFi.Source.roots/0` gives the branches of that source, and
+  everything below them is generic: this page holds no knowledge of internet radio and
+  none of podcasts.
 
-  The page keeps the `ref` of each entry in its own state, and each control names
-  an entry by its place in the list. A `ref` is a term of the source, so a page
-  that put one in an address would have to turn text back into a term, and no
-  page reads a term from a person. The name of a source is not a `ref`, and
-  `MyHiFi.Source.from_slug/1` compares it with the sources that this firmware
-  holds.
+  ## Two rules make the whole tree
+
+  A row of `MyHiFi.Playback.Facet` opens into the items that link to it. An item of the
+  kind `:container` opens into the items whose `parent_id` names it. A source takes no
+  part in either one, which is what one catalogue is for.
+
+  ## What Cinder holds, and what this page holds
+
+  `Cinder` runs the query. It holds the loading state, the sort, the filters and the
+  page controls, so this page holds none of that: no cursor, no page of entries, and no
+  read of a list inside `handle_event`. A slow read draws a loading state, which the
+  page before this one did not.
+
+  This page holds the breadcrumbs and the marker of the track that plays, because
+  neither one belongs to a list.
+
+  ## The address says where a person is
+
+  `/browse/internet-radio/countries/NZ` is the stations of New Zealand, and
+  `/browse/podcasts/subscriptions/<id>` is the episodes of one show. One segment names
+  each level, and `handle_params/3` builds the path again from them, so a reload, a
+  bookmark and the back control of a browser all work.
+
+  A segment is what the level above it needs to find the row: the name of a branch at
+  the top, the value of a facet under one of those, and the identifier of an item under
+  a container. The rules of the tree are what make this possible, because the page can
+  walk the same two steps that a person did.
+
+  The sort, the filters and the page go in the query, and `Cinder.UrlSync` writes them:
+  `/browse/internet-radio/countries/NZ?sort=-title&title=rock`. Each level is a
+  collection of its own, so a sort belongs to the list that a person set it on.
   """
 
   use MyHiFiWeb, :live_view
 
+  require Ash.Query
+
   alias MyHiFi.Event
-  alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
+  alias MyHiFi.Playback.Facet
+  alias MyHiFi.Playback.Item
   alias MyHiFi.Source
+
+  import MyHiFiWeb.ItemList, only: [row: 1, count: 1]
+
+  on_mount(MyHiFiWeb.ItemList)
+
+  @collection "browse"
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Event.subscribe(:player)
+    if connected?(socket), do: Event.subscribe(:source)
 
     {:ok,
      socket
      |> assign(:page_title, "Browse")
-     |> assign(:current, current(Playback.state!()))}
+     |> assign(:finding?, false)
+     |> assign(:root_counts, %{})
+     |> assign(:list_query, nil)
+     |> assign(:url_state, nil)}
   end
 
   @impl Phoenix.LiveView
-  def handle_params(%{"source" => slug}, _uri, socket) do
+  def handle_params(%{"source" => slug} = params, uri, socket) do
     with {:ok, module} <- Source.from_slug(slug),
          true <- Source.enabled?(module) do
-      {:noreply, socket |> start_at(module) |> load()}
+      # `Cinder.UrlSync.handle_params/3` gives the socket, and it writes `:url_state`
+      # on it. Do not put what it gives into an assign.
+      {:noreply,
+       socket
+       |> assign(:finding?, params["find"] == "1")
+       |> at(module, params["path"] || [])
+       |> then(&Cinder.UrlSync.handle_params(params, uri, &1))}
     else
       _other -> {:noreply, first_source(socket)}
     end
@@ -47,89 +89,94 @@ defmodule MyHiFiWeb.BrowseLive do
   def handle_params(_params, _uri, socket), do: {:noreply, first_source(socket)}
 
   @impl Phoenix.LiveView
-  def handle_info(%Events.Started{source: source, track: %{ref: ref}}, socket) do
-    {:noreply, assign(socket, :current, %{source: source, ref: ref, status: :playing})}
+  def handle_event("open_root", %{"index" => index}, socket) do
+    {name, _listing} = Enum.at(socket.assigns.roots, to_index(index))
+
+    {:noreply, go(socket, socket.assigns.segments ++ [slug(name)])}
   end
 
-  # A pause keeps the track selected, so the marker stays and it names the pause. A
-  # buffer holds the same place, and it makes no sound yet. Neither event names a
-  # track, so each one changes the state of the entry that the page already marks.
-  @impl Phoenix.LiveView
-  def handle_info(%Events.Paused{}, socket), do: {:noreply, put_status(socket, :paused)}
-
-  @impl Phoenix.LiveView
-  def handle_info(%Events.Buffering{}, socket), do: {:noreply, put_status(socket, :buffering)}
-
-  @impl Phoenix.LiveView
-  def handle_info(%event{}, socket) when event in [Events.Stopped, Events.Failed] do
-    {:noreply, assign(socket, :current, nil)}
+  # A facet opens into the items that hold it, and a container opens into what it
+  # holds. Neither rule needs the source.
+  def handle_event("open", %{"id" => id}, socket) do
+    case here(socket.assigns) do
+      %{kind: :facet} -> {:noreply, open_facet(socket, id)}
+      %{kind: :item} -> {:noreply, open_item(socket, id)}
+      nil -> {:noreply, socket}
+    end
   end
 
-  # The page ignores every other event of the player. A progress event arrives
-  # once a second, and the marker of the list does not change with it.
-  @impl Phoenix.LiveView
-  def handle_info(_message, socket), do: {:noreply, socket}
+  # The controls take the room of three rows of the list, and a person wants them for a
+  # long list alone. They therefore start out of sight, and this control brings them.
+  def handle_event("find", _params, socket) do
+    socket = assign(socket, :finding?, !socket.assigns.finding?)
 
-  @impl Phoenix.LiveView
-  def handle_event("clear_search", _params, socket) do
-    {:noreply, socket |> assign(:query, nil) |> load()}
+    {:noreply, go(socket, socket.assigns.segments)}
+  end
+
+  # A person who will not wait for the schedule asks for the read now. The source
+  # publishes `MyHiFi.Event.Source.Changed` when it finishes, and the list then reads
+  # itself again.
+  def handle_event("refresh", _params, socket) do
+    case Source.refresh(socket.assigns.source, opened_item(socket.assigns)) do
+      :ok ->
+        {:noreply, put_flash(socket, :info, "The device reads this again now.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "The device could not read this again.")}
+    end
   end
 
   @impl Phoenix.LiveView
   def handle_event("crumb", %{"index" => index}, socket) do
-    {:noreply,
-     socket
-     |> assign(:path, Enum.take(socket.assigns.path, to_index(index) + 1))
-     |> assign(:query, nil)
-     |> load()}
+    {:noreply, go(socket, Enum.take(socket.assigns.segments, to_index(index)))}
   end
 
-  @impl Phoenix.LiveView
-  def handle_event("favourite", %{"index" => index}, socket) do
-    case entry_at(socket, index) do
-      nil -> {:noreply, socket}
-      entry -> {:noreply, mark(socket, to_index(index), entry)}
-    end
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("more", _params, socket) do
-    {:noreply, load_more(socket)}
-  end
-
-  @impl Phoenix.LiveView
-  def handle_event("open", %{"index" => index}, socket) do
-    case entry_at(socket, index) do
-      {:container, container} ->
-        {:noreply,
-         socket
-         |> assign(:path, socket.assigns.path ++ [container])
-         |> assign(:query, nil)
-         |> load()}
-
-      _other ->
+  # A person types a name, and the tree is not what finds it. See `MyHiFiWeb.SearchLive`.
+  def handle_event("search", %{"text" => text}, socket) do
+    case String.trim(text) do
+      "" ->
         {:noreply, socket}
+
+      trimmed ->
+        {:noreply,
+         push_navigate(socket,
+           to: ~p"/search/#{socket.assigns.current_source}?#{%{search: trimmed}}"
+         )}
     end
   end
 
-  @impl Phoenix.LiveView
-  def handle_event("play", %{"index" => index}, socket) do
-    case entry_at(socket, index) do
-      {:track, track} -> {:noreply, play(socket, track)}
-      _other -> {:noreply, socket}
-    end
+  # Cinder gives the query that it read, with the sort and the filters of the person on
+  # it. `MyHiFiWeb.ItemList` reads it when a person presses play, so the list that they
+  # see goes in the queue.
+  def handle_info({:list_query, %{query: query}}, socket) do
+    {:noreply, assign(socket, :list_query, query)}
   end
 
+  # A source reads a service behind the page, so what a container holds can change
+  # while a person looks at it. Cinder reads the query again.
   @impl Phoenix.LiveView
-  def handle_event("search", %{"search" => %{"query" => query}}, socket) do
-    case String.trim(query) do
-      "" -> {:noreply, socket |> assign(:query, nil) |> load()}
-      query -> {:noreply, socket |> assign(:query, query) |> load()}
-    end
+  def handle_info(%Event.Source.Changed{}, socket) do
+    {:noreply, Cinder.Refresh.refresh_table(socket, socket.assigns.collection_id)}
   end
+
+  # This is the clause that `use Cinder.UrlSync` writes. This page writes it out,
+  # because the macro puts it where the `use` stands and the compiler then reports that
+  # the clauses of `handle_info/2` are not together.
+  def handle_info({:table_state_change, _id, state}, socket) do
+    {:noreply,
+     Cinder.UrlSync.update_url(socket, state, get_in(socket.assigns, [:url_state, :uri]))}
+  end
+
+  # A progress event arrives once a second, and no list changes with it.
+  def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl Phoenix.LiveView
   def render(assigns) do
+    assigns =
+      assigns
+      |> assign(:here, here(assigns))
+      |> assign(:refreshable?, refreshable?(assigns))
+
     ~H"""
     <div id="browse">
       <p :if={is_nil(@source)} id="no-source" class="text-ink-dim">
@@ -137,254 +184,354 @@ defmodule MyHiFiWeb.BrowseLive do
       </p>
 
       <div :if={@source}>
-        <div class="mb-4 flex flex-wrap items-center gap-3">
-          <nav id="crumbs" aria-label="Where you are" class="flex flex-wrap items-center gap-1 text-sm">
-            <span :for={{crumb, index} <- Enum.with_index(@path)} class="flex items-center gap-1">
-              <.icon
-                :if={index > 0}
-                name="hero-chevron-right-micro"
-                class="size-3 text-ink-faint"
-              />
-              <button
-                type="button"
-                id={"crumb-#{index}"}
-                phx-click="crumb"
-                phx-value-index={index}
-                disabled={index == length(@path) - 1 and is_nil(@query)}
-                class={[
-                  "rounded px-1 py-0.5",
-                  if(index == length(@path) - 1 and is_nil(@query),
-                    do: "text-ink",
-                    else: "text-ink-dim hover:text-accent"
-                  )
-                ]}
-              >
-                {crumb.title}
-              </button>
-            </span>
+        <.crumbs
+          path={@path}
+          source={@source}
+          finding?={@finding?}
+          collection?={not is_nil(@here)}
+          refreshable?={@refreshable?}
+        />
 
-            <span :if={@query} class="flex items-center gap-1 text-ink">
-              <.icon name="hero-chevron-right-micro" class="size-3 text-ink-faint" />
-              <span>Search for {@query}</span>
-            </span>
-          </nav>
+        <.finder :if={is_nil(@here) and @searchable?} source={@source} />
 
-          <.form
-            :if={@search?}
-            for={@search_form}
-            id="search-form"
-            phx-submit="search"
-            class="w-full sm:ml-auto sm:w-auto"
-          >
-            <div class="flex items-center gap-2">
-              <.input
-                field={@search_form[:query]}
-                type="search"
-                placeholder="Search"
-                class="grow sm:w-56"
-              />
-              <button
-                type="submit"
-                id="do-search"
-                aria-label="Search"
-                class="control flex size-10 shrink-0 items-center justify-center rounded-lg"
-              >
-                <.icon name="hero-magnifying-glass" class="size-4" />
-              </button>
-              <button
-                :if={@query}
-                type="button"
-                id="clear-search"
-                phx-click="clear_search"
-                aria-label="Clear the search"
-                class="control flex size-10 shrink-0 items-center justify-center rounded-lg"
-              >
-                <.icon name="hero-x-mark" class="size-4" />
-              </button>
-            </div>
-          </.form>
-        </div>
+        <.roots :if={is_nil(@here)} roots={@roots} counts={@root_counts} />
 
-        <p :if={@entries == []} id="empty" class="glass rounded-xl px-4 py-8 text-center text-ink-faint">
-          Nothing here.
-        </p>
-
-        <ul :if={@entries != []} id="entries" class="glass overflow-hidden rounded-xl">
-          <li
-            :for={{entry, index} <- Enum.with_index(@entries)}
-            id={"entry-#{index}"}
-            class={[
-              "relative flex items-center gap-2 border-b border-edge px-2 last:border-0",
-              current_entry?(assigns, entry) && "bg-accent/12"
-            ]}
-          >
-            <%!-- The bar down the left edge marks the row that plays, and the eye finds
-            it in a long list without a read of any title. --%>
-            <span
-              :if={current_entry?(assigns, entry)}
-              aria-hidden="true"
-              class="led absolute inset-y-0 left-0 w-[3px]"
-            />
-            <%= case entry do %>
-              <% {:container, container} -> %>
-                <button
-                  type="button"
-                  id={"open-#{index}"}
-                  phx-click="open"
-                  phx-value-index={index}
-                  class="group flex min-w-0 grow items-center gap-3 py-3 text-left"
-                >
-                  <.icon name="hero-folder" class="size-4 shrink-0 text-ink-faint" />
-                  <%!-- `min-w-0` is what makes `truncate` work. A flex item keeps its
-                  content width without it, so a long title pushed the chevron and the
-                  star of a podcast show off the row. --%>
-                  <span class="min-w-0 grow truncate text-ink group-hover:text-accent">
-                    {container.title}
-                  </span>
-                  <.icon
-                    name="hero-chevron-right-mini"
-                    class="size-4 shrink-0 text-ink-faint group-hover:text-accent"
-                  />
-                </button>
-              <% {:track, track} -> %>
-                <.track track={track} index={index} status={current_status(assigns, track)} />
-            <% end %>
-            <.favourite entry={entry} index={index} />
-          </li>
-        </ul>
-
-        <button
-          :if={@cursor}
-          type="button"
-          id="more"
-          phx-click="more"
-          class="control mt-4 w-full rounded-xl py-3 text-sm"
+        <Cinder.collection
+          :if={@here}
+          id={@collection_id}
+          query={@here.query}
+          layout={:list}
+          url_state={@url_state}
+          page_size={100}
+          empty_message="Nothing here."
+          loading_message="Reading…"
+          filters_label="Filter"
+          sort_label="Sort"
+          show_filters={@finding?}
+          show_sort={@finding?}
+          query_opts={[load: [counts(@here.kind)]]}
+          on_query_change={:list_query}
         >
-          Show more
-        </button>
+          <:col
+            :if={@here[:order]}
+            field={@here[:order] && elem(@here[:order], 1)}
+            label={@here[:order] && elem(@here[:order], 0)}
+            sort
+          />
+
+          <:col field={field(@here.kind)} label={label(@path, @here.kind)} sort filter />
+
+          <:item :let={row}>
+            <.row row={row} kind={@here.kind} playing={@playing} source={@source} />
+          </:item>
+        </Cinder.collection>
       </div>
     </div>
     """
   end
 
-  # The row of a track. `status` is `nil` for each track that the player does not
-  # hold, and the marker of the current one holds three parts: a level meter in the
-  # place of the play control, the state in words, and the title in the accent
-  # colour. A person then knows the row from a look, and a person who reads the
-  # screen with a reader gets `aria-current` and the same words.
-  attr :track, :any, required: true
-  attr :index, :integer, required: true
-  attr :status, :atom, required: true
+  attr :path, :list, required: true
+  attr :source, :any, required: true
+  attr :finding?, :boolean, required: true
+  attr :collection?, :boolean, required: true
+  attr :refreshable?, :boolean, required: true
 
-  defp track(assigns) do
+  defp crumbs(assigns) do
     ~H"""
-    <button
-      type="button"
-      id={"play-#{@index}"}
-      phx-click="play"
-      phx-value-index={@index}
-      aria-current={@status && "true"}
-      class="group flex min-w-0 grow items-center gap-3 py-3 text-left"
+    <nav
+      id="crumbs"
+      aria-label="Where you are"
+      class="mb-4 flex flex-wrap items-center gap-1 text-sm"
     >
-      <span class={[
-        "control flex size-8 shrink-0 items-center justify-center rounded-full",
-        if(@status, do: "control-on", else: "group-hover:text-accent")
-      ]}>
-        <span :if={@status == :playing} class="meter" aria-hidden="true">
-          <span /><span /><span />
-        </span>
-        <.icon :if={@status == :paused} name="hero-pause-mini" class="size-4" />
-        <.icon
-          :if={@status == :buffering}
-          name="hero-arrow-path-mini"
-          class="size-4 motion-safe:animate-spin"
-        />
-        <.icon :if={is_nil(@status)} name="hero-play-mini" class="size-4" />
-      </span>
+      <button
+        type="button"
+        id="crumb-0"
+        phx-click="crumb"
+        phx-value-index="0"
+        disabled={@path == []}
+        class={[
+          "rounded px-1 py-0.5",
+          if(@path == [], do: "text-ink", else: "text-ink-dim hover:text-accent")
+        ]}
+      >
+        {@source.title()}
+      </button>
 
-      <span class="min-w-0 grow">
-        <span
-          :if={@status}
-          class="block text-[0.65rem] uppercase tracking-[0.18em] text-accent"
+      <span :for={{crumb, index} <- Enum.with_index(@path)} class="flex items-center gap-1">
+        <.icon name="hero-chevron-right-micro" class="size-3 text-ink-faint" />
+        <button
+          type="button"
+          id={"crumb-#{index + 1}"}
+          phx-click="crumb"
+          phx-value-index={index + 1}
+          disabled={index == length(@path) - 1}
+          class={[
+            "rounded px-1 py-0.5",
+            if(index == length(@path) - 1,
+              do: "text-ink",
+              else: "text-ink-dim hover:text-accent"
+            )
+          ]}
         >
-          {status_text(@status)}
-        </span>
-        <span class={[
-          "block truncate",
-          if(@status, do: "font-medium text-accent", else: "text-ink group-hover:text-accent")
-        ]}>
-          {@track.title}
-        </span>
-        <span :if={@track.subtitle} class="block truncate text-xs text-ink-faint">
-          {@track.subtitle}
-        </span>
+          {crumb.title}
+        </button>
       </span>
-    </button>
+
+      <span class="ml-auto flex items-center gap-1">
+        <button
+          :if={@refreshable?}
+          type="button"
+          id="refresh"
+          phx-click="refresh"
+          aria-label="Read this again"
+          class="control flex size-8 shrink-0 items-center justify-center rounded-lg"
+        >
+          <.icon name="hero-arrow-path" class="size-4" />
+        </button>
+
+        <button
+          :if={@collection?}
+          type="button"
+          id="find"
+          phx-click="find"
+          aria-pressed={to_string(@finding?)}
+          aria-label="Filter and sort"
+          class={[
+            "control flex size-8 shrink-0 items-center justify-center rounded-lg",
+            if(@finding?, do: "control-on")
+          ]}
+        >
+          <.icon name="hero-adjustments-horizontal" class="size-4" />
+        </button>
+      </span>
+    </nav>
     """
   end
 
-  # One control for a track and for a container. A station is a track and a podcast
-  # show is a container, and each one carries `favourite?`, so this needs no
-  # knowledge of which source it draws. A `nil` mark draws nothing.
-  attr :entry, :any, required: true
-  attr :index, :integer, required: true
+  # A branch is counted when a person looks at the branches, and never below them. Each
+  # one is one query, and a source holds three.
+  defp root_counts(_module, [_segment | _rest]), do: %{}
 
-  defp favourite(assigns) do
-    assigns = assign(assigns, :marked, elem(assigns.entry, 1).favourite?)
+  defp root_counts(module, []) do
+    Map.new(module.roots(), fn {name, listing} -> {name, Ash.count!(listing.query)} end)
+  end
 
+  attr :source, :any, required: true
+
+  # A person who knows the name of a station or of a show does not want to walk a tree
+  # for it. The tree holds the browsing, and `MyHiFiWeb.SearchLive` holds the finding.
+  defp finder(assigns) do
     ~H"""
-    <button
-      :if={is_boolean(@marked)}
-      type="button"
-      id={"favourite-#{@index}"}
-      phx-click="favourite"
-      phx-value-index={@index}
-      aria-pressed={to_string(@marked == true)}
-      aria-label="Favourite"
-      class={[
-        "flex size-9 shrink-0 items-center justify-center rounded-full",
-        if(@marked, do: "text-accent", else: "text-ink-faint hover:text-ink")
-      ]}
-    >
-      <.icon name={if @marked, do: "hero-star-solid", else: "hero-star"} class="size-5" />
-    </button>
+    <form id="finder" phx-submit="search" class="mb-4 flex items-center gap-2">
+      <input
+        type="search"
+        name="text"
+        autocomplete="off"
+        placeholder={"Search #{@source.title()}…"}
+        aria-label={"Search #{@source.title()}"}
+        class="recess w-full rounded-lg border-0 px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-1 focus:ring-accent/60"
+      />
+      <button
+        type="submit"
+        id="do-search"
+        aria-label="Find"
+        class="control flex size-9 shrink-0 items-center justify-center rounded-lg"
+      >
+        <.icon name="hero-magnifying-glass" class="size-4" />
+      </button>
+    </form>
     """
   end
 
-  # The player holds the track, and the track holds its `ref`, so the list needs no
-  # knowledge of the source to find the entry that plays. A pause holds the track as
-  # well, and a boot restores a paused track, so the marker must draw for that state
-  # too. See section 9 of the specification.
-  defp current(%{playing?: true, source: source, track: %{ref: ref}}) do
-    %{source: source, ref: ref, status: :playing}
+  attr :roots, :list, required: true
+  attr :counts, :map, required: true
+
+  defp roots(assigns) do
+    ~H"""
+    <ul id="entries" class="glass overflow-hidden rounded-xl">
+      <li
+        :for={{{name, _listing}, index} <- Enum.with_index(@roots)}
+        class="flex items-center gap-2 border-b border-edge px-2 last:border-0"
+      >
+        <button
+          type="button"
+          id={"open-#{index}"}
+          phx-click="open_root"
+          phx-value-index={index}
+          class="group flex min-w-0 grow items-center gap-3 py-3 text-left"
+        >
+          <.icon name="hero-folder" class="size-4 shrink-0 text-ink-faint" />
+          <span class="min-w-0 grow truncate text-ink group-hover:text-accent">{name}</span>
+          <.count of={Map.get(@counts, name, 0)} />
+          <.icon
+            name="hero-chevron-right-mini"
+            class="size-4 shrink-0 text-ink-faint group-hover:text-accent"
+          />
+        </button>
+      </li>
+    </ul>
+    """
   end
 
-  defp current(%{paused?: true, source: source, track: %{ref: ref}}) do
-    %{source: source, ref: ref, status: :paused}
+  # A sort, a filter and a page each give a new address, and none of them changes the
+  # level. `walk/2` reads the database, and it asks a source to read a feed, so it runs
+  # one time for each level and not one time for each press of a control.
+  defp at(socket, module, segments) do
+    if socket.assigns[:source] == module and socket.assigns[:segments] == segments do
+      socket
+    else
+      socket
+      |> start_at(module)
+      |> assign(:segments, segments)
+      |> assign(:collection_id, collection_id(segments))
+      |> assign(:path, walk(module, segments))
+      |> assign(:root_counts, root_counts(module, segments))
+    end
   end
 
-  defp current(_state), do: nil
+  defp here(%{path: []}), do: nil
+  defp here(%{path: path}), do: List.last(path).listing
+  defp here(_assigns), do: nil
 
-  defp put_status(%{assigns: %{current: nil}} = socket, _status), do: socket
+  # A branch and a facet are lists that this page makes, and a container is a row of the
+  # catalogue. Only a container names a thing that a source can read again.
+  defp opened_item(%{path: []}), do: nil
+  defp opened_item(%{path: path}), do: Map.get(List.last(path), :item)
+  defp opened_item(_assigns), do: nil
 
-  defp put_status(socket, status) do
-    assign(socket, :current, %{socket.assigns.current | status: status})
+  # See `MyHiFi.Source.refresh/2`. The source says whether it reads a service, so this
+  # page holds no knowledge of podcasts.
+  defp refreshable?(%{source: nil}), do: false
+
+  defp refreshable?(assigns) do
+    not is_nil(opened_item(assigns)) and :refresh in assigns.source.capabilities()
   end
 
-  defp current_status(%{current: %{source: source, ref: ref, status: status}, source: source}, %{
-         ref: ref
-       }) do
-    status
+  # Cinder keeps the sort and the filters of one collection, and a level of facets and a
+  # level of items are two resources. One identifier for both gives a sort of `title` to
+  # a query of `MyHiFi.Playback.Facet`, which holds no such field. Each level therefore
+  # gets an identifier of its own, and a new list starts with no sort and no filter.
+  defp collection_id(segments), do: Enum.map_join([@collection | segments], "-", &slug/1)
+
+  # A facet is named by its value, and an item by its title.
+  defp field(:facet), do: "value"
+  defp field(:item), do: "title"
+
+  # Each level counts what its rows hold. Cinder keeps what `query_opts` names, and Ash
+  # gives the whole page to the calculation in one call.
+  defp counts(:facet), do: :item_count
+  defp counts(:item), do: :child_count
+
+  # The filter and the sort name what a person looks at. `Value` is the field of the
+  # facet, and it says nothing to somebody who opened Countries.
+  defp label(path, :facet), do: List.last(path).title
+  defp label(_path, :item), do: "Title"
+
+  # A facet is named by its value, which reads far better in an address than an
+  # identifier does.
+  defp open_facet(socket, id) do
+    case Ash.get(Facet, id) do
+      {:ok, facet} -> go(socket, socket.assigns.segments ++ [to_string(facet.value.value)])
+      {:error, _reason} -> socket
+    end
   end
 
-  defp current_status(_assigns, _track), do: nil
+  # An item holds no name that an address can use, so its identifier is the segment.
+  defp open_item(socket, id) do
+    case Playback.get_item(id) do
+      {:ok, %{kind: :container}} -> go(socket, socket.assigns.segments ++ [id])
+      _other -> socket
+    end
+  end
 
-  defp current_entry?(assigns, {:track, track}), do: not is_nil(current_status(assigns, track))
-  defp current_entry?(_assigns, _entry), do: false
+  defp go(socket, segments), do: push_patch(socket, to: address(socket, segments))
 
-  defp status_text(:paused), do: "Paused"
-  defp status_text(:buffering), do: "Buffering"
-  defp status_text(_status), do: "Playing"
+  # An empty list gives the address of the source, and not one with a slash on the end of
+  # it. `find` says that the controls are in sight, and it stays through a level change,
+  # because it is what a person chose and not a part of the level.
+  defp address(socket, segments) do
+    source = socket.assigns.current_source
+    query = if socket.assigns.finding?, do: %{find: 1}, else: %{}
+
+    case segments do
+      [] -> ~p"/browse/#{source}?#{query}"
+      _other -> ~p"/browse/#{source}/#{segments}?#{query}"
+    end
+  end
+
+  # Walk the same two steps that a person walked, one segment at a time. A segment that
+  # names nothing ends the walk, so a stale bookmark gives the level that still stands
+  # and not an error.
+  defp walk(source, segments) do
+    Enum.reduce_while(segments, [], fn segment, path ->
+      case step(source, List.last(path), segment) do
+        nil -> {:halt, path}
+        crumb -> {:cont, path ++ [crumb]}
+      end
+    end)
+  end
+
+  # A branch, or a container by its identifier. `MyHiFiWeb.SearchLive` finds a show
+  # that no branch of this source holds, so the address of a container cannot need one.
+  defp step(source, nil, segment) do
+    case Enum.find(source.roots(), fn {name, _listing} -> slug(name) == segment end) do
+      {name, listing} -> %{title: name, listing: listing}
+      nil -> container(source, segment)
+    end
+  end
+
+  defp step(source, %{listing: %{kind: :facet}}, segment) do
+    query =
+      Item
+      |> Ash.Query.filter(source == ^Source.slug(source) and exists(facets, value == ^segment))
+      |> Ash.Query.sort(rank: :desc, title: :asc)
+
+    %{title: segment, listing: %{query: query, kind: :item, order: {"Popularity", "rank"}}}
+  end
+
+  defp step(source, %{listing: %{kind: :item}}, segment), do: container(source, segment)
+
+  # A container opens into the items whose `parent_id` names it. The source must match,
+  # so an identifier of one source cannot open under another one.
+  #
+  # The oldest item comes first. A person who presses one episode of a show queues the
+  # rest of the list behind it, so the order of the list is the order that they hear,
+  # and a series makes sense from the start.
+  #
+  # An item with no date comes before all of them, because SQLite reads no date as the
+  # smallest one. `:asc_nils_last` says otherwise, and Cinder reads no direction but
+  # `:asc` and `:desc`, so it would drop the sort and leave the alphabet.
+  defp container(source, id) do
+    slug = Source.slug(source)
+
+    case Playback.get_item(id) do
+      {:ok, %{kind: :container, source: ^slug} = item} ->
+        opened(source, item)
+
+        query =
+          Item
+          |> Ash.Query.filter(parent_id == ^item.id)
+          |> Ash.Query.sort(published_at: :asc, title: :asc)
+
+        %{
+          title: item.title,
+          item: item,
+          listing: %{query: query, kind: :item, order: {"Date", "published_at"}}
+        }
+
+      _other ->
+        nil
+    end
+  end
+
+  # A branch is named by its name, in lower case with a dash for each space.
+  defp slug(name), do: name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-")
+
+  # A source that must reach a service when a container opens says so. See
+  # `MyHiFi.Source.opened/1`.
+  defp opened(source, item) do
+    if function_exported?(source, :opened, 1), do: source.opened(item), else: :ok
+  end
 
   defp first_source(socket) do
     case Source.enabled() do
@@ -396,116 +543,22 @@ defmodule MyHiFiWeb.BrowseLive do
   defp start_at(socket, nil) do
     socket
     |> assign(:source, nil)
+    |> assign(:searchable?, false)
     |> assign(:current_source, nil)
+    |> assign(:roots, [])
     |> assign(:path, [])
-    |> assign(:entries, [])
-    |> assign(:cursor, nil)
-    |> assign(:query, nil)
-    |> assign(:search?, false)
-    |> assign(:search_form, to_form(%{"query" => ""}, as: :search))
+    |> assign(:segments, [])
   end
 
   defp start_at(socket, module) do
     socket
     |> assign(:source, module)
+    |> assign(:searchable?, :search in module.capabilities())
     |> assign(:current_source, Source.slug(module))
     |> assign(:page_title, module.title())
-    |> assign(:path, [%{ref: module.root(), title: module.title()}])
-    |> assign(:entries, [])
-    |> assign(:cursor, nil)
-    |> assign(:query, nil)
-    |> assign(:search?, :search in module.capabilities())
-    |> assign(:search_form, to_form(%{"query" => ""}, as: :search))
+    |> assign(:roots, module.roots())
   end
 
-  defp load(socket) do
-    case read(socket, nil) do
-      {:ok, page} ->
-        socket
-        |> assign(:entries, page.entries)
-        |> assign(:cursor, page.cursor)
-        |> assign(:search_form, to_form(%{"query" => socket.assigns.query || ""}, as: :search))
-
-      {:error, reason} ->
-        socket
-        |> assign(:entries, [])
-        |> assign(:cursor, nil)
-        |> put_flash(:error, "This source gave an error: #{inspect(reason)}")
-    end
-  end
-
-  defp load_more(%{assigns: %{cursor: nil}} = socket), do: socket
-
-  defp load_more(socket) do
-    case read(socket, socket.assigns.cursor) do
-      {:ok, page} ->
-        socket
-        |> assign(:entries, socket.assigns.entries ++ page.entries)
-        |> assign(:cursor, page.cursor)
-
-      {:error, reason} ->
-        put_flash(socket, :error, "This source gave an error: #{inspect(reason)}")
-    end
-  end
-
-  defp read(%{assigns: %{source: source, query: query}} = socket, cursor) when is_binary(query) do
-    source.search(query, options(socket, cursor))
-  end
-
-  defp read(%{assigns: %{source: source, path: path}} = socket, cursor) do
-    source.browse(List.last(path).ref, options(socket, cursor))
-  end
-
-  defp options(_socket, nil), do: []
-  defp options(_socket, cursor), do: [cursor: cursor]
-
-  defp play(socket, track) do
-    case Playback.play(socket.assigns.source, track.ref) do
-      :ok ->
-        socket
-        |> assign(:current, %{
-          source: socket.assigns.source,
-          ref: track.ref,
-          status: :buffering
-        })
-        |> put_flash(:info, "Playing #{track.title}.")
-
-      {:error, reason} ->
-        put_flash(socket, :error, "Could not play that: #{inspect(reason)}")
-    end
-  end
-
-  defp mark(socket, _index, {_kind, %{favourite?: nil}}), do: socket
-
-  defp mark(socket, index, {_kind, entry} = whole) do
-    case socket.assigns.source.favourite(entry.ref, not entry.favourite?) do
-      :ok -> assign(socket, :entries, refresh(socket, index, whole))
-      {:error, reason} -> put_flash(socket, :error, "Could not do that: #{inspect(reason)}")
-    end
-  end
-
-  # The source holds the mark, so the page reads a track again instead of writing
-  # what it thinks the new state is.
-  defp refresh(socket, index, {:track, track}) do
-    case socket.assigns.source.track(track.ref) do
-      {:ok, track} -> List.replace_at(socket.assigns.entries, index, {:track, track})
-      {:error, _reason} -> socket.assigns.entries
-    end
-  end
-
-  # A container has no such read. The behaviour names `track/1` and no
-  # `container/1`, and one page refreshing one star does not earn a callback that
-  # every source must then implement. `favourite/2` gave `:ok`, so the new state is
-  # the state that this page asked for. Reading the list again is the other answer,
-  # and for a search of a service that would be a request to it for each star.
-  defp refresh(socket, index, {:container, container}) do
-    container = %{container | favourite?: not container.favourite?}
-
-    List.replace_at(socket.assigns.entries, index, {:container, container})
-  end
-
-  defp entry_at(socket, index), do: Enum.at(socket.assigns.entries, to_index(index))
-
-  defp to_index(index) when is_integer(index), do: index
   defp to_index(index) when is_binary(index), do: String.to_integer(index)
+  defp to_index(index) when is_integer(index), do: index
 end

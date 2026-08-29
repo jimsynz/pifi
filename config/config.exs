@@ -89,6 +89,10 @@ config :esbuild,
 
 config :phoenix, json_library: Jason
 
+# Every collection of the web interface draws with the faceplate style. See
+# `MyHiFiWeb.CinderTheme`.
+config :cinder, default_theme: MyHiFiWeb.CinderTheme
+
 config :logger,
   default_formatter: [format: "$time $metadata[$level] $message\n", metadata: [:request_id]]
 

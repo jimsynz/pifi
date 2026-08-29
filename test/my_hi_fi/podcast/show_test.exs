@@ -2,15 +2,12 @@ defmodule MyHiFi.Podcast.ShowTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Podcast
+  alias MyHiFi.Test.Podcasts
 
+  # A show holds the address of the feed and what the last read gave. The title, the
+  # author and the picture are on the item that `MyHiFi.Podcast.Fill` writes.
   defp from_feed(overrides \\ %{}) do
-    defaults = %{
-      feed_url: "https://example.test/#{System.unique_integer([:positive])}/rss",
-      title: "Road Work",
-      author: "Dan Benjamin",
-      description: "A show about work.",
-      artwork_url: "https://example.test/cover.jpg"
-    }
+    defaults = %{feed_url: "https://example.test/#{System.unique_integer([:positive])}/rss"}
 
     Podcast.upsert_show_from_feed!(Map.merge(defaults, overrides))
   end
@@ -19,37 +16,35 @@ defmodule MyHiFi.Podcast.ShowTest do
     test "it writes a show" do
       show = from_feed()
 
-      assert show.title == "Road Work"
-      assert show.author == "Dan Benjamin"
-      assert show.subscribed? == false
+      assert show.feed_url =~ "example.test"
+      assert show.item_id == nil
       assert show.last_fetched_at
       assert show.last_error == nil
     end
 
     test "a second read updates the row of the first one" do
-      first = from_feed(%{feed_url: "https://example.test/rss", title: "Old title"})
-      second = from_feed(%{feed_url: "https://example.test/rss", title: "New title"})
+      first = from_feed(%{feed_url: "https://example.test/rss"})
+      second = from_feed(%{feed_url: "https://example.test/rss"})
 
       assert second.id == first.id
-      assert second.title == "New title"
       assert length(Podcast.list_shows!()) == 1
     end
 
     test "it leaves the subscription of the person alone" do
       show = from_feed(%{feed_url: "https://example.test/rss"})
-      {:ok, _show} = Podcast.subscribe(show)
+      _show = Podcasts.subscribe(show)
 
-      updated = from_feed(%{feed_url: "https://example.test/rss", title: "New title"})
+      updated = from_feed(%{feed_url: "https://example.test/rss"})
 
-      assert updated.subscribed? == true
-      assert updated.title == "New title"
+      # The mark is on the item, and a read of the feed writes the row of the show.
+      assert [%{id: id}] = Podcast.subscribed_shows!()
+      assert id == updated.id
     end
 
     test "it leaves the identifier of the index alone" do
       Podcast.upsert_show_from_index!(%{
         feed_url: "https://example.test/rss",
-        index_id: 920_666,
-        title: "From the index"
+        index_id: 920_666
       })
 
       show = from_feed(%{feed_url: "https://example.test/rss"})
@@ -73,32 +68,26 @@ defmodule MyHiFi.Podcast.ShowTest do
       show =
         Podcast.upsert_show_from_index!(%{
           feed_url: "https://example.test/rss",
-          index_id: 920_666,
-          title: "The Rest Is History",
-          author: "Goalhanger",
-          description: "History.",
-          artwork_url: "https://example.test/cover.jpg"
+          index_id: 920_666
         })
 
-      assert show.title == "The Rest Is History"
       assert show.index_id == 920_666
+      # Only a read of the feed writes this, so a search leaves it absent.
       assert show.last_fetched_at == nil
     end
 
     test "the feed wins, so a search gives the index identifier and nothing more" do
-      from_feed(%{feed_url: "https://example.test/rss", title: "From the feed"})
+      from_feed(%{feed_url: "https://example.test/rss"})
 
       show =
         Podcast.upsert_show_from_index!(%{
           feed_url: "https://example.test/rss",
-          index_id: 920_666,
-          title: "From the index",
-          author: "Somebody else"
+          index_id: 920_666
         })
 
+      # The index gives the identifier, and it takes nothing else of the feed away.
       assert show.index_id == 920_666
-      assert show.title == "From the feed"
-      assert show.author == "Dan Benjamin"
+      assert show.last_fetched_at
     end
   end
 
@@ -106,22 +95,24 @@ defmodule MyHiFi.Podcast.ShowTest do
     test "subscribe and unsubscribe move the mark" do
       show = from_feed()
 
-      {:ok, show} = Podcast.subscribe(show)
-      assert show.subscribed? == true
+      Podcasts.subscribe(show)
+      assert [%{id: id}] = Podcast.subscribed_shows!()
+      assert id == show.id
 
-      {:ok, show} = Podcast.unsubscribe(show)
-      assert show.subscribed? == false
+      Podcasts.unsubscribe(show)
+      assert Podcast.subscribed_shows!() == []
     end
 
-    test "`subscriptions` reads the subscribed shows alone, and it sorts by the title" do
-      _plain = from_feed(%{title: "Not subscribed"})
-      zebra = from_feed(%{title: "Zebra"})
-      apple = from_feed(%{title: "Apple"})
+    test "`subscriptions` reads the subscribed shows alone" do
+      _plain = from_feed()
+      zebra = from_feed()
+      apple = from_feed()
 
-      {:ok, _show} = Podcast.subscribe(zebra)
-      {:ok, _show} = Podcast.subscribe(apple)
+      Podcasts.subscribe(zebra)
+      Podcasts.subscribe(apple)
 
-      assert Enum.map(Podcast.subscribed_shows!(), & &1.title) == ["Apple", "Zebra"]
+      assert Podcast.subscribed_shows!() |> Enum.map(& &1.id) |> Enum.sort() ==
+               Enum.sort([zebra.id, apple.id])
     end
   end
 

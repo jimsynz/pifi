@@ -2,32 +2,20 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   use MyHiFiWeb.ConnCase, async: false
   use Oban.Testing, repo: MyHiFi.Repo
 
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Device, as: Events
   alias MyHiFi.Podcast.Index
-  alias MyHiFi.Radio
-  alias MyHiFi.Radio.Station.SyncFromRemote
+  alias MyHiFi.Radio.Sync.FromRemote
   alias MyHiFi.Settings
   alias MyHiFi.Source
   alias MyHiFi.Test.NoCardOutput
+  alias MyHiFi.Test.Stations
   alias MyHiFi.Test.TwoCardOutput
 
   @radio Source.slug(Source.InternetRadio)
   @podcasts Source.slug(Source.Podcasts)
 
-  defp station(overrides) do
-    defaults = %{
-      remote_id: "remote-#{System.unique_integer([:positive])}",
-      title: "Station #{System.unique_integer([:positive])}",
-      stream_url: "http://example.test/stream.mp3",
-      codec: "MP3",
-      bitrate: 128,
-      hls?: false,
-      country_code: "NZ",
-      tags: ["news"],
-      click_count: 0
-    }
-
-    Radio.upsert_station_from_remote!(Map.merge(defaults, overrides))
-  end
+  defp station(overrides), do: Stations.create(overrides)
 
   setup do
     Application.put_env(:my_hi_fi, Index, plug: {Req.Test, Index}, retry: false)
@@ -36,7 +24,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     on_exit(fn ->
       # The settings outlive a test, because they are rows and not process state.
       for key <- [
-            SyncFromRemote.countries_key(),
+            FromRemote.countries_key(),
             MyHiFi.Player.output_device_key(),
             Index.key_setting(),
             Index.secret_setting(),
@@ -189,20 +177,69 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     end
   end
 
-  describe "the interval" do
-    test "reads the reports again", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings")
+  # The page asks for no report on an interval. `MyHiFi.Device.Monitor` owns the three
+  # sources of truth and publishes on the `:device` topic.
+  describe "the reports that arrive" do
+    test "a card that goes reaches the page", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings")
 
-      NoCardOutput.use_it()
-      send(view.pid, :refresh)
+      refute html =~ "No sound card is present"
+
+      Event.publish(:device, %Events.OutputChanged{devices: [], selected: nil, in_use: nil})
 
       assert render(view) =~ "No sound card is present"
     end
 
-    test "it leaves a source page alone, because a person may be typing", %{conn: conn} do
+    test "free space that moves reaches the page", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/storage")
+
+      Event.publish(:device, %Events.StorageChanged{
+        path: "/root",
+        total_bytes: 1_000_000_000,
+        free_bytes: 4_000_000,
+        used_bytes: 996_000_000,
+        database_bytes: 2_000_000,
+        full?: true
+      })
+
+      html = render(view)
+
+      assert html =~ "/root"
+      assert has_element?(view, "#storage-warning")
+    end
+
+    # `os_mon` holds the alarm, and a partition with room raises none.
+    test "a partition with room draws no warning", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/storage")
+
+      refute has_element?(view, "#storage-warning")
+    end
+
+    test "an interface that connects reaches the page", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      Event.publish(:device, %Events.NetworkChanged{
+        interfaces: [
+          %{
+            name: "wlan0",
+            type: "WiFi",
+            connection: :internet,
+            addresses: ["192.168.1.50"],
+            ssid: "A network",
+            signal_percent: 74
+          }
+        ]
+      })
+
+      assert render(view) =~ "192.168.1.50"
+    end
+
+    # A person may be in the middle of typing in the form of a source, and a report
+    # touches nothing of that page.
+    test "it leaves a source page alone", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/settings/sources/#{@radio}")
 
-      send(view.pid, :refresh)
+      Event.publish(:device, %Events.OutputChanged{devices: [], selected: nil, in_use: nil})
 
       assert render(view) =~ "Station countries"
     end
@@ -271,7 +308,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     test "shows the default country when a person has chosen none", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings/sources/#{@radio}")
 
-      assert html =~ SyncFromRemote.default_countries()
+      assert html =~ FromRemote.default_countries()
     end
 
     test "counts the stations", %{conn: conn} do
@@ -292,7 +329,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
         |> render_submit()
 
       assert html =~ "NZ, AU"
-      assert SyncFromRemote.configured_countries() == ["NZ", "AU"]
+      assert FromRemote.configured_countries() == ["NZ", "AU"]
     end
 
     test "the change is still there for the next visit", %{conn: conn} do
@@ -309,7 +346,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       view |> form("#source-form", source: %{countries: "nz, NZ , nz"}) |> render_submit()
 
-      assert SyncFromRemote.configured_countries() == ["NZ"]
+      assert FromRemote.configured_countries() == ["NZ"]
     end
 
     test "an empty list gives an error, and the old list stays", %{conn: conn} do
@@ -319,7 +356,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       html = view |> form("#source-form", source: %{countries: " , "}) |> render_submit()
 
       assert html =~ "Name at least one country"
-      assert SyncFromRemote.configured_countries() == ["NZ"]
+      assert FromRemote.configured_countries() == ["NZ"]
     end
 
     test "asking for the stations puts a job in the queue", %{conn: conn} do
@@ -328,7 +365,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       html = view |> element("#source-action-sync") |> render_click()
 
       assert html =~ "asks for the station list"
-      assert_enqueued(worker: MyHiFi.Radio.Station.Workers.SyncFromRemote)
+      assert_enqueued(worker: MyHiFi.Radio.Sync.Workers.FromRemote)
     end
   end
 
@@ -345,6 +382,48 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       # The setting is a row, so it outlives the process that read it.
       assert {:ok, %{value: "Audio"}} = Settings.fetch(MyHiFi.Player.output_device_key())
+    end
+  end
+
+  # A DAC on the I2S pins answers to nothing until the bootloader loads an overlay for
+  # it, so it reaches no list of cards. A person names what they added instead.
+  describe "the audio hardware" do
+    test "the output page holds a way to reach it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/output")
+
+      assert has_element?(view, "#hardware-link")
+    end
+
+    test "it names each profile that this firmware knows", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/settings/output/hardware")
+
+      for profile <- MyHiFi.Hardware.profiles() do
+        assert html =~ profile.title
+      end
+    end
+
+    test "the profile in use is marked, and a person cannot choose it again", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/output/hardware")
+
+      assert view |> element("#profile-none") |> render() =~ "disabled"
+    end
+
+    # A host writes no boot configuration and restarts nothing, so the choice alone is
+    # what this can read.
+    test "a choice is kept", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/output/hardware")
+
+      view |> element("#profile-hifiberry-dac") |> render_click()
+
+      assert MyHiFi.Hardware.chosen().id == "hifiberry-dac"
+      assert view |> element("#profile-hifiberry-dac") |> render() =~ "disabled"
+
+      on_exit(fn ->
+        case MyHiFi.Settings.fetch(MyHiFi.Hardware.setting()) do
+          {:ok, setting} -> MyHiFi.Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
     end
   end
 
@@ -434,6 +513,24 @@ defmodule MyHiFiWeb.SettingsLiveTest do
         |> render_submit()
 
       refute html =~ "THESECRET"
+    end
+
+    test "a device with no key holds no control to read the index", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/#{@podcasts}")
+
+      refute has_element?(view, "#source-action-read_index")
+    end
+
+    # The read reaches a service, so it goes to a job and a person waits for nothing.
+    test "a person reads the index again, and a job does it", %{conn: conn} do
+      put_key()
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/#{@podcasts}")
+
+      html = view |> element("#source-action-read_index") |> render_click()
+
+      assert html =~ "reads the index now"
+
+      assert_enqueued(worker: MyHiFi.Podcast.Show.Workers.ReadTrending)
     end
 
     test "a person removes the key, and the subscriptions stay", %{conn: conn} do

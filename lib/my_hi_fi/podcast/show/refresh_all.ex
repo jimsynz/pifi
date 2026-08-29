@@ -27,6 +27,7 @@ defmodule MyHiFi.Podcast.Show.RefreshAll do
 
   require Logger
 
+  alias MyHiFi.Playback
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Refresh
   alias MyHiFi.Source
@@ -71,18 +72,29 @@ defmodule MyHiFi.Podcast.Show.RefreshAll do
   defp remove_forgotten do
     before = DateTime.add(DateTime.utc_now(), -@stale_after_days, :day)
 
-    Podcast.list_shows!()
-    |> Enum.reject(& &1.subscribed?)
+    Podcast.list_shows!(load: [:item])
+    |> Enum.reject(&subscribed?/1)
     |> Enum.filter(&(DateTime.compare(&1.updated_at, before) == :lt))
     |> Enum.map(&remove/1)
     |> Enum.count(&(&1 == :ok))
   end
 
-  defp remove(show) do
-    show.id
-    |> Podcast.episodes_of_show!()
-    |> Enum.each(&Podcast.destroy_episode!/1)
+  # A subscription is a mark on the item of the show. A show that names no item is one
+  # that no person has reached, so no person subscribed to it.
+  defp subscribed?(%{item: %{favourite?: true}}), do: true
+  defp subscribed?(_show), do: false
 
-    Podcast.destroy_show(show)
+  # The item of the show holds its episodes, and SQLite removes a child with its
+  # parent, so one destroy takes the whole show away.
+  # The row of the show names the item, so the show goes first. SQLite holds that key,
+  # and it refuses an item that a show still names.
+  defp remove(show) do
+    result = Podcast.destroy_show(show)
+    remove_item(show.item)
+
+    result
   end
+
+  defp remove_item(nil), do: :ok
+  defp remove_item(item), do: Playback.destroy_item!(item)
 end

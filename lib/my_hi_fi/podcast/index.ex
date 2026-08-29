@@ -47,7 +47,8 @@ defmodule MyHiFi.Podcast.Index do
           title: String.t(),
           author: String.t() | nil,
           description: String.t() | nil,
-          artwork_url: String.t() | nil
+          artwork_url: String.t() | nil,
+          categories: [String.t()]
         }
 
   @typedoc "One category of the index."
@@ -198,7 +199,8 @@ defmodule MyHiFi.Podcast.Index do
         title: title,
         author: presence(feed["author"]) || presence(feed["ownerName"]),
         description: presence(feed["description"]),
-        artwork_url: presence(feed["artwork"]) || presence(feed["image"])
+        artwork_url: presence(feed["artwork"]) || presence(feed["image"]),
+        categories: categories_of(feed)
       }
     else
       _other -> nil
@@ -206,6 +208,21 @@ defmodule MyHiFi.Podcast.Index do
   end
 
   def show(_feed), do: nil
+
+  # The index gives the categories of a feed as a map of an identifier to a name, and
+  # it gives none for a feed that holds none. The name is what a person reads, and
+  # `MyHiFi.Podcast.Fill` writes each one as a facet.
+  defp categories_of(%{"categories" => categories}) when is_map(categories) do
+    categories
+    |> Map.values()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp categories_of(_feed), do: []
 
   defp shows(body) do
     body

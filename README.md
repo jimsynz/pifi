@@ -10,12 +10,15 @@ to analogue converter (DAC). It gives a Phoenix LiveView web interface for setup
 and for control. A later version adds a 2.8 inch PiTFT screen and a knob with
 dynamic detents.
 
-`docs/spec.md` holds the specification.
-
 ## State
 
-This project is early. The firmware does not play audio yet. The repository holds
-the Nerves, Phoenix, and Ash skeleton, and the specification.
+The firmware plays internet radio and podcasts. It holds a web interface to browse,
+to search and to control what plays. The device screen and the knob are not built
+yet.
+
+The code is the specification. Each module says what it does and why, and
+`MyHiFi.Source`, `MyHiFi.Output` and `MyHiFi.Peripheral` hold the rules that a new
+source, a new output and a new piece of hardware follow.
 
 ## Design
 

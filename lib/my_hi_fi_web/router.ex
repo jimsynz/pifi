@@ -29,9 +29,14 @@ defmodule MyHiFiWeb.Router do
     pipe_through(:browser)
 
     live("/", BrowseLive)
+    # The rest of the address is where a person is in the tree, one segment for each
+    # level. See `MyHiFiWeb.BrowseLive`.
     live("/browse/:source", BrowseLive)
+    live("/browse/:source/*path", BrowseLive)
+    live("/search/:source", SearchLive)
     live("/settings", SettingsLive, :menu)
     live("/settings/output", SettingsLive, :output)
+    live("/settings/output/hardware", SettingsLive, :hardware)
     live("/settings/sources", SettingsLive, :sources)
     live("/settings/sources/:source", SettingsLive, :source)
     live("/settings/network", SettingsLive, :network)

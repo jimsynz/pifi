@@ -100,11 +100,15 @@ defmodule MyHiFi.MixProject do
       {:ash_sqlite, "~> 0.2"},
       # `MyHiFi.Cache` models the cache on disk with this. It is not on Hex, and its
       # author says that the API iterates, so this names a reference and pins it in
-      # the way that `vintage_net_wizard` is pinned. See section 8 of
-      # `docs/cache-plan.md` for what that risk is.
+      # the way that `vintage_net_wizard` is pinned. A new reference therefore needs a
+      # read of what changed.
       {:ash_storage, github: "ash-project/ash_storage", ref: "fb919d33fcbd", override: true},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
+      # The browse page gives Cinder a query, and Cinder holds the loading state, the
+      # sort, the page controls and the URL state. It is pure Elixir, and so is
+      # `ash_phoenix`, which it needs.
+      {:cinder, "~> 0.16"},
       # `membrane_core` needs `ratio`, and `ratio` names
       # `decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`, so the
       # two do not agree.
@@ -148,8 +152,7 @@ defmodule MyHiFi.MixProject do
       # `MyHiFi.Podcast.Feed.Parser` reads a podcast feed with this. It is pure
       # Elixir and it holds no dependency of its own, so it needs nothing from the
       # Nerves system. `Saxy.Partial` takes one chunk at a time, so a 13 MB feed
-      # never arrives in memory as one binary. See section 3 of
-      # `docs/podcasts-plan.md` for the packages that this replaces.
+      # never arrives in memory as one binary.
       {:saxy, "~> 1.6"},
       {:shoehorn, "~> 0.9.1"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
@@ -188,7 +191,7 @@ defmodule MyHiFi.MixProject do
       # the README of the system.
       {:nerves_system_myhifi_rpi0_2,
        git: "https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2.git",
-       tag: "v0.1.0",
+       branch: "main",
        runtime: false,
        targets: :myhifi_rpi0_2,
        nerves: [compile: true]},

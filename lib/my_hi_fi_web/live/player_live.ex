@@ -25,7 +25,9 @@ defmodule MyHiFiWeb.PlayerLive do
 
   A control that the source does not hold is dead. `MyHiFi.Source.capabilities/0`
   gives that list, and a radio station therefore shows the two skip controls disabled.
-  This page holds no knowledge of any particular service.
+  Previous and next belong to the queue and not to a source, so a track that plays
+  always holds them, and the player answers `:no_more` at the end of the list. This
+  page holds no knowledge of any particular service.
   """
 
   use MyHiFiWeb, :live_view
@@ -43,7 +45,7 @@ defmodule MyHiFiWeb.PlayerLive do
     socket =
       socket
       |> assign(:status, status(state))
-      |> assign(:track, state.track)
+      |> assign(:track, state.item)
       |> assign(:standby?, state.standby?)
       |> assign(:position_ms, state.position_ms)
       |> assign(:duration_ms, nil)
@@ -307,7 +309,7 @@ defmodule MyHiFiWeb.PlayerLive do
           <p class="numerals mt-4 text-lg text-ink-dim">{elapsed(assigns)}</p>
 
           <p :if={@status == :failed} id="reason" class="mt-3 text-sm text-red-300">
-            The player stopped: {inspect(@reason)}
+            {Events.Failed.message(@reason)}
           </p>
 
           <div id="transport" class="mt-6 flex items-center justify-center gap-3">
@@ -316,7 +318,7 @@ defmodule MyHiFiWeb.PlayerLive do
               click="previous"
               icon="hero-backward"
               label="The track before"
-              disabled={:previous not in @capabilities or is_nil(@track)}
+              disabled={is_nil(@track)}
             />
             <.round_control
               id="back"
@@ -340,7 +342,7 @@ defmodule MyHiFiWeb.PlayerLive do
               click="next"
               icon="hero-forward"
               label="The track after"
-              disabled={:next not in @capabilities or is_nil(@track)}
+              disabled={is_nil(@track)}
             />
           </div>
 
@@ -439,7 +441,7 @@ defmodule MyHiFiWeb.PlayerLive do
   # The display holds one line under the title. A failure needs that line, because
   # the large view is not open, and a person must read the reason.
   defp second_line(%{status: :failed, reason: reason}) when not is_nil(reason) do
-    "The player stopped: #{inspect(reason)}"
+    Events.Failed.message(reason)
   end
 
   defp second_line(%{stream_title: stream_title, track: track}) when is_binary(stream_title) do

@@ -6,15 +6,18 @@ defmodule MyHiFi.Event do
   Every message is a struct with named fields, and nothing sends a bare tuple or a
   map.
 
-  There are four topics. `:player` carries what the player does, and
-  `MyHiFi.Event.Player` holds those structs. `:view`, `:input` and `:hint` belong
-  to the device screen and the knob, and they arrive with that work.
+  There are six topics. `:player` carries what the player does, and
+  `MyHiFi.Event.Player` holds those structs. `:source` carries a change to the
+  content of a source, and `MyHiFi.Event.Source` holds those. `:device` carries the
+  state of the hardware that no person changes, and `MyHiFi.Event.Device` holds
+  those. `:view`, `:input` and `:hint` belong to the device screen and the knob, and
+  they arrive with that work.
   """
 
-  @topics [:player, :view, :input, :hint]
+  @topics [:player, :source, :device, :view, :input, :hint]
 
   @typedoc "The topics that a part subscribes to."
-  @type topic :: :player | :view | :input | :hint
+  @type topic :: :player | :source | :device | :view | :input | :hint
 
   @typedoc "Any event of any topic."
   @type t :: struct()
