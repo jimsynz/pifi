@@ -101,6 +101,7 @@ defmodule MyHiFi.MixProject do
       # this firmware needs that option and nothing else would serve.
       {:nbpr_flac, "~> 1.5", organization: "nbpr", targets: @all_targets},
       {:nbpr_vorbis_tools, "~> 1.4", organization: "nbpr", targets: @all_targets},
+      {:nbpr_libvips, "~> 8.18", organization: "nbpr", targets: @all_targets},
       # Dependencies for all targets
       {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.8"},
