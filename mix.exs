@@ -213,7 +213,7 @@ defmodule MyHiFi.MixProject do
       # the README of the system.
       {:nerves_system_myhifi_rpi0_2,
        git: "https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2.git",
-       branch: "main",
+       tag: "v0.1.2",
        runtime: false,
        targets: :myhifi_rpi0_2,
        nerves: [compile: true]},

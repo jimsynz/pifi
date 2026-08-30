@@ -26,12 +26,16 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   `state` decides the whole picture. `:stopped` shows the name of the device,
   because a person who sees nothing else needs to know that the device is awake.
+
+  `artwork_path` is the disk path of a thumbnail image, or `nil` for no artwork.
+  The path must be absolute and allowed by Emerge's runtime paths configuration.
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
           title: String.t() | nil,
           subtitle: String.t() | nil,
           message: String.t() | nil,
+          artwork_path: String.t() | nil,
           live?: boolean(),
           percent: 0..100,
           position_ms: non_neg_integer(),
@@ -50,6 +54,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       title: nil,
       subtitle: nil,
       message: nil,
+      artwork_path: nil,
       live?: false,
       percent: 0,
       position_ms: 0,
@@ -124,8 +129,23 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   # The body takes the space that the status row and the progress bar leave, so the
   # bar sits at the foot of the screen and does not follow a title of one line.
+  # Artwork sits on the left, and the title and subtitle sit on the right.
   defp body(view) do
-    column([width(fill()), height(fill()), spacing(6)], [title(view), subtitle(view)])
+    row([width(fill()), height(fill()), spacing(10)], [
+      artwork(view),
+      column([width(fill()), height(fill()), spacing(6)], [title(view), subtitle(view)])
+    ])
+  end
+
+  # The artwork is a square thumbnail, 120 pixels on each side. A track that holds
+  # no artwork shows nothing in that place, and the text takes the full width.
+  defp artwork(%{artwork_path: nil}), do: none()
+
+  defp artwork(%{artwork_path: path}) do
+    image(
+      [width(px(120)), height(px(120)), Border.rounded(8), image_fit(:cover)],
+      {:path, path}
+    )
   end
 
   # `paragraph/2` wraps, and `el/2` with `text/1` does not. A title of a podcast

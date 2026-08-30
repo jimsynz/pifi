@@ -42,6 +42,7 @@ defmodule MyHiFiWeb.Router do
     live("/settings/network", SettingsLive, :network)
     live("/settings/storage", SettingsLive, :storage)
     get("/artwork/:name", ArtworkController, :show)
+    get("/artwork/:name/thumbnail", ArtworkController, :thumbnail)
   end
 
   if Application.compile_env(:my_hi_fi, :dev_routes) do

@@ -37,6 +37,7 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   @behaviour MyHiFi.Peripheral
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen}
 
@@ -76,6 +77,7 @@ defmodule MyHiFi.Peripheral.PiTft do
         title: title(event.track),
         subtitle: subtitle(event.track),
         message: nil,
+        artwork_path: artwork_disk_path(event.artwork_path),
         live?: event.live?,
         position_ms: event.position_ms,
         duration_ms: duration(event.track)
@@ -87,7 +89,12 @@ defmodule MyHiFi.Peripheral.PiTft do
   end
 
   defp view(%Player.MetadataChanged{} = event, view) do
-    %{view | title: event.title || view.title, subtitle: event.artist || view.subtitle}
+    %{
+      view
+      | title: event.title || view.title,
+        subtitle: event.artist || view.subtitle,
+        artwork_path: artwork_disk_path(event.artwork_path) || view.artwork_path
+    }
   end
 
   defp view(%Player.Buffering{} = event, view),
@@ -112,7 +119,17 @@ defmodule MyHiFi.Peripheral.PiTft do
     pixels =
       state.view
       |> Screen.render()
-      |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+      |> EmergeSkia.render_to_pixels(
+        otp_app: :my_hi_fi,
+        width: width,
+        height: height,
+        assets: [
+          runtime_paths: [
+            enabled: true,
+            allowlist: [MyHiFi.Cache.directory()]
+          ]
+        ]
+      )
       |> Ili9341.to_rgb565()
 
     case Ili9341.write_frame(state.screen, pixels) do
@@ -120,6 +137,19 @@ defmodule MyHiFi.Peripheral.PiTft do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  # The event carries the artwork as a URL path like `/artwork/<hash>`. The screen
+  # needs the disk path of the thumbnail, so this extracts the hash and looks it up.
+  defp artwork_disk_path(nil), do: nil
+
+  defp artwork_disk_path("/artwork/" <> name) do
+    case Artwork.serve_thumbnail(name) do
+      {:ok, path, _content_type} -> path
+      :error -> nil
+    end
+  end
+
+  defp artwork_disk_path(_url), do: nil
 
   # A track holds a title, a subtitle and a duration. A source that gives less is
   # normal, and the screen then shows less.

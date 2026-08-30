@@ -22,6 +22,7 @@ defmodule MyHiFi.Artwork.Worker do
   def perform(%Oban.Job{args: %{"url" => url}}) do
     case Artwork.fetch(url) do
       {:ok, name} ->
+        generate_thumbnail(name)
         Event.publish(:player, %Events.MetadataChanged{artwork_path: "/artwork/#{name}"})
         :ok
 
@@ -44,6 +45,17 @@ defmodule MyHiFi.Artwork.Worker do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp generate_thumbnail(name) do
+    with {:ok, entry} <- MyHiFi.Cache.fetch("artwork", name) do
+      case Artwork.generate_thumbnail(entry) do
+        {:ok, _variant} -> :ok
+        {:error, :unsupported_format} -> :ok
+        {:error, :vipsthumbnail_not_found} -> :ok
+        {:error, reason} -> Logger.warning("Thumbnail generation failed: #{inspect(reason)}")
+      end
     end
   end
 

@@ -211,7 +211,7 @@ defmodule MyHiFiWeb.PlayerLive do
               :if={@artwork_path}
               id="artwork"
               phx-hook="Accent"
-              src={@artwork_path}
+              src={thumbnail_url(@artwork_path)}
               alt=""
               class="size-full object-cover"
             />
@@ -493,4 +493,6 @@ defmodule MyHiFiWeb.PlayerLive do
 
     "#{String.pad_leading(to_string(minutes), 2, "0")}:#{String.pad_leading(to_string(rem(seconds, 60)), 2, "0")}"
   end
+
+  defp thumbnail_url(path) when is_binary(path), do: "#{path}/thumbnail"
 end

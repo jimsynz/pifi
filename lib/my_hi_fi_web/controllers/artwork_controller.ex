@@ -42,4 +42,24 @@ defmodule MyHiFiWeb.ArtworkController do
   # name that holds a hash only, and each type is an image that holds no script.
   @sobelow_skip ["Traversal.SendFile"]
   defp send_artwork(conn, path), do: send_file(conn, 200, path)
+
+  @doc """
+  Serves a thumbnail of one artwork entry.
+
+  The name comes from a request, and `MyHiFi.Artwork.serve_thumbnail/1` gives a
+  path for a name that holds a hash only. Any other name gives 404.
+  """
+  @sobelow_skip ["XSS.ContentType"]
+  def thumbnail(conn, %{"name" => name}) do
+    case Artwork.serve_thumbnail(name) do
+      {:ok, path, type} ->
+        conn
+        |> put_resp_content_type(type, nil)
+        |> put_resp_header("cache-control", "public, max-age=#{@one_week}, immutable")
+        |> send_artwork(path)
+
+      :error ->
+        send_resp(conn, 404, "")
+    end
+  end
 end
