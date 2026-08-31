@@ -39,10 +39,36 @@ defmodule MyHiFi.Peripheral do
 
   A peripheral publishes with `MyHiFi.Event.publish/2`, from its own process. That
   needs no callback.
+
+  ## Which peripherals run
+
+  Two answers make one. `all/0` names the peripherals that this firmware knows, and
+  it comes from the configuration. `enabled?/1` says whether the part is wired to
+  this board, and it comes from the settings, because a person answers it.
+
+  **A firmware cannot know what a board holds.** The same image runs on a board with
+  a screen and on a board with none, and a bus with nothing on it gives an error at
+  each start. A peripheral is therefore out of use until a person says otherwise, and
+  the settings page is where they say it.
+
+  `MyHiFi.Peripheral.Supervisor` holds the processes, and `start/1` and `stop/1` move
+  one in and out of it. A change therefore reaches the hardware at once, and it also
+  survives a restart.
   """
+
+  require Logger
+
+  alias MyHiFi.Settings
 
   @typedoc "What one peripheral holds between events. The module chooses the shape."
   @type state :: term()
+
+  @doc """
+  The name of this peripheral, for a person to read.
+
+  The settings page draws this, and it holds no list of the peripherals.
+  """
+  @callback title() :: String.t()
 
   @doc """
   Take hold of the hardware.
@@ -67,23 +93,176 @@ defmodule MyHiFi.Peripheral do
   @callback terminate(reason :: term(), state()) :: :ok
 
   @doc """
-  The peripherals that this device holds, as children for a supervisor.
+  The peripherals that this device can hold.
 
   `config/target.exs` names them, in the way that `:output` and `:sources` name
-  theirs. A device with no screen and no knob names none, and a person who adds an
-  SSD1306 screen adds a line there and changes nothing else.
+  theirs. Each entry holds the module and the options that reach `c:init/1`.
 
       config :my_hi_fi, peripherals: [{MyHiFi.Peripheral.PiTft, rotation: :landscape}]
 
-  The identifier of each child is the module of the peripheral, so one supervisor
-  holds a screen and a knob together.
+  A name here says that the firmware knows the part. It does not say that the part
+  is wired to this board. `enabled?/1` says that, and a person answers it.
   """
-  @spec child_specs() :: [Supervisor.child_spec()]
-  def child_specs do
-    :my_hi_fi
-    |> Application.get_env(:peripherals, [])
-    |> Enum.map(fn {module, opts} ->
-      Supervisor.child_spec({MyHiFi.Peripheral.Server, [{:module, module} | opts]}, id: module)
+  @spec all() :: [{module(), keyword()}]
+  def all, do: Application.get_env(:my_hi_fi, :peripherals, [])
+
+  @doc """
+  Put a peripheral in use, or take it out of use.
+
+  This writes the setting and it starts or stops the process, so a person sees a
+  screen light up and go dark without a restart.
+
+  A start that fails still leaves the setting as the person asked for it. A person
+  who turns the screen on and then wires it expects it to come up on the next boot.
+  """
+  @spec enable(module(), boolean()) :: :ok | {:error, term()}
+  def enable(module, true) do
+    Settings.put!(enabled_key(module), "true")
+
+    start(module)
+  end
+
+  def enable(module, false) do
+    Settings.put!(enabled_key(module), "false")
+
+    stop(module)
+  end
+
+  @doc """
+  The settings key that says whether a peripheral is in use.
+
+      iex> MyHiFi.Peripheral.enabled_key(MyHiFi.Peripheral.PiTft)
+      "peripheral.pi-tft.enabled"
+  """
+  @spec enabled_key(module()) :: String.t()
+  def enabled_key(module), do: "peripheral." <> slug(module) <> ".enabled"
+
+  @doc """
+  Whether a person put this peripheral in use.
+
+  A peripheral that no person changed is **out of use**, and this is the opposite of
+  `MyHiFi.Source.enabled?/1`. The hardware is the reason. A source that no person
+  asked for reads a service and shows a list, and it costs nothing. A screen that no
+  person wired cannot answer, and a firmware that opens a bus with nothing on it
+  holds a fault at each start. A person therefore says that the part is there.
+  """
+  @spec enabled?(module()) :: boolean()
+  def enabled?(module) do
+    case Settings.fetch(enabled_key(module)) do
+      {:ok, %{value: "true"}} -> true
+      _other -> false
+    end
+  end
+
+  @doc """
+  Read a peripheral back from its name.
+
+  The name comes from a request, so this compares it with the name of each
+  peripheral of `all/0`. It turns no text into an atom, and an unknown name gives an
+  error. See `MyHiFi.Source.from_slug/1`, which does the same for a source.
+  """
+  @spec from_slug(String.t()) :: {:ok, module()} | {:error, :not_a_peripheral}
+  def from_slug(name) do
+    case Enum.find(all(), fn {module, _options} -> slug(module) == name end) do
+      nil -> {:error, :not_a_peripheral}
+      {module, _options} -> {:ok, module}
+    end
+  end
+
+  @doc """
+  Whether this peripheral holds its hardware now.
+
+  A peripheral that a person put in use and that did not start gives `false`, so a
+  settings page can say the difference.
+  """
+  @spec running?(module()) :: boolean()
+  def running?(module) do
+    __MODULE__.Supervisor
+    |> Supervisor.which_children()
+    |> Enum.any?(fn {id, pid, _type, _modules} -> id == module and is_pid(pid) end)
+  end
+
+  @doc """
+  The name of a peripheral in an address and in a settings key.
+
+      iex> MyHiFi.Peripheral.slug(MyHiFi.Peripheral.PiTft)
+      "pi-tft"
+  """
+  @spec slug(module()) :: String.t()
+  def slug(module) do
+    module
+    |> Module.split()
+    |> List.last()
+    |> Macro.underscore()
+    |> String.replace("_", "-")
+  end
+
+  @doc """
+  Start one peripheral now.
+
+  It gives `{:error, reason}` for hardware that does not answer, and a settings page
+  shows that sentence to the person who asked. See `MyHiFi.Peripheral.Server`.
+  """
+  @spec start(module()) :: :ok | {:error, term()}
+  def start(module) do
+    case Supervisor.start_child(__MODULE__.Supervisor, spec(module)) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, error} -> {:error, reason(error)}
+    end
+  end
+
+  @doc """
+  Start each peripheral that a person put in use.
+
+  `MyHiFi.Application` calls this after the supervision tree starts, and it is not
+  the child list of `MyHiFi.Peripheral.Supervisor`. A child that fails to start stops
+  the whole start of a supervisor, and a screen that no person wired must never keep
+  the music from playing.
+  """
+  @spec start_enabled() :: :ok
+  def start_enabled do
+    Enum.each(all(), fn {module, _options} ->
+      if enabled?(module), do: report(module, start(module))
     end)
+  end
+
+  @doc """
+  Stop one peripheral now.
+
+  `c:terminate/2` runs, so a screen turns its backlight off before the process goes.
+  """
+  @spec stop(module()) :: :ok
+  def stop(module) do
+    Supervisor.terminate_child(__MODULE__.Supervisor, module)
+    Supervisor.delete_child(__MODULE__.Supervisor, module)
+
+    :ok
+  end
+
+  # The options of `all/0` reach `c:init/1`, and the identifier of the child is the
+  # module, so one supervisor holds a screen and a knob together.
+  defp spec(module) do
+    Supervisor.child_spec({__MODULE__.Server, [{:module, module} | options(module)]}, id: module)
+  end
+
+  # A supervisor of OTP puts its own record of the child beside the reason of a start
+  # that failed, and `:child` is the tag of that record. A person reads the reason, and
+  # the record means nothing to them.
+  defp reason({reason, child}) when is_tuple(child) and elem(child, 0) == :child, do: reason
+
+  defp reason(error), do: error
+
+  defp options(module) do
+    case List.keyfind(all(), module, 0) do
+      {^module, options} -> options
+      nil -> []
+    end
+  end
+
+  defp report(_module, :ok), do: :ok
+
+  defp report(module, {:error, reason}) do
+    Logger.error("#{module.title()} did not start: #{inspect(reason)}")
   end
 end

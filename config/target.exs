@@ -29,8 +29,10 @@ config :nerves_runtime, startup_guard_enabled: true
 # one small package, and `nerves_system_myhifi_rpi0_2` holds it for this reason.
 config :emerge, compiled_backends: [:wayland]
 
-# The hardware that a person sees and touches. A device with no screen and no knob
-# names none. See `MyHiFi.Peripheral.child_specs/0`.
+# The hardware that a person sees and touches, and that this firmware knows how to
+# drive. A name here does not start anything: the same image runs on a board with a
+# screen and on a board with none, so each peripheral is out of use until a person
+# names it on the settings page. See `MyHiFi.Peripheral`.
 config :my_hi_fi, peripherals: [{MyHiFi.Peripheral.PiTft, []}]
 
 # Erlinit can be configured without a rootfs_overlay. See

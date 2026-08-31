@@ -10,6 +10,7 @@ defmodule MyHiFiWeb.SettingsLive do
       /settings/output                 the sound card
       /settings/sources                the sources, and which ones are in use
       /settings/sources/internet-radio one source
+      /settings/peripherals            the screens and the controls of the board
       /settings/network                a report
       /settings/storage                a report
 
@@ -21,6 +22,12 @@ defmodule MyHiFiWeb.SettingsLive do
 
   The page never sends the secret of an index back to a browser. A source marks
   such a field `write_only?`, and it then gives no value for it.
+
+  It holds no knowledge of any peripheral either. A peripheral names itself with
+  `c:MyHiFi.Peripheral.title/0`, and this page draws that name and one control. A
+  peripheral is out of use until a person says that the part is wired, because the same
+  image runs on a board with a screen and on a board with none. See
+  `MyHiFi.Peripheral`.
 
   The network state and the storage state are reports, and a person changes neither
   one here. The Wi-Fi details belong to the setup wizard. See `MyHiFi.Setup`.
@@ -40,6 +47,7 @@ defmodule MyHiFiWeb.SettingsLive do
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: Events
   alias MyHiFi.Hardware
+  alias MyHiFi.Peripheral
   alias MyHiFi.Source
 
   @impl Phoenix.LiveView
@@ -93,6 +101,27 @@ defmodule MyHiFiWeb.SettingsLive do
     else
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+    end
+  end
+
+  # A peripheral that a person turns on opens a bus, and a bus with nothing on it gives
+  # an error. That error is the answer to the question that they asked, so it reaches
+  # the page and not the log alone. The setting stays as they asked either way, so a
+  # screen that they wire afterwards comes up on the next boot.
+  @impl Phoenix.LiveView
+  def handle_event("enable_peripheral", %{"slug" => slug, "enabled" => enabled}, socket) do
+    with {:ok, module} <- Peripheral.from_slug(slug),
+         :ok <- Peripheral.enable(module, enabled == "true") do
+      {:noreply, socket |> put_flash(:info, peripheral_in_use(module)) |> refresh()}
+    else
+      {:error, :not_a_peripheral} ->
+        {:noreply, push_navigate(socket, to: ~p"/settings/peripherals")}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "That did not start: #{inspect(reason)}")
+         |> refresh()}
     end
   end
 
@@ -153,6 +182,15 @@ defmodule MyHiFiWeb.SettingsLive do
 
       <.row id="sources-row" to={~p"/settings/sources"} icon="hero-queue-list" title="Sources">
         {sources_summary(@source_list)}
+      </.row>
+
+      <.row
+        id="peripherals-row"
+        to={~p"/settings/peripherals"}
+        icon="hero-cpu-chip"
+        title="Peripherals"
+      >
+        {peripherals_summary(@peripheral_list)}
       </.row>
 
       <.row id="network-row" to={~p"/settings/network"} icon="hero-wifi" title="Network">
@@ -342,6 +380,59 @@ defmodule MyHiFiWeb.SettingsLive do
           <p :if={action.description} class="mt-1 text-sm text-ink-dim">{action.description}</p>
         </div>
       </div>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
+  def render(%{live_action: :peripherals} = assigns) do
+    ~H"""
+    <.section id="settings-peripherals" title="Peripherals" back={~p"/settings"}>
+      <p class="mb-3 text-sm text-ink-dim">
+        This firmware runs on a board with a screen and on a board with none, so it
+        cannot know what yours holds. Name the parts that you wired.
+      </p>
+
+      <p :if={@peripheral_list == []} id="no-peripherals" class="text-sm text-ink-dim">
+        This firmware knows no peripheral.
+      </p>
+
+      <ul class="divide-y divide-edge">
+        <li
+          :for={peripheral <- @peripheral_list}
+          id={"peripheral-row-#{peripheral.slug}"}
+          class="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
+        >
+          <.icon
+            name="hero-cpu-chip"
+            class={[
+              "size-5 shrink-0",
+              if(peripheral.running?, do: "text-accent", else: "text-ink-faint")
+            ]}
+          />
+
+          <span class="min-w-0 grow">
+            <span class="block truncate text-ink">{peripheral.title}</span>
+            <span class="block truncate text-xs text-ink-faint">
+              {peripheral_state(peripheral)}
+            </span>
+          </span>
+
+          <button
+            type="button"
+            id={"enable-peripheral-#{peripheral.slug}"}
+            phx-click="enable_peripheral"
+            phx-value-slug={peripheral.slug}
+            phx-value-enabled={to_string(not peripheral.enabled?)}
+            class={[
+              "control shrink-0 rounded-lg px-3 py-1.5 text-xs",
+              peripheral.enabled? && "control-on"
+            ]}
+          >
+            {if peripheral.enabled?, do: "Take out of use", else: "Put in use"}
+          </button>
+        </li>
+      </ul>
     </.section>
     """
   end
@@ -556,6 +647,7 @@ defmodule MyHiFiWeb.SettingsLive do
     |> assign(:interfaces, Device.network!())
     |> assign(:storage, Device.storage!())
     |> assign(:source_list, source_list())
+    |> assign(:peripheral_list, peripheral_list())
   end
 
   # `:sources` belongs to `MyHiFiWeb.Shell`, and the top row of the faceplate draws
@@ -571,6 +663,37 @@ defmodule MyHiFiWeb.SettingsLive do
         enabled?: Source.enabled?(module)
       }
     end)
+  end
+
+  # `enabled?` is what a person asked for, and `running?` is what the hardware gave.
+  # The two are different when a person turns a screen on and the screen is not wired,
+  # and a page that showed one of them would tell them the wrong thing.
+  defp peripheral_list do
+    Enum.map(Peripheral.all(), fn {module, _options} ->
+      %{
+        module: module,
+        title: module.title(),
+        slug: Peripheral.slug(module),
+        enabled?: Peripheral.enabled?(module),
+        running?: Peripheral.running?(module)
+      }
+    end)
+  end
+
+  defp peripheral_state(%{enabled?: false}), do: "Out of use"
+  defp peripheral_state(%{running?: true}), do: "In use"
+  defp peripheral_state(_peripheral), do: "In use, and it did not start"
+
+  defp peripheral_in_use(module) do
+    if Peripheral.enabled?(module),
+      do: "#{module.title()} is in use.",
+      else: "#{module.title()} is out of use."
+  end
+
+  defp peripherals_summary([]), do: "This firmware knows none"
+
+  defp peripherals_summary(peripherals) do
+    "#{Enum.count(peripherals, & &1.running?)} of #{length(peripherals)} running"
   end
 
   defp in_use(module) do

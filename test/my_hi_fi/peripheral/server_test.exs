@@ -13,6 +13,9 @@ defmodule MyHiFi.Peripheral.ServerTest do
     @behaviour MyHiFi.Peripheral
 
     @impl MyHiFi.Peripheral
+    def title, do: "Recorder"
+
+    @impl MyHiFi.Peripheral
     def init(opts) do
       case Keyword.fetch!(opts, :report_to) do
         {:fail, reason} -> {:error, reason}

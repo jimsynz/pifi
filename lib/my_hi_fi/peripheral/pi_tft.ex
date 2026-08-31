@@ -41,6 +41,10 @@ defmodule MyHiFi.Peripheral.PiTft do
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen}
 
+  @doc "The name that the settings page draws."
+  @impl MyHiFi.Peripheral
+  def title, do: "PiTFT 2.8 inch screen"
+
   @doc """
   Take hold of the screen and draw the first frame.
 

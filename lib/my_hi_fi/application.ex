@@ -32,13 +32,21 @@ defmodule MyHiFi.Application do
         {Registry, keys: :unique, name: Download.Registry},
         {DynamicSupervisor, strategy: :one_for_one, name: Download.Supervisor},
         MyHiFi.Player,
+        MyHiFi.Peripheral.Supervisor,
         MyHiFiWeb.Endpoint
       ] ++ target_children()
 
     # `MyHiFi.Radio.FirstSync` comes after Oban, because it puts a job in the
     # queue.
 
-    Supervisor.start_link(children, supervisor_options())
+    with {:ok, supervisor} <- Supervisor.start_link(children, supervisor_options()) do
+      # This comes after the tree and not inside it. A peripheral opens a bus, and a
+      # bus with nothing on it gives an error, so one screen that no person wired
+      # would stop the start of the whole firmware. See `MyHiFi.Peripheral`.
+      MyHiFi.Peripheral.start_enabled()
+
+      {:ok, supervisor}
+    end
   end
 
   # `MyHiFi.Playback.Queue` is on ETS, and the data layer makes the table when
@@ -108,15 +116,12 @@ defmodule MyHiFi.Application do
         MyHiFi.Radio.FirstSync,
         # The reports of the settings page arrive on the `:device` topic, and no page
         # asks for them on an interval. See `MyHiFi.Device.Monitor`.
-        MyHiFi.Device.Monitor
-      ] ++
-        MyHiFi.Peripheral.child_specs() ++
-        [
-          # An upgrade formats the boot partition, so the boot configuration of a person
-          # is gone and this writes it again. It comes last, because it restarts the
-          # device when it writes. See `MyHiFi.Hardware`.
-          MyHiFi.Hardware
-        ]
+        MyHiFi.Device.Monitor,
+        # An upgrade formats the boot partition, so the boot configuration of a person
+        # is gone and this writes it again. It comes last, because it restarts the
+        # device when it writes. See `MyHiFi.Hardware`.
+        MyHiFi.Hardware
+      ]
     end
   end
 end

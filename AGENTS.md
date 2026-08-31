@@ -107,6 +107,14 @@ Licence: Apache-2.0.
   send pixels or frames to a screen. Send it typed events. A 128 by 64
   monochrome screen and a 320 by 240 colour screen need different layouts, and
   each one decides its own.
+- **A peripheral is out of use until a person says that the part is wired.** The
+  same image runs on a board with a screen and on a board with none, and a bus
+  with nothing on it gives an error at each start. `config/target.exs` names what
+  this firmware knows, and `MyHiFi.Peripheral.enabled?/1` reads the settings for
+  what the board holds. This is the opposite of `MyHiFi.Source.enabled?/1`, and
+  the hardware is the reason. `MyHiFi.Peripheral.Supervisor` starts with no child,
+  because a child that fails to start stops the start of a whole supervisor and a
+  screen must never keep the music from playing.
 - **Screens and controls share one behaviour.** Do not split them. On the PiTFT
   the ILI9341 screen and the STMPE610 touch controller share SPI0, so one process
   must own the bus. `MyHiFi.Peripheral.PiTft` draws and publishes touch events.

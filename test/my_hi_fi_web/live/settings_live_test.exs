@@ -8,6 +8,8 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   alias MyHiFi.Radio.Sync.FromRemote
   alias MyHiFi.Settings
   alias MyHiFi.Source
+  alias MyHiFi.Peripheral
+  alias MyHiFi.Test.Lamp
   alias MyHiFi.Test.NoCardOutput
   alias MyHiFi.Test.Stations
   alias MyHiFi.Test.TwoCardOutput
@@ -28,6 +30,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
             MyHiFi.Player.output_device_key(),
             Index.key_setting(),
             Index.secret_setting(),
+            Peripheral.enabled_key(Lamp),
             Source.enabled_key(Source.InternetRadio),
             Source.enabled_key(Source.Podcasts)
           ] do
@@ -48,6 +51,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       assert html =~ "Settings"
       assert has_element?(view, "#output-row")
       assert has_element?(view, "#sources-row")
+      assert has_element?(view, "#peripherals-row")
       assert has_element?(view, "#network-row")
       assert has_element?(view, "#storage-row")
     end
@@ -155,6 +159,83 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       assert has_element?(view, "#absent-output")
       # The player uses the first card that is present, and the page marks that one.
       assert has_element?(view, "#selected-0")
+    end
+  end
+
+  describe "the peripheral list" do
+    setup do
+      Application.put_env(:my_hi_fi, :peripherals, [{Lamp, report_to: self()}])
+
+      on_exit(fn ->
+        Peripheral.stop(Lamp)
+        Application.delete_env(:my_hi_fi, :peripherals)
+      end)
+
+      :ok
+    end
+
+    test "a firmware that knows no peripheral says so", %{conn: conn} do
+      Application.delete_env(:my_hi_fi, :peripherals)
+
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
+
+      assert has_element?(view, "#no-peripherals")
+    end
+
+    test "each peripheral is out of use until a person says otherwise", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/peripherals")
+
+      assert has_element?(view, "#peripheral-row-lamp")
+      assert html =~ "Out of use"
+    end
+
+    test "a person puts one in use, and it starts", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
+
+      html = view |> element("#enable-peripheral-lamp") |> render_click()
+
+      assert html =~ "Lamp is in use."
+      assert Peripheral.running?(Lamp)
+    end
+
+    test "a person takes one out of use, and it stops", %{conn: conn} do
+      :ok = Peripheral.enable(Lamp, true)
+
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
+      html = view |> element("#enable-peripheral-lamp") |> render_click()
+
+      assert html =~ "Lamp is out of use."
+      assert_receive {:lamp_terminated, :shutdown}
+      refute Peripheral.running?(Lamp)
+    end
+
+    test "hardware that does not answer says why", %{conn: conn} do
+      Application.put_env(:my_hi_fi, :peripherals, [{Lamp, fault: :no_such_device}])
+
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
+      html = view |> element("#enable-peripheral-lamp") |> render_click()
+
+      assert html =~ "That did not start: :no_such_device"
+      assert html =~ "In use, and it did not start"
+    end
+
+    test "the menu says how many run", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/settings")
+      assert html =~ "0 of 1 running"
+
+      :ok = Peripheral.enable(Lamp, true)
+
+      {:ok, _view, html} = live(conn, ~p"/settings")
+      assert html =~ "1 of 1 running"
+    end
+
+    test "the choice is still there for the next visit", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
+      view |> element("#enable-peripheral-lamp") |> render_click()
+
+      {:ok, _view, html} = live(conn, ~p"/settings/peripherals")
+
+      assert html =~ "In use"
     end
   end
 
