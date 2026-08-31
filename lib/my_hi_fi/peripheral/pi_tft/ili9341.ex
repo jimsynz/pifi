@@ -25,7 +25,8 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   `@init_sequence` is the sequence of the Adafruit driver, and most of it sets the
   power and the gamma of the panel. **No part of it is measured on this board.**
   The panel of a clone may need other values, and a wrong gamma shows as a colour
-  that is not the colour that Emerge drew. See section 9 of `docs/pitft-plan.md`.
+  that is not the colour that Emerge drew. A clone may also hold a controller that
+  is not an ILI9341, so read the parts of the board before you change a value here.
   """
 
   import Bitwise, only: [|||: 2]

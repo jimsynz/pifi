@@ -140,8 +140,8 @@ defmodule MyHiFi.MixProject do
       # screen over SPI.
       #
       # `config/target.exs` names the backend, because `EmergeSkia.BuildConfig`
-      # sees `MIX_TARGET` and chooses the DRM one by itself. See section 3 of
-      # `docs/pitft-plan.md` for why the choice is what it is.
+      # sees `MIX_TARGET` and chooses the DRM one by itself, and it holds the reason
+      # that the choice is what it is.
       {:emerge, "~> 0.3"},
       {:membrane_aac_fdk_plugin, "~> 0.18"},
       {:membrane_aac_plugin, "~> 0.19"},
