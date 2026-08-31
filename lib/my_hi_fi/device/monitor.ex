@@ -33,9 +33,16 @@ if Mix.target() != :host do
     A sync of the station artwork writes many files in a moment, and each one is a
     notification. One read for each of them would run `df` hundreds of times, so a
     notification asks for one read a moment later and the ones behind it join that read.
+
+    This process also starts ntpd again when a connection reaches the internet. It holds
+    the network events already, and a second subscriber of the same property would do
+    that work twice. The comment on `restart_ntpd/3` holds the fault of busybox ntpd
+    that makes this necessary.
     """
 
     use GenServer
+
+    require Logger
 
     alias MyHiFi.Device
     alias MyHiFi.Event
@@ -72,7 +79,9 @@ if Mix.target() != :host do
     end
 
     @impl GenServer
-    def handle_info({VintageNet, _property, _old, _new, _metadata}, state) do
+    def handle_info({VintageNet, property, old, new, _metadata}, state) do
+      restart_ntpd(property, old, new)
+
       {:noreply, publish(state, :network, network(), &%Events.NetworkChanged{interfaces: &1})}
     end
 
@@ -115,6 +124,28 @@ if Mix.target() != :host do
         Map.put(state, key, report)
       end
     end
+
+    # `NervesTime` starts ntpd 10 ms after the boot, and Wi-Fi associates later than
+    # that. busybox ntpd reads the address of each pool server one time, at its start,
+    # so a start with no DNS leaves the daemon with no server. It then runs and sets no
+    # clock, and the board holds 1970 until something starts the daemon again.
+    #
+    # A connection that reaches `:internet` is the first moment that a read of an
+    # address can succeed, so the daemon starts again there. A clock that is already
+    # right needs nothing. The Podcast Index refuses a request from a board whose clock
+    # is not right, so this is what makes a podcast work on a cold start. See
+    # `MyHiFi.Podcast.Index`.
+    defp restart_ntpd(["interface", _name, "connection"], old, :internet) when old != :internet do
+      if NervesTime.synchronized?() do
+        :ok
+      else
+        Logger.info("The network reached the internet, and the clock is not right yet.")
+
+        NervesTime.restart_ntpd()
+      end
+    end
+
+    defp restart_ntpd(_property, _old, _new), do: :ok
 
     defp network, do: Device.network!()
 
