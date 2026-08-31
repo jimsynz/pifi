@@ -97,6 +97,44 @@ defmodule MyHiFi.Peripheral.ServerTest do
     assert_receive {:EXIT, ^pid, :bus_gone}
   end
 
+  describe "a message that is not an event" do
+    test "a port that ends keeps the peripheral running" do
+      pid = start_peripheral()
+
+      send(pid, {:EXIT, self(), :normal})
+
+      assert Process.alive?(pid)
+      assert_saw_an_event(pid)
+    end
+
+    test "a link that ends badly keeps the peripheral running" do
+      pid = start_peripheral()
+
+      send(pid, {:EXIT, self(), :bus_gone})
+
+      assert Process.alive?(pid)
+      assert_saw_an_event(pid)
+    end
+
+    test "anything else keeps the peripheral running" do
+      pid = start_peripheral()
+
+      send(pid, {:tcp_closed, make_ref()})
+      send(pid, :hello)
+
+      assert Process.alive?(pid)
+      assert_saw_an_event(pid)
+    end
+  end
+
+  # A peripheral that still answers an event is one that the message did not break.
+  defp assert_saw_an_event(pid) do
+    Event.publish(:player, %Player.Paused{position_ms: 7})
+
+    assert_receive {:peripheral_saw, %Player.Paused{position_ms: 7}}
+    assert Process.alive?(pid)
+  end
+
   # `start_supervised!` and not `start_link`, because a peripheral registers under the
   # name of its module. A linked process dies when the test does, and it deregisters
   # after that, so the next test would race with it for the name.

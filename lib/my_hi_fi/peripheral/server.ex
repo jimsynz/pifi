@@ -25,6 +25,14 @@ defmodule MyHiFi.Peripheral.Server do
   An event that gives `{:error, reason}` stops the process. The hardware is what
   fails there, and a restart takes hold of it again. A peripheral that wants to
   continue gives `{:ok, state}`, which is what an event that it cannot use gives.
+
+  ## What else arrives
+
+  Trapping exits also brings the end of every linked port and process here, and a
+  peripheral holds hardware that opens both. None of that stops this process. The
+  hardware speaks through the callbacks: a bus that is gone gives `{:error, reason}`
+  on the next event, and the log then names the event that failed. An exit message
+  says much less than that, and a screen must never stop the music.
   """
 
   use GenServer
@@ -57,8 +65,25 @@ defmodule MyHiFi.Peripheral.Server do
     end
   end
 
+  # The process traps exits, so the end of every linked port and process arrives here.
+  # `gen_server` answers the exit of the parent itself, so what reaches this clause
+  # belongs to the peripheral. The first start of the PiTFT on the board ended a port
+  # with `:normal`, and a clause that read events alone stopped the screen for it.
   @doc false
   @impl GenServer
+  def handle_info({:EXIT, _from, :normal}, server), do: {:noreply, server}
+
+  # An exit that is not normal does not stop this process either. The hardware speaks
+  # through the callbacks of the peripheral, and the next draw gives `{:error, reason}`
+  # for a bus that is gone. That is what stops it, and the log then names the event.
+  # A screen must never stop the music, and an exit that this cannot read is a poor
+  # reason to take a process down.
+  def handle_info({:EXIT, from, reason}, %{module: module} = server) do
+    Logger.warning("#{inspect(module)} lost #{inspect(from)}: #{inspect(reason)}")
+
+    {:noreply, server}
+  end
+
   def handle_info(%_{} = event, %{module: module} = server) do
     case module.handle_event(event, server.state) do
       {:ok, state} ->
@@ -71,6 +96,14 @@ defmodule MyHiFi.Peripheral.Server do
 
         {:stop, reason, server}
     end
+  end
+
+  # Every event of this firmware is a struct, so a message of another shape belongs to
+  # something that the peripheral used and not to a topic. See `MyHiFi.Event`.
+  def handle_info(message, %{module: module} = server) do
+    Logger.debug("#{inspect(module)} read no event in #{inspect(message)}")
+
+    {:noreply, server}
   end
 
   @doc false
