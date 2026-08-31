@@ -37,13 +37,25 @@ defmodule MyHiFi.Test.RecordingScreen do
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(_opts), do: Agent.start_link(fn -> [] end, name: __MODULE__)
 
+  @typedoc "One thing that the driver did."
+  @type entry :: {:spi, binary()} | {:gpio, 0 | 1} | {:backlight, 0 | 1}
+
   @doc "Write one entry down. The backends call this."
-  @spec record({:spi, binary()} | {:gpio, 0 | 1}) :: :ok
+  @spec record(entry()) :: :ok
   def record(entry), do: Agent.update(__MODULE__, &[entry | &1])
 
   @doc "Everything that happened, in order."
-  @spec entries() :: [{:spi, binary()} | {:gpio, 0 | 1}]
+  @spec entries() :: [entry()]
   def entries, do: __MODULE__ |> Agent.get(& &1) |> Enum.reverse()
+
+  @doc """
+  The levels that the backlight line was given, in order.
+
+  1 is on and 0 is off. A board that wires the backlight to a supply gives none of
+  these. See `MyHiFi.Peripheral.PiTft.Ili9341.backlight/2`.
+  """
+  @spec backlight() :: [0 | 1]
+  def backlight, do: for({:backlight, level} <- entries(), do: level)
 
   @doc "Forget everything, so a test reads one draw and not the init sequence too."
   @spec forget() :: :ok
@@ -66,6 +78,9 @@ defmodule MyHiFi.Test.RecordingScreen do
     |> flush()
     |> Enum.reverse()
   end
+
+  # The backlight says nothing about the bus, so it ends no command and opens none.
+  defp fold({:backlight, _level}, state), do: state
 
   # The line goes low for a command, so a low level ends the command before it.
   defp fold({:gpio, 0}, state), do: {:awaiting_command, flush(state)}
@@ -164,11 +179,13 @@ defmodule MyHiFi.Test.RecordingScreen do
     defimpl Circuits.GPIO.Handle do
       alias MyHiFi.Test.RecordingScreen
 
-      # The backlight is a GPIO as well, and it says nothing about the bus, so only
-      # the data or command line goes in the record.
+      # The backlight is a GPIO as well, and it says nothing about the bus, so it goes
+      # in the record under a name of its own and `commands/0` passes it by.
       @data_command 25
+      @backlight 18
 
       def write(%{spec: @data_command}, value), do: RecordingScreen.record({:gpio, value})
+      def write(%{spec: @backlight}, value), do: RecordingScreen.record({:backlight, value})
       def write(_handle, _value), do: :ok
 
       def read(_handle), do: 0

@@ -4,11 +4,11 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: Events
+  alias MyHiFi.Peripheral
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Radio.Sync.FromRemote
   alias MyHiFi.Settings
   alias MyHiFi.Source
-  alias MyHiFi.Peripheral
   alias MyHiFi.Test.Lamp
   alias MyHiFi.Test.NoCardOutput
   alias MyHiFi.Test.Stations

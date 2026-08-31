@@ -38,7 +38,9 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   @height 240
 
   @software_reset 0x01
+  @sleep_in 0x10
   @sleep_out 0x11
+  @display_off 0x28
   @display_on 0x29
   @column_address_set 0x2A
   @page_address_set 0x2B
@@ -152,6 +154,32 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   @spec backlight(t(), boolean()) :: :ok
   def backlight(%{backlight: nil}, _on?), do: :ok
   def backlight(screen, on?), do: GPIO.write(screen.backlight, if(on?, do: 1, else: 0))
+
+  @doc """
+  Wake the panel, or put it to sleep.
+
+  A panel that sleeps draws nothing and holds no frame, and it needs 120 ms to wake.
+  `MyHiFi.Peripheral.PiTft` does this for standby, because a screen that stayed lit
+  would tell a person that the device is awake.
+
+  **The backlight is not part of this, and the order is the reason.** A caller wakes
+  the panel, draws a frame, and turns the backlight on after that, so a person never
+  sees the frame that the panel held before. Going the other way it turns the
+  backlight off first. See `backlight/2`.
+  """
+  @spec display(t(), boolean()) :: :ok | {:error, term()}
+  def display(screen, true) do
+    with :ok <- command(screen, @sleep_out),
+         :ok <- sleep(@sleep_out_delay_ms) do
+      command(screen, @display_on)
+    end
+  end
+
+  def display(screen, false) do
+    with :ok <- command(screen, @display_off) do
+      command(screen, @sleep_in)
+    end
+  end
 
   @doc """
   Turn RGBA into RGB565, with the high byte first.

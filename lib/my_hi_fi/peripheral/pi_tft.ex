@@ -24,6 +24,22 @@ defmodule MyHiFi.Peripheral.PiTft do
   and holds no list. It publishes nothing, because the STMPE610 touch controller
   needs the second chip select line of this bus and that work comes next.
 
+  ## Standby
+
+  A screen that stayed lit would tell a person that the device is awake. Standby
+  therefore turns the backlight off and puts the panel to sleep, and leaving standby
+  wakes the panel, draws the view, and turns the backlight on. The order matters: a
+  backlight that came on before the draw would show the frame that the panel held
+  before.
+
+  **Standby holds the view, and it does not clear it.** A person who paused a track
+  and then pressed standby gets no event on the way back, because the player leaves
+  that track paused. A view that this cleared would show the name of the device and
+  not the track that waits.
+
+  A panel that sleeps draws nothing, so an event that arrives in standby moves the
+  view and writes no byte to the bus.
+
   ## Why it drops events
 
   `Player.Progress` arrives one time each second, and a frame takes the time to draw
@@ -40,6 +56,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   alias MyHiFi.Artwork
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen}
+  alias MyHiFi.Playback
 
   @doc "The name that the settings page draws."
   @impl MyHiFi.Peripheral
@@ -53,8 +70,16 @@ defmodule MyHiFi.Peripheral.PiTft do
   @impl MyHiFi.Peripheral
   def init(opts) do
     with {:ok, screen} <- Ili9341.open(opts) do
-      draw(%{screen: screen, view: Screen.new()})
+      first_frame(%{screen: screen, view: Screen.new(), awake?: true})
     end
+  end
+
+  # A person can turn the screen on while the device is in standby, and a device that
+  # lost its power in standby comes back in standby. The player holds that state and it
+  # publishes no event for a state that did not change, so this asks one time. A page
+  # does the same when a person opens it.
+  defp first_frame(state) do
+    if Playback.state!().standby?, do: doze(state), else: draw(state)
   end
 
   @doc "The screen reads what the player does, and it uses no other topic."
@@ -63,6 +88,10 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   @doc false
   @impl MyHiFi.Peripheral
+  def handle_event(%Player.Standby{entered?: true}, state), do: doze(state)
+
+  def handle_event(%Player.Standby{entered?: false}, state), do: wake(state)
+
   def handle_event(event, %{view: current} = state) do
     case view(event, current) do
       ^current -> {:ok, state}
@@ -111,11 +140,36 @@ defmodule MyHiFi.Peripheral.PiTft do
     do: %{view | state: :failed, message: message(event.reason)}
 
   defp view(%Player.Stopped{}, _view), do: Screen.new()
-  defp view(%Player.Standby{entered?: true}, _view), do: Screen.new()
 
-  # A hint, a view event, or a standby that ends changes nothing that this screen
-  # shows. An ignored event is normal. See `MyHiFi.Peripheral`.
+  # A hint or a view event changes nothing that this screen shows. An ignored event is
+  # normal. See `MyHiFi.Peripheral`.
   defp view(_event, view), do: view
+
+  # Standby holds the view. A person who paused a track and pressed standby gets no
+  # event on the way back, because the player leaves that track paused, so a view that
+  # this cleared would show the name of the device and not the track that waits.
+  defp doze(%{awake?: false} = state), do: {:ok, state}
+
+  defp doze(state) do
+    with :ok <- Ili9341.backlight(state.screen, false),
+         :ok <- Ili9341.display(state.screen, false) do
+      {:ok, %{state | awake?: false}}
+    end
+  end
+
+  defp wake(%{awake?: true} = state), do: {:ok, state}
+
+  defp wake(state) do
+    with :ok <- Ili9341.display(state.screen, true),
+         {:ok, state} <- draw(%{state | awake?: true}),
+         :ok <- Ili9341.backlight(state.screen, true) do
+      {:ok, state}
+    end
+  end
+
+  # A panel that sleeps draws nothing, so a `Progress` event in standby moves the view
+  # and writes no byte to the bus.
+  defp draw(%{awake?: false} = state), do: {:ok, state}
 
   defp draw(state) do
     {width, height} = Screen.size()

@@ -1,13 +1,17 @@
 defmodule MyHiFi.Peripheral.PiTftTest do
   # `MyHiFi.Test.RecordingScreen` is a named process, so two of these cannot run at
   # the same time.
-  use ExUnit.Case, async: false
+  use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PiTft
   alias MyHiFi.Test.RecordingScreen
 
   @memory_write 0x2C
+  @sleep_in 0x10
+  @sleep_out 0x11
+  @display_off 0x28
+  @display_on 0x29
 
   setup do
     RecordingScreen.use_it()
@@ -23,6 +27,19 @@ defmodule MyHiFi.Peripheral.PiTftTest do
     {:ok, _state} = PiTft.init([])
 
     assert frames() == 1
+  end
+
+  test "it starts dark when the device is in standby" do
+    :ok = MyHiFi.Player.standby(true)
+    on_exit(fn -> MyHiFi.Player.standby(false) end)
+
+    RecordingScreen.use_it()
+
+    {:ok, state} = PiTft.init([])
+
+    refute state.awake?
+    assert frames() == 0
+    assert RecordingScreen.backlight() == [0]
   end
 
   test "it reads the player topic only" do
@@ -115,19 +132,73 @@ defmodule MyHiFi.Peripheral.PiTftTest do
       assert state.view.title == nil
     end
 
-    test "standby clears the screen, and leaving standby draws nothing new", %{state: state} do
+    test "standby turns the backlight off and puts the panel to sleep", %{state: state} do
       {:ok, state} = PiTft.handle_event(started(), state)
       RecordingScreen.forget()
 
       {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: true}, state)
-      assert state.view.state == :stopped
-      assert frames() == 1
 
+      refute state.awake?
+      assert RecordingScreen.backlight() == [0]
+      assert @display_off in sent()
+      assert @sleep_in in sent()
+      assert frames() == 0
+    end
+
+    test "standby holds the track, so a person sees it again on the way back", %{state: state} do
+      {:ok, state} = PiTft.handle_event(started(), state)
+
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: true}, state)
+
+      assert state.view.state == :playing
+      assert state.view.title == "The Detail"
+    end
+
+    test "an event in standby moves the view and writes no byte", %{state: state} do
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: true}, state)
       RecordingScreen.forget()
+
+      {:ok, state} =
+        PiTft.handle_event(%Player.Progress{position_ms: 4000, duration_ms: 60_000}, state)
+
+      assert state.view.position_ms == 4000
+      assert frames() == 0
+    end
+
+    test "leaving standby wakes the panel, draws, and lights it after that",
+         %{state: state} do
+      {:ok, state} = PiTft.handle_event(started(), state)
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: true}, state)
+      RecordingScreen.forget()
+
       {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: false}, state)
 
-      assert state.view.state == :stopped
-      assert frames() == 0
+      assert state.awake?
+      assert frames() == 1
+      assert RecordingScreen.backlight() == [1]
+      assert @sleep_out in sent()
+      assert @display_on in sent()
+    end
+
+    test "a second standby writes nothing more", %{state: state} do
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: true}, state)
+
+      refute state.awake?
+      assert RecordingScreen.backlight() == []
+      assert sent() == []
+    end
+
+    test "leaving standby that never began writes nothing", %{state: state} do
+      RecordingScreen.forget()
+
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: false}, state)
+
+      assert state.awake?
+      assert RecordingScreen.backlight() == []
+      assert sent() == []
     end
 
     test "a failure says what went wrong", %{state: state} do
@@ -179,4 +250,8 @@ defmodule MyHiFi.Peripheral.PiTftTest do
     RecordingScreen.commands()
     |> Enum.count(&match?({@memory_write, _pixels}, &1))
   end
+
+  # The command bytes that reached the screen, so a test names one and asks whether the
+  # driver sent it.
+  defp sent, do: Enum.map(RecordingScreen.commands(), fn {command, _payload} -> command end)
 end
