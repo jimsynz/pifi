@@ -12,7 +12,10 @@ config :my_hi_fi, Oban,
   notifier: Oban.Notifiers.PG,
   queues: [default: 10],
   repo: MyHiFi.Repo,
-  plugins: [{Oban.Plugins.Cron, []}]
+  # A job that finished stays in the table until something removes it, and this device
+  # runs for years on an SD card. A week is long enough to read what happened and short
+  # enough that the table never grows.
+  plugins: [{Oban.Plugins.Cron, []}, {Oban.Plugins.Pruner, max_age: 604_800}]
 
 config :my_hi_fi,
   ecto_repos: [MyHiFi.Repo],

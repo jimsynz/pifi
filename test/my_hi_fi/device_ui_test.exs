@@ -10,6 +10,11 @@ defmodule MyHiFi.DeviceUiTest do
   alias MyHiFi.Playback
 
   setup do
+    # `MyHiFi.Application` starts none of these in the test environment, so each test
+    # holds one of its own and no test inherits a listener that it did not ask for. The
+    # name is the one that the firmware uses, because these tests read it back.
+    start_supervised!(MyHiFi.DeviceUi)
+
     :ok = Event.subscribe(:player)
     on_exit(fn -> Playback.standby(false) end)
 

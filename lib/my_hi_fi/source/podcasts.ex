@@ -198,6 +198,11 @@ defmodule MyHiFi.Source.Podcasts do
 
   def put_settings(_values), do: {:error, "Give both the key and the secret."}
 
+  # The index signs every request, so a device with no key reaches nothing at all.
+  # `MyHiFi.AutoSync` reads this before it asks for the trending list or for a feed.
+  @impl MyHiFi.Source
+  def ready?, do: Index.configured?()
+
   @impl MyHiFi.Source
   def settings_actions do
     if Index.configured?() do

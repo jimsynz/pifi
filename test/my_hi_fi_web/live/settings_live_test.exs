@@ -23,9 +23,10 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     Application.put_env(:my_hi_fi, Index, plug: {Req.Test, Index}, retry: false)
     on_exit(fn -> Application.delete_env(:my_hi_fi, Index) end)
 
-    # `MyHiFi.AutoStandby` holds the period in its own state as well as in a row, so a
-    # test that changed it must put the process back where it was.
-    on_exit(fn -> MyHiFi.Playback.set_standby_minutes(20) end)
+    # The standby section reads and writes the period through `MyHiFi.Playback`, which
+    # names the process for the whole node. `MyHiFi.Application` starts none in the test
+    # environment, so this test holds its own and it goes at the end of the test.
+    start_supervised!(MyHiFi.AutoStandby)
 
     on_exit(fn ->
       # The settings outlive a test, because they are rows and not process state.
@@ -242,6 +243,66 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, _view, html} = live(conn, ~p"/settings/peripherals")
 
       assert html =~ "In use"
+    end
+  end
+
+  describe "the refresh periods of a source" do
+    setup do
+      on_exit(fn ->
+        for %{key: key} <- MyHiFi.AutoSync.jobs() do
+          case MyHiFi.Settings.fetch(MyHiFi.AutoSync.hours_key(key)) do
+            {:ok, setting} -> MyHiFi.Settings.delete!(setting)
+            {:error, _reason} -> :ok
+          end
+        end
+      end)
+
+      :ok
+    end
+
+    # A job of a source belongs beside the settings of that source, and not on a page of
+    # its own. See `MyHiFi.AutoSync.jobs_for/1`.
+    test "the section of a source draws the jobs of that source alone", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/sources/internet-radio")
+
+      assert has_element?(view, "#sync-radio")
+      assert html =~ "Internet radio stations"
+
+      refute has_element?(view, "#sync-podcast-trending")
+      refute has_element?(view, "#sync-podcast-refresh")
+    end
+
+    test "a source with more than one job draws each of them", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/podcasts")
+
+      assert has_element?(view, "#sync-podcast-trending")
+      assert has_element?(view, "#sync-podcast-refresh")
+      refute has_element?(view, "#sync-radio")
+    end
+
+    test "a press of a period writes it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/internet-radio")
+
+      html = view |> element("#sync-radio-24") |> render_click()
+
+      assert html =~ "Internet radio stations: daily."
+      assert MyHiFi.AutoSync.hours("radio") == 24
+    end
+
+    test "a person can turn one job off and leave the others", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/podcasts")
+
+      html = view |> element("#sync-podcast-trending-0") |> render_click()
+
+      assert html =~ "Trending podcasts does not sync by itself now."
+      assert MyHiFi.AutoSync.hours("podcast-trending") == 0
+      assert MyHiFi.AutoSync.hours("podcast-refresh") == 6
+    end
+
+    test "the menu holds no section of its own for this", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings")
+
+      refute has_element?(view, "#syncing-row")
     end
   end
 

@@ -44,6 +44,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
   use MyHiFiWeb, :live_view
 
+  alias MyHiFi.AutoSync
   alias MyHiFi.Device
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: Events
@@ -163,6 +164,19 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("set_sync_hours", %{"key" => key, "hours" => hours}, socket) do
+    module = socket.assigns.source.module
+
+    case AutoSync.set_hours(key, String.to_integer(hours)) do
+      :ok ->
+        {:noreply, socket |> put_flash(:info, sync_flash(key, hours)) |> load_source(module)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "That did not work: #{inspect(reason)}")}
+    end
+  end
+
+  @impl Phoenix.LiveView
   def handle_event("set_standby_minutes", %{"minutes" => minutes}, socket) do
     case MyHiFi.Playback.set_standby_minutes(String.to_integer(minutes)) do
       {:ok, :ok} ->
@@ -208,6 +222,7 @@ defmodule MyHiFiWeb.SettingsLive do
       <.row id="standby-row" to={~p"/settings/standby"} icon="hero-moon" title="Standby">
         {standby_summary(@standby_minutes)}
       </.row>
+
 
       <.row id="network-row" to={~p"/settings/network"} icon="hero-wifi" title="Network">
         {network_summary(@interfaces)}
@@ -394,6 +409,37 @@ defmodule MyHiFiWeb.SettingsLive do
             {action.title}
           </button>
           <p :if={action.description} class="mt-1 text-sm text-ink-dim">{action.description}</p>
+        </div>
+      </div>
+
+      <div :if={@source.jobs != []} id="source-syncing" class="mt-4 border-t border-edge pt-4">
+        <p class="mb-3 text-sm text-ink-dim">
+          The device reads these when the period has passed and the network answers, so
+          one that is switched off at night reads what it missed when you turn it on.
+        </p>
+
+        <div :for={job <- @source.jobs} id={"sync-#{job.key}"} class="mb-3">
+          <p class="text-sm font-medium text-ink">{job.title}</p>
+          <p class="mb-2 text-sm text-ink-dim">{job.description}</p>
+
+          <div class="flex flex-wrap gap-1">
+            <button
+              :for={hours <- sync_periods()}
+              type="button"
+              id={"sync-#{job.key}-#{hours}"}
+              phx-click="set_sync_hours"
+              phx-value-key={job.key}
+              phx-value-hours={hours}
+              class={[
+                "control rounded-lg px-2 py-1 text-sm",
+                hours == job.hours && "text-accent"
+              ]}
+            >
+              {sync_period_title(hours)}
+            </button>
+          </div>
+
+          <p class="mt-2 text-xs text-ink-faint">{last_run_title(job.last_run)}</p>
         </div>
       </div>
     </.section>
@@ -678,6 +724,7 @@ defmodule MyHiFiWeb.SettingsLive do
       enabled?: Source.enabled?(module),
       fields: fields,
       actions: Source.settings_actions(module),
+      jobs: sync_jobs(module),
       form: to_form(Map.new(fields, &{&1.key, &1.value || ""}), as: :source)
     })
   end
@@ -709,6 +756,44 @@ defmodule MyHiFiWeb.SettingsLive do
 
   # The periods that a person can pick. A free number would need a check of its own on
   # this page, and no person of a stereo wants 37 minutes.
+  # The period of a job sits in the section of the source that the job belongs to, and
+  # this page names no job of its own. Reading the trending list means nothing without
+  # podcasts. See `MyHiFi.AutoSync.jobs_for/1`.
+  defp sync_jobs(source) do
+    Enum.map(AutoSync.jobs_for(source), fn job ->
+      job
+      |> Map.take([:key, :title, :description])
+      |> Map.put(:hours, AutoSync.hours(job.key))
+      |> Map.put(:last_run, AutoSync.last_run(job.key))
+    end)
+  end
+
+  # The hours that a person can choose for one job of `MyHiFi.AutoSync`. A station list
+  # moves slowly and a feed of a podcast moves each day, so the list reaches a week.
+  defp sync_periods, do: [0, 1, 6, 12, 24, 72, 168]
+
+  defp sync_period_title(0), do: "Never"
+  defp sync_period_title(1), do: "Hourly"
+  defp sync_period_title(24), do: "Daily"
+  defp sync_period_title(72), do: "Every 3 days"
+  defp sync_period_title(168), do: "Weekly"
+  defp sync_period_title(hours), do: "Every #{hours} hours"
+
+  defp sync_flash(key, "0"), do: "#{sync_title(key)} does not sync by itself now."
+
+  defp sync_flash(key, hours),
+    do: "#{sync_title(key)}: #{String.downcase(sync_period_title(String.to_integer(hours)))}."
+
+  defp sync_title(key) do
+    case Enum.find(AutoSync.jobs(), &(&1.key == key)) do
+      nil -> key
+      job -> job.title
+    end
+  end
+
+  defp last_run_title(nil), do: "It has not run on this device yet."
+  defp last_run_title(at), do: "It last ran on #{Calendar.strftime(at, "%d %B at %H:%M UTC")}."
+
   defp periods, do: [0, 5, 10, 15, 20, 30, 45, 60, 90, 120]
 
   defp period_title(0), do: "Never"

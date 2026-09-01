@@ -23,24 +23,14 @@ defmodule MyHiFi.Application do
       [
         MyHiFi.Repo,
         MyHiFiWeb.Telemetry,
-        {Oban,
-         AshOban.config(
-           Application.fetch_env!(:my_hi_fi, :ash_domains),
-           Application.fetch_env!(:my_hi_fi, Oban)
-         )},
+        {Oban, oban_config()},
         {Phoenix.PubSub, [name: MyHiFi.PubSub]},
         {Registry, keys: :unique, name: Download.Registry},
         {DynamicSupervisor, strategy: :one_for_one, name: Download.Supervisor},
         MyHiFi.Player,
-        # It reads the player, so it comes after it. See `MyHiFi.AutoStandby`.
-        MyHiFi.AutoStandby,
-        MyHiFi.DeviceUi,
         MyHiFi.Peripheral.Supervisor,
         MyHiFiWeb.Endpoint
-      ] ++ target_children()
-
-    # `MyHiFi.Radio.FirstSync` comes after Oban, because it puts a job in the
-    # queue.
+      ] ++ listening_children() ++ target_children()
 
     with {:ok, supervisor} <- Supervisor.start_link(children, supervisor_options()) do
       # This comes after the tree and not inside it. A peripheral opens a bus, and a
@@ -60,9 +50,47 @@ defmodule MyHiFi.Application do
   # happen.
   defp make_queue_table, do: Ash.read!(MyHiFi.Playback.Queue)
 
+  # **These two listen to a topic and act on the player, and a test must start its own.**
+  # Each one is named for the whole node, so a suite that ran them would give every test
+  # a listener that it did not ask for: a test of the battery publishes a low cell, this
+  # `MyHiFi.AutoStandby` puts the player in standby for it, and the next test then finds
+  # a device that is asleep. That failure came and went with the order of the files.
+  #
+  # A test that wants one starts it with `ExUnit.Callbacks.start_supervised/1`, which
+  # gives one instance for that test and takes it away at the end of it.
+  if Mix.env() == :test do
+    defp listening_children, do: []
+  else
+    # `MyHiFi.AutoStandby` reads the player, so it comes after it.
+    defp listening_children, do: [MyHiFi.AutoStandby, MyHiFi.DeviceUi]
+  end
+
   # See https://elixir.hexdocs.pm/Supervisor.html
   # for other strategies and supported options
   defp supervisor_options, do: [strategy: :one_for_one, name: MyHiFi.Supervisor]
+
+  # `AshOban.config/2` reads the `schedule` block of each resource and puts a line in the
+  # crontab for it. **A clock is the wrong condition for the work that needs the
+  # network**, and `MyHiFi.AutoSync` holds the right one, so this takes those lines out
+  # again. The `schedule` block stays, because `AshOban.schedule/2` reads it and a
+  # scheduled action takes no `false` in the place of its cron.
+  defp oban_config do
+    :my_hi_fi
+    |> Application.fetch_env!(:ash_domains)
+    |> AshOban.config(Application.fetch_env!(:my_hi_fi, Oban))
+    |> Keyword.update!(:plugins, &Enum.map(&1, fn plugin -> without_auto_sync(plugin) end))
+  end
+
+  defp without_auto_sync({Oban.Plugins.Cron, options}) do
+    workers = MyHiFi.AutoSync.workers()
+
+    {Oban.Plugins.Cron,
+     Keyword.update!(options, :crontab, fn crontab ->
+       Enum.reject(crontab, fn {_cron, worker, _opts} -> worker in workers end)
+     end)}
+  end
+
+  defp without_auto_sync(plugin), do: plugin
 
   # List all child processes to be supervised
   if Mix.target() == :host do
@@ -116,10 +144,12 @@ defmodule MyHiFi.Application do
 
     defp target_children do
       [
-        MyHiFi.Radio.FirstSync,
         # The reports of the settings page arrive on the `:device` topic, and no page
         # asks for them on an interval. See `MyHiFi.Device.Monitor`.
         MyHiFi.Device.Monitor,
+        # It reads the network that the monitor publishes, so it comes after it. It also
+        # puts jobs in the queue, so it comes after Oban. See `MyHiFi.AutoSync`.
+        MyHiFi.AutoSync,
         # An upgrade formats the boot partition, so the boot configuration of a person
         # is gone and this writes it again. It comes last, because it restarts the
         # device when it writes. See `MyHiFi.Hardware`.

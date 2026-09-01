@@ -376,10 +376,23 @@ defmodule MyHiFi.Source do
   """
   @callback run_settings_action(String.t()) :: {:ok, String.t()} | {:error, String.t()}
 
+  @doc """
+  Whether this source holds what it needs to reach its service.
+
+  **This is not `enabled?/1`.** A person answers that one, and this one is a fact about
+  the source: podcasts need a key of the Podcast Index, and a device that holds none can
+  reach nothing. `MyHiFi.AutoSync` asks both before it runs the work of a source, so a
+  device with no key asks the index nothing and writes no job that can only fail.
+
+  A source that needs no such thing leaves this out, and `ready?/1` then gives `true`.
+  """
+  @callback ready?() :: boolean()
+
   # A source with no search leaves `search/1` out, and it names no `:search` in
   # `c:capabilities/0`.
   @optional_callbacks finished: 1,
                       opened: 1,
+                      ready?: 0,
                       refresh: 1,
                       search: 1,
                       settings: 0,
@@ -502,6 +515,17 @@ defmodule MyHiFi.Source do
       {:ok, %{value: "false"}} -> false
       _other -> true
     end
+  end
+
+  @doc """
+  Whether a source holds what it needs to reach its service.
+
+  A source that names no `c:ready?/0` needs nothing, so this gives `true` for it. See
+  that callback for the difference between this and `enabled?/1`.
+  """
+  @spec ready?(module()) :: boolean()
+  def ready?(module) do
+    if implements?(module, :ready?, 0), do: module.ready?(), else: true
   end
 
   @doc """
