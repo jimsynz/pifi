@@ -19,17 +19,31 @@ defmodule MyHiFi.Test.RecordingScreen do
 
   use Agent
 
-  # The screen is on one bus of SPI0 and the touch controller is on the other, and the
-  # backlight is GPIO 2 of that controller. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
-  @screen_bus "spidev0.0"
-  @touch_bus "spidev0.1"
+  # The PiTFT screen is on one bus of SPI0 and its touch controller is on the other, and
+  # the backlight is GPIO 2 of that controller. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
+  # The Pirate Audio puts its screen on the other bus, its data and command line on GPIO
+  # 9, and its backlight on a line of the Raspberry Pi, so `use_it/1` takes all three.
+  @pi_tft [screen_bus: "spidev0.0", data_command: 25, backlight_line: nil]
   @gpio_set_pin 0x10
   @gpio_clear_pin 0x11
 
-  @doc "Start the recorder and make these the Circuits backends for one test."
-  @spec use_it() :: :ok
-  def use_it do
+  @doc """
+  Start the recorder and make these the Circuits backends for one test.
+
+  ## Options
+
+  - `:screen_bus` - the SPI bus that the screen is on. `"spidev0.0"` by default, which
+    is the PiTFT. The Pirate Audio is on `"spidev0.1"`.
+  - `:data_command` - the GPIO that says command or data. 25 by default, which is the
+    PiTFT. The Pirate Audio uses 9.
+  - `:backlight_line` - the GPIO of the backlight, for a board that holds it on a line
+    of the Raspberry Pi. `nil` by default, because the PiTFT holds it on the touch
+    controller instead. See `backlight/0` and `backlight_line/0`.
+  """
+  @spec use_it(keyword()) :: :ok
+  def use_it(opts \\ []) do
     start_link([])
+    Agent.update(__MODULE__, fn state -> %{state | config: Keyword.merge(@pi_tft, opts)} end)
 
     Application.put_env(:circuits_spi, :default_backend, __MODULE__.Spi)
     Application.put_env(:circuits_gpio, :default_backend, __MODULE__.Gpio)
@@ -42,18 +56,23 @@ defmodule MyHiFi.Test.RecordingScreen do
 
   @doc false
   @spec start_link(keyword()) :: Agent.on_start()
-  def start_link(_opts), do: Agent.start_link(fn -> [] end, name: __MODULE__)
+  def start_link(_opts),
+    do: Agent.start_link(fn -> %{entries: [], config: @pi_tft} end, name: __MODULE__)
 
   @typedoc "One thing that the driver did."
-  @type entry :: {:spi, String.t(), binary()} | {:gpio, 0 | 1}
+  @type entry :: {:spi, String.t(), binary()} | {:gpio, 0 | 1} | {:backlight, 0 | 1}
+
+  @doc "What `use_it/1` was told about the board under test."
+  @spec config() :: keyword()
+  def config, do: Agent.get(__MODULE__, & &1.config)
 
   @doc "Write one entry down. The backends call this."
   @spec record(entry()) :: :ok
-  def record(entry), do: Agent.update(__MODULE__, &[entry | &1])
+  def record(entry), do: Agent.update(__MODULE__, &%{&1 | entries: [entry | &1.entries]})
 
   @doc "Everything that happened, in order."
   @spec entries() :: [entry()]
-  def entries, do: __MODULE__ |> Agent.get(& &1) |> Enum.reverse()
+  def entries, do: __MODULE__ |> Agent.get(& &1.entries) |> Enum.reverse()
 
   @doc """
   The levels that the backlight was given, in order.
@@ -64,14 +83,26 @@ defmodule MyHiFi.Test.RecordingScreen do
   """
   @spec backlight() :: [0 | 1]
   def backlight do
-    for {:spi, @touch_bus, <<register, 0x04>>} <- entries(),
+    touch_bus = other_bus()
+
+    for {:spi, ^touch_bus, <<register, 0x04>>} <- entries(),
         register in [@gpio_set_pin, @gpio_clear_pin],
         do: if(register == @gpio_set_pin, do: 1, else: 0)
   end
 
+  @doc """
+  The levels that a backlight on a line of the Raspberry Pi was given, in order.
+
+  1 is on and 0 is off. This is the Pirate Audio, where the light is GPIO 13 of the
+  board. The PiTFT holds its light on the touch controller, so it uses `backlight/0`
+  instead. See `MyHiFi.Peripheral.PirateAudio.St7789`.
+  """
+  @spec backlight_line() :: [0 | 1]
+  def backlight_line, do: for({:backlight, level} <- entries(), do: level)
+
   @doc "Forget everything, so a test reads one draw and not the init sequence too."
   @spec forget() :: :ok
-  def forget, do: Agent.update(__MODULE__, fn _entries -> [] end)
+  def forget, do: Agent.update(__MODULE__, &%{&1 | entries: []})
 
   @doc """
   What the screen was told, as commands.
@@ -85,36 +116,50 @@ defmodule MyHiFi.Test.RecordingScreen do
   """
   @spec commands() :: [{byte(), binary()}]
   def commands do
+    bus = screen_bus()
+
     entries()
-    |> Enum.reduce({nil, []}, &fold/2)
+    |> Enum.reduce({nil, []}, &fold(bus, &1, &2))
     |> flush()
     |> Enum.reverse()
   end
 
-  # The touch controller says nothing about the screen, so its bus ends no command and
-  # opens none.
-  defp fold({:spi, @touch_bus, _data}, state), do: state
+  defp screen_bus, do: Keyword.fetch!(config(), :screen_bus)
+
+  # The PiTFT holds its touch controller on the bus that the screen is not on.
+  defp other_bus do
+    case screen_bus() do
+      "spidev0.0" -> "spidev0.1"
+      _other -> "spidev0.0"
+    end
+  end
+
+  # The backlight of a line is not a byte of the screen, so it ends no command.
+  defp fold(_bus, {:backlight, _level}, state), do: state
 
   # The line goes low for a command, so a low level ends the command before it.
-  defp fold({:gpio, 0}, state), do: {:awaiting_command, flush(state)}
+  defp fold(_bus, {:gpio, 0}, state), do: {:awaiting_command, flush(state)}
 
   # The line goes high for data, and the bytes that follow belong to the command
   # that is already open.
-  defp fold({:gpio, 1}, state), do: state
+  defp fold(_bus, {:gpio, 1}, state), do: state
 
-  defp fold({:spi, @screen_bus, <<command>>}, {:awaiting_command, commands}),
+  defp fold(bus, {:spi, bus, <<command>>}, {:awaiting_command, commands}),
     do: {{command, []}, commands}
 
-  defp fold({:spi, @screen_bus, payload}, {{command, parts}, commands}),
+  defp fold(bus, {:spi, bus, payload}, {{command, parts}, commands}),
     do: {{command, [payload | parts]}, commands}
 
-  defp fold({:spi, @screen_bus, payload}, {:awaiting_command, _commands}) do
+  defp fold(bus, {:spi, bus, payload}, {:awaiting_command, _commands}) do
     raise "a command is one byte, and the screen got #{byte_size(payload)} with the line low"
   end
 
-  defp fold({:spi, @screen_bus, payload}, {nil, _commands}) do
+  defp fold(bus, {:spi, bus, payload}, {nil, _commands}) do
     raise "the screen got #{byte_size(payload)} bytes before the line said command or data"
   end
+
+  # Anything on the other bus says nothing about the screen.
+  defp fold(_bus, {:spi, _other, _data}, state), do: state
 
   defp flush({{command, parts}, commands}),
     do: [{command, parts |> Enum.reverse() |> IO.iodata_to_binary()} | commands]
@@ -204,12 +249,23 @@ defmodule MyHiFi.Test.RecordingScreen do
     defimpl Circuits.GPIO.Handle do
       alias MyHiFi.Test.RecordingScreen
 
-      # The line that says command or data. The backlight is not a GPIO of the
-      # Raspberry Pi on this board, so no line here carries it.
-      @data_command 25
+      # Which line says command or data, and which one carries the backlight, depends on
+      # the board. The PiTFT holds its light on the touch controller and names no line
+      # here. See `MyHiFi.Test.RecordingScreen.use_it/1`.
+      def write(%{spec: spec}, value) do
+        config = RecordingScreen.config()
 
-      def write(%{spec: @data_command}, value), do: RecordingScreen.record({:gpio, value})
-      def write(_handle, _value), do: :ok
+        cond do
+          spec == Keyword.fetch!(config, :data_command) ->
+            RecordingScreen.record({:gpio, value})
+
+          spec == Keyword.get(config, :backlight_line) ->
+            RecordingScreen.record({:backlight, value})
+
+          true ->
+            :ok
+        end
+      end
 
       def read(_handle), do: 0
       def status(_handle), do: {:ok, %{direction: :output}}

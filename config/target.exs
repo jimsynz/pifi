@@ -33,7 +33,11 @@ config :emerge, compiled_backends: [:wayland]
 # drive. A name here does not start anything: the same image runs on a board with a
 # screen and on a board with none, so each peripheral is out of use until a person
 # names it on the settings page. See `MyHiFi.Peripheral`.
-config :my_hi_fi, peripherals: [{MyHiFi.Peripheral.PiTft, []}]
+config :my_hi_fi,
+  peripherals: [
+    {MyHiFi.Peripheral.PiTft, []},
+    {MyHiFi.Peripheral.PirateAudio, []}
+  ]
 
 # Erlinit can be configured without a rootfs_overlay. See
 # https://github.com/nerves-project/erlinit/ for more information on
