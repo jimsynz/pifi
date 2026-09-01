@@ -117,12 +117,27 @@ Licence: Apache-2.0.
   screen must never keep the music from playing.
 - **Screens and controls share one behaviour.** Do not split them. On the PiTFT
   the ILI9341 screen and the STMPE610 touch controller share SPI0, so one process
-  must own the bus. `MyHiFi.Peripheral.PiTft` draws and publishes touch events.
+  must own the bus. `MyHiFi.Peripheral.PiTft` draws, and it publishes what a person
+  presses. A peripheral that reads hardware names
+  `c:MyHiFi.Peripheral.handle_info/2`, because a GPIO line speaks to the process
+  that holds it and not to a topic.
+- **The backlight of the PiTFT is on GPIO 2 of the STMPE610, and the four buttons
+  are on lines 18, 27, 22 and 23.** Pin 18 of the Raspberry Pi reaches the light on
+  no board that this firmware drives. The Adafruit PiTFT joins the two with a solder
+  jumper named `Lite #18`, the Jaycar XC9022 clone that this device holds has none,
+  and the STMPE line takes precedence over that pin in any case. A write to pin 18
+  therefore changed nothing, standby slept the panel under a light that stayed on,
+  and a panel that sleeps shows white. **Line 18 is a button.** Read the order of the
+  row one button at a time, and read it from
+  `MyHiFi.Event.Input.ButtonPressed`: four presses in one go give a list of events
+  that holds no order of place, and two builds named the wrong row from such a list.
+  `MyHiFi.DeviceUi` decides what a place in the row means, and the driver names the
+  place alone.
 - **Emerge draws the device screen, through its raster part alone.**
   `EmergeSkia.render_to_pixels/2` gives the pixels back to the caller, and
   `MyHiFi.Peripheral.PiTft` writes them to the ILI9341 over SPI. Do not call
   `EmergeSkia.start/1` and do not add a display server: this firmware drives no
-  window and no DRM device. Three traps, and each one costs a build to find.
+  window and no DRM device. Four traps, and each one costs a build to find.
   - **`mix.exs` sets `TARGET_VENDOR` to `"unknown"`, and it must stay that way.**
     `rustler_precompiled` reads the same four variables that Bundlex reads. Emerge
     publishes `aarch64-unknown-linux-gnu`, so `"nerves"` there makes it compile
@@ -139,6 +154,13 @@ Licence: Apache-2.0.
     cannot serve this: it sets `LD_LIBRARY_PATH` at boot, glibc reads that variable
     one time when the process starts, and a NIF of the BEAM is not a program that a
     port starts.
+  - **Emerge refuses a runtime path by its extension, and it reads no byte to
+    decide.** The list that it holds by default names `.png`, `.jpg` and five other
+    types, and a name of the cache carries no type, so a thumbnail is
+    `<hash>.thumbnail`. Emerge drew the mark that it draws for a picture that it
+    cannot read, and the screen showed that in the place of the artwork.
+    `MyHiFi.Peripheral.PiTft.asset_options/0` names the one extension that this
+    firmware gives it.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `MyHiFi.Application` calls
