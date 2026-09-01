@@ -45,6 +45,57 @@ defmodule MyHiFi.Peripheral.ServerTest do
     end
   end
 
+  # Hardware speaks to the process that holds it, and a peripheral that names
+  # `handle_info/2` reads what it sends. See `MyHiFi.Peripheral.PiTft`.
+  defmodule Listener do
+    @moduledoc false
+
+    @behaviour MyHiFi.Peripheral
+
+    @impl MyHiFi.Peripheral
+    def title, do: "Listener"
+
+    @impl MyHiFi.Peripheral
+    def init(opts), do: {:ok, %{report_to: Keyword.fetch!(opts, :report_to)}}
+
+    @impl MyHiFi.Peripheral
+    def subscriptions, do: []
+
+    @impl MyHiFi.Peripheral
+    def handle_event(_event, state), do: {:ok, state}
+
+    @impl MyHiFi.Peripheral
+    def handle_info(:break, _state), do: {:error, :the_line_is_gone}
+
+    def handle_info(message, state) do
+      send(state.report_to, {:peripheral_heard, message})
+      {:ok, state}
+    end
+
+    @impl MyHiFi.Peripheral
+    def terminate(_reason, _state), do: :ok
+  end
+
+  describe "a message that the hardware sends" do
+    test "it reaches a peripheral that names handle_info/2" do
+      {:ok, pid} = Server.start_link(module: Listener, report_to: self())
+
+      send(pid, {:circuits_gpio, 27, 1_000, 0})
+
+      assert_receive {:peripheral_heard, {:circuits_gpio, 27, 1_000, 0}}
+      assert Process.alive?(pid)
+    end
+
+    test "a failure stops the peripheral, because the hardware is what failed" do
+      Process.flag(:trap_exit, true)
+      {:ok, pid} = Server.start_link(module: Listener, report_to: self())
+
+      send(pid, :break)
+
+      assert_receive {:EXIT, ^pid, :the_line_is_gone}
+    end
+  end
+
   test "it gives each event of a subscribed topic to the peripheral" do
     start_peripheral()
 

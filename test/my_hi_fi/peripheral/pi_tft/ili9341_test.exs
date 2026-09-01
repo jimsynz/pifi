@@ -9,6 +9,8 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341Test do
   @column_address_set 0x2A
   @page_address_set 0x2B
   @memory_write 0x2C
+
+  @screen_bus "spidev0.0"
   @display_on 0x29
 
   setup do
@@ -104,11 +106,11 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341Test do
   # before it are not.
   defp pixel_transfers do
     RecordingScreen.entries()
-    |> Enum.drop_while(&(&1 != {:spi, <<@memory_write>>}))
+    |> Enum.drop_while(&(&1 != {:spi, @screen_bus, <<@memory_write>>}))
     |> Enum.drop(1)
     |> Enum.flat_map(fn
-      {:spi, data} -> [byte_size(data)]
-      {:gpio, _value} -> []
+      {:spi, @screen_bus, data} -> [byte_size(data)]
+      _other -> []
     end)
   end
 end

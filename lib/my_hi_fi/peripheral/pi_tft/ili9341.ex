@@ -93,11 +93,10 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   @type t :: %__MODULE__{
           bus: SPI.Bus.t(),
           data_command: GPIO.Handle.t(),
-          backlight: GPIO.Handle.t() | nil,
           max_transfer: pos_integer()
         }
 
-  defstruct [:bus, :data_command, :backlight, :max_transfer]
+  defstruct [:bus, :data_command, :max_transfer]
 
   @doc "The size of this screen, in pixels."
   @spec size() :: {pos_integer(), pos_integer()}
@@ -110,8 +109,6 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
 
   - `:bus` - the SPI bus of the screen. `"spidev0.0"` by default.
   - `:data_command` - the GPIO that says command or data. 25 by default.
-  - `:backlight` - the GPIO of the backlight, or `nil` for a board that wires it to
-    a supply. 18 by default.
   - `:speed_hz` - the bus speed. 32 MHz by default, which writes a full frame in
     38 ms.
   - `:rotation` - see `t:rotation/0`. `:landscape` by default.
@@ -123,12 +120,10 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
              speed_hz: Keyword.get(opts, :speed_hz, 32_000_000)
            ),
          {:ok, data_command} <-
-           GPIO.open(Keyword.get(opts, :data_command, 25), :output, initial_value: 0),
-         {:ok, backlight} <- open_backlight(Keyword.get(opts, :backlight, 18)) do
+           GPIO.open(Keyword.get(opts, :data_command, 25), :output, initial_value: 0) do
       screen = %__MODULE__{
         bus: bus,
         data_command: data_command,
-        backlight: backlight,
         max_transfer: SPI.max_transfer_size(bus)
       }
 
@@ -136,24 +131,12 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
     end
   end
 
-  @doc "Give the screen back, and turn the backlight off with it."
+  @doc "Give the screen back."
   @spec close(t()) :: :ok
   def close(screen) do
-    backlight(screen, false)
-    if screen.backlight, do: GPIO.close(screen.backlight)
     GPIO.close(screen.data_command)
     SPI.close(screen.bus)
   end
-
-  @doc """
-  Turn the backlight on or off.
-
-  A board that wires the backlight to a supply holds no GPIO for it, and this then
-  does nothing.
-  """
-  @spec backlight(t(), boolean()) :: :ok
-  def backlight(%{backlight: nil}, _on?), do: :ok
-  def backlight(screen, on?), do: GPIO.write(screen.backlight, if(on?, do: 1, else: 0))
 
   @doc """
   Wake the panel, or put it to sleep.
@@ -164,8 +147,9 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
 
   **The backlight is not part of this, and the order is the reason.** A caller wakes
   the panel, draws a frame, and turns the backlight on after that, so a person never
-  sees the frame that the panel held before. Going the other way it turns the
-  backlight off first. See `backlight/2`.
+  sees the frame that the panel held before. Going the other way it turns the light
+  off first, because a panel that sleeps under a light that is on shows white. The
+  light is on the touch controller. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
   """
   @spec display(t(), boolean()) :: :ok | {:error, term()}
   def display(screen, true) do
@@ -222,9 +206,6 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
       data(screen, pixels)
     end
   end
-
-  defp open_backlight(nil), do: {:ok, nil}
-  defp open_backlight(pin), do: GPIO.open(pin, :output, initial_value: 1)
 
   defp reset(screen, rotation) do
     with :ok <- command(screen, @software_reset),

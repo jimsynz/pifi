@@ -7,6 +7,17 @@ defmodule MyHiFi.Peripheral.PiTftTest do
   alias MyHiFi.Peripheral.PiTft
   alias MyHiFi.Test.RecordingScreen
 
+  # A JPEG of 16 by 16 pixels that Skia can read. A picture of a few bytes that names
+  # itself a JPEG would draw the same mark as a picture that Emerge refuses, and this
+  # test would then hold nothing.
+  @jpeg Base.decode64!(
+          "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABQODxIPDRQSEBIXFRQYHjIhHhwcHj0sLiQySUBMS0dARk" <>
+            "VQWnNiUFVtVkVGZIhlbXd7gYKBTmCNl4x9lnN+gXz/2wBDARUXFx4aHjshITt8U0ZTfHx8fHx8fHx8" <>
+            "fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHz/wAARCAAQABADASIAAhEBAx" <>
+            "EB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAA" <>
+            "AAAAAAAAAAAABAb/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCaAMoH/9k="
+        )
+
   @memory_write 0x2C
   @sleep_in 0x10
   @sleep_out 0x11
@@ -39,7 +50,10 @@ defmodule MyHiFi.Peripheral.PiTftTest do
 
     refute state.awake?
     assert frames() == 0
-    assert RecordingScreen.backlight() == [0]
+    # Taking hold of the backlight writes its level, so the light goes on and then
+    # off. It was on from the moment that the board had power, so a person sees no
+    # change. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
+    assert List.last(RecordingScreen.backlight()) == 0
   end
 
   test "it reads the player topic only" do
@@ -230,6 +244,59 @@ defmodule MyHiFi.Peripheral.PiTftTest do
 
     {width, height} = PiTft.Ili9341.size()
     assert byte_size(pixels) == width * height * 2
+  end
+
+  describe "the pictures that Emerge may read" do
+    setup do
+      directory = Path.join(MyHiFi.Cache.directory(), "artwork")
+      File.mkdir_p!(directory)
+
+      thumbnail = Path.join(directory, "a_picture.thumbnail")
+      picture = Path.join(directory, "a_picture.jpg")
+      File.write!(thumbnail, @jpeg)
+      File.write!(picture, @jpeg)
+
+      on_exit(fn ->
+        File.rm(thumbnail)
+        File.rm(picture)
+      end)
+
+      %{directory: directory, thumbnail: thumbnail, picture: picture}
+    end
+
+    # Emerge refuses a runtime path by its extension, and a name of the cache holds
+    # none of the seven that Emerge allows by default. The screen then showed the mark
+    # that Emerge draws for a picture that it cannot read.
+    test "a thumbnail of the cache draws what its bytes hold", context do
+      %{directory: directory, thumbnail: thumbnail, picture: picture} = context
+
+      by_extension = [
+        runtime_paths: [
+          enabled: true,
+          allowlist: [MyHiFi.Cache.directory()],
+          extensions: [".jpg"]
+        ]
+      ]
+
+      ours = pixels_of(thumbnail, PiTft.asset_options())
+      absent = pixels_of(Path.join(directory, "absent.thumbnail"), PiTft.asset_options())
+
+      assert ours == pixels_of(picture, by_extension)
+      refute ours == absent
+    end
+  end
+
+  defp pixels_of(path, assets) do
+    {width, height} = PiTft.Screen.size()
+
+    %{PiTft.Screen.new() | state: :playing, title: "RNZ National", artwork_path: path}
+    |> PiTft.Screen.render()
+    |> EmergeSkia.render_to_pixels(
+      otp_app: :my_hi_fi,
+      width: width,
+      height: height,
+      assets: assets
+    )
   end
 
   defp started do

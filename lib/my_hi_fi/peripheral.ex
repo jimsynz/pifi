@@ -93,6 +93,21 @@ defmodule MyHiFi.Peripheral do
   @callback terminate(reason :: term(), state()) :: :ok
 
   @doc """
+  Do something with a message that is not an event.
+
+  Hardware speaks to the process that holds it, and a button of a GPIO line sends
+  `{:circuits_gpio, pin, timestamp, value}` for each change of level. A peripheral
+  that reads such a message names this callback, and it usually turns the message
+  into an event of the `:input` topic. See `MyHiFi.Peripheral.PiTft`.
+
+  A peripheral that holds nothing that speaks by itself names none, and
+  `MyHiFi.Peripheral.Server` then writes the message in the log and continues.
+  """
+  @callback handle_info(message :: term(), state()) :: {:ok, state()} | {:error, term()}
+
+  @optional_callbacks handle_info: 2
+
+  @doc """
   The peripherals that this device can hold.
 
   `config/target.exs` names them, in the way that `:output` and `:sources` name

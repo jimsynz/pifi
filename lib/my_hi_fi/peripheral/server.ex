@@ -99,11 +99,28 @@ defmodule MyHiFi.Peripheral.Server do
   end
 
   # Every event of this firmware is a struct, so a message of another shape belongs to
-  # something that the peripheral used and not to a topic. See `MyHiFi.Event`.
+  # the hardware that the peripheral holds and not to a topic. A GPIO line that a
+  # person presses is one of those. See `MyHiFi.Event` and `c:MyHiFi.Peripheral.handle_info/2`.
   def handle_info(message, %{module: module} = server) do
-    Logger.debug("#{inspect(module)} read no event in #{inspect(message)}")
+    if function_exported?(module, :handle_info, 2) do
+      hardware_message(message, server)
+    else
+      Logger.debug("#{inspect(module)} read no event in #{inspect(message)}")
 
-    {:noreply, server}
+      {:noreply, server}
+    end
+  end
+
+  defp hardware_message(message, %{module: module} = server) do
+    case module.handle_info(message, server.state) do
+      {:ok, state} ->
+        {:noreply, %{server | state: state}}
+
+      {:error, reason} ->
+        Logger.error("#{inspect(module)} failed on #{inspect(message)}: #{inspect(reason)}")
+
+        {:stop, reason, server}
+    end
   end
 
   @doc false

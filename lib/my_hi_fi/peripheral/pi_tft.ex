@@ -19,10 +19,11 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   ## What it does not do yet
 
-  It takes the `:player` topic only. The `:view` and `:hint` topics need
-  `MyHiFi.DeviceUi`, which is not written, so this screen shows the now playing view
-  and holds no list. It publishes nothing, because the STMPE610 touch controller
-  needs the second chip select line of this bus and that work comes next.
+  It takes the `:player` topic only. The `:view` and `:hint` topics need more of
+  `MyHiFi.DeviceUi` than is written, so this screen shows the now playing view and
+  holds no list. It publishes the four buttons of the board, and it publishes no
+  touch: the STMPE610 holds the panel as well as the light, and reading the panel is
+  the work that comes next.
 
   ## Standby
 
@@ -31,6 +32,10 @@ defmodule MyHiFi.Peripheral.PiTft do
   wakes the panel, draws the view, and turns the backlight on. The order matters: a
   backlight that came on before the draw would show the frame that the panel held
   before.
+
+  **The light is on the touch controller, and not on a pin of the Raspberry Pi.** A
+  panel that sleeps under a light that stays on shows white, which is what this board
+  did while the firmware wrote to pin 18. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
 
   **Standby holds the view, and it does not clear it.** A person who paused a track
   and then pressed standby gets no event on the way back, because the player leaves
@@ -55,7 +60,9 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   alias MyHiFi.Artwork
   alias MyHiFi.Event.Player
-  alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen}
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Input
+  alias MyHiFi.Peripheral.PiTft.{Buttons, Ili9341, Screen, Stmpe610}
   alias MyHiFi.Playback
 
   @doc "The name that the settings page draws."
@@ -63,14 +70,24 @@ defmodule MyHiFi.Peripheral.PiTft do
   def title, do: "PiTFT 2.8 inch screen"
 
   @doc """
-  Take hold of the screen and draw the first frame.
+  Take hold of the screen and the touch controller, and draw the first frame.
 
-  Every option goes to `MyHiFi.Peripheral.PiTft.Ili9341.open/1`.
+  Every option goes to `MyHiFi.Peripheral.PiTft.Ili9341.open/1`. The touch
+  controller takes the defaults of `MyHiFi.Peripheral.PiTft.Stmpe610.open/1`, and it
+  holds the backlight of this board.
   """
   @impl MyHiFi.Peripheral
   def init(opts) do
-    with {:ok, screen} <- Ili9341.open(opts) do
-      first_frame(%{screen: screen, view: Screen.new(), awake?: true})
+    with {:ok, screen} <- Ili9341.open(opts),
+         {:ok, stmpe} <- Stmpe610.open(),
+         {:ok, buttons} <- Buttons.open() do
+      first_frame(%{
+        screen: screen,
+        stmpe: stmpe,
+        buttons: buttons,
+        view: Screen.new(),
+        awake?: true
+      })
     end
   end
 
@@ -99,9 +116,59 @@ defmodule MyHiFi.Peripheral.PiTft do
     end
   end
 
-  @doc "Turn the backlight off and give the bus back."
+  @doc """
+  Say that a person pressed a button.
+
+  The lines of the buttons send a message for each change of level, and this turns a
+  press into `MyHiFi.Event.Input.ButtonPressed`. **This module says which button and
+  not what the button does.** `MyHiFi.DeviceUi` holds that.
+  """
   @impl MyHiFi.Peripheral
-  def terminate(_reason, state), do: Ili9341.close(state.screen)
+  def handle_info(message, state) do
+    case Buttons.press(state.buttons, message) do
+      {:ok, button, buttons} ->
+        Event.publish(:input, %Input.ButtonPressed{peripheral: __MODULE__, button: button})
+
+        {:ok, %{state | buttons: buttons}}
+
+      {:none, buttons} ->
+        {:ok, %{state | buttons: buttons}}
+    end
+  end
+
+  @doc "Turn the backlight off and give the hardware back."
+  @impl MyHiFi.Peripheral
+  def terminate(_reason, state) do
+    Buttons.close(state.buttons)
+    Stmpe610.close(state.stmpe)
+    Ili9341.close(state.screen)
+  end
+
+  @doc """
+  What Emerge may read from the disk while it draws.
+
+  The cache holds the thumbnails, and `MyHiFi.Artwork` names each one
+  `<hash>.thumbnail`, because a name of the cache carries no type.
+
+  **Emerge refuses a runtime path by its extension, and it reads no byte to decide.**
+  The default list holds `.jpg` and six other names, so it refused every thumbnail,
+  and the screen showed the mark that Emerge draws for a picture that it cannot read.
+  Skia reads the bytes and finds the JPEG, so the name of the file is all that this
+  changes.
+
+  One extension is also tighter than seven: a runtime path of this firmware is a
+  thumbnail of the cache and nothing else.
+  """
+  @spec asset_options() :: keyword()
+  def asset_options do
+    [
+      runtime_paths: [
+        enabled: true,
+        allowlist: [MyHiFi.Cache.directory()],
+        extensions: [".thumbnail"]
+      ]
+    ]
+  end
 
   defp view(%Player.Started{} = event, view) do
     %{
@@ -151,7 +218,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp doze(%{awake?: false} = state), do: {:ok, state}
 
   defp doze(state) do
-    with :ok <- Ili9341.backlight(state.screen, false),
+    with :ok <- Stmpe610.backlight(state.stmpe, false),
          :ok <- Ili9341.display(state.screen, false) do
       {:ok, %{state | awake?: false}}
     end
@@ -162,7 +229,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp wake(state) do
     with :ok <- Ili9341.display(state.screen, true),
          {:ok, state} <- draw(%{state | awake?: true}),
-         :ok <- Ili9341.backlight(state.screen, true) do
+         :ok <- Stmpe610.backlight(state.stmpe, true) do
       {:ok, state}
     end
   end
@@ -181,12 +248,7 @@ defmodule MyHiFi.Peripheral.PiTft do
         otp_app: :my_hi_fi,
         width: width,
         height: height,
-        assets: [
-          runtime_paths: [
-            enabled: true,
-            allowlist: [MyHiFi.Cache.directory()]
-          ]
-        ]
+        assets: asset_options()
       )
       |> Ili9341.to_rgb565()
 
@@ -202,7 +264,7 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   defp artwork_disk_path("/artwork/" <> name) do
     case Artwork.serve_thumbnail(name) do
-      {:ok, path, _content_type} -> path
+      {:ok, path, _content_type, _etag} -> path
       :error -> nil
     end
   end

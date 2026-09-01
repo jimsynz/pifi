@@ -32,6 +32,7 @@ defmodule MyHiFi.Application do
         {Registry, keys: :unique, name: Download.Registry},
         {DynamicSupervisor, strategy: :one_for_one, name: Download.Supervisor},
         MyHiFi.Player,
+        MyHiFi.DeviceUi,
         MyHiFi.Peripheral.Supervisor,
         MyHiFiWeb.Endpoint
       ] ++ target_children()

@@ -19,6 +19,13 @@ defmodule MyHiFi.Test.RecordingScreen do
 
   use Agent
 
+  # The screen is on one bus of SPI0 and the touch controller is on the other, and the
+  # backlight is GPIO 2 of that controller. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
+  @screen_bus "spidev0.0"
+  @touch_bus "spidev0.1"
+  @gpio_set_pin 0x10
+  @gpio_clear_pin 0x11
+
   @doc "Start the recorder and make these the Circuits backends for one test."
   @spec use_it() :: :ok
   def use_it do
@@ -38,7 +45,7 @@ defmodule MyHiFi.Test.RecordingScreen do
   def start_link(_opts), do: Agent.start_link(fn -> [] end, name: __MODULE__)
 
   @typedoc "One thing that the driver did."
-  @type entry :: {:spi, binary()} | {:gpio, 0 | 1} | {:backlight, 0 | 1}
+  @type entry :: {:spi, String.t(), binary()} | {:gpio, 0 | 1}
 
   @doc "Write one entry down. The backends call this."
   @spec record(entry()) :: :ok
@@ -49,13 +56,18 @@ defmodule MyHiFi.Test.RecordingScreen do
   def entries, do: __MODULE__ |> Agent.get(& &1) |> Enum.reverse()
 
   @doc """
-  The levels that the backlight line was given, in order.
+  The levels that the backlight was given, in order.
 
-  1 is on and 0 is off. A board that wires the backlight to a supply gives none of
-  these. See `MyHiFi.Peripheral.PiTft.Ili9341.backlight/2`.
+  1 is on and 0 is off. The backlight is GPIO 2 of the STMPE610, so each level here
+  is a write of `GPIO_SET_PIN` or `GPIO_CLR_PIN` on the bus of that chip. See
+  `MyHiFi.Peripheral.PiTft.Stmpe610`.
   """
   @spec backlight() :: [0 | 1]
-  def backlight, do: for({:backlight, level} <- entries(), do: level)
+  def backlight do
+    for {:spi, @touch_bus, <<register, 0x04>>} <- entries(),
+        register in [@gpio_set_pin, @gpio_clear_pin],
+        do: if(register == @gpio_set_pin, do: 1, else: 0)
+  end
 
   @doc "Forget everything, so a test reads one draw and not the init sequence too."
   @spec forget() :: :ok
@@ -79,8 +91,9 @@ defmodule MyHiFi.Test.RecordingScreen do
     |> Enum.reverse()
   end
 
-  # The backlight says nothing about the bus, so it ends no command and opens none.
-  defp fold({:backlight, _level}, state), do: state
+  # The touch controller says nothing about the screen, so its bus ends no command and
+  # opens none.
+  defp fold({:spi, @touch_bus, _data}, state), do: state
 
   # The line goes low for a command, so a low level ends the command before it.
   defp fold({:gpio, 0}, state), do: {:awaiting_command, flush(state)}
@@ -89,16 +102,17 @@ defmodule MyHiFi.Test.RecordingScreen do
   # that is already open.
   defp fold({:gpio, 1}, state), do: state
 
-  defp fold({:spi, <<command>>}, {:awaiting_command, commands}), do: {{command, []}, commands}
+  defp fold({:spi, @screen_bus, <<command>>}, {:awaiting_command, commands}),
+    do: {{command, []}, commands}
 
-  defp fold({:spi, payload}, {{command, parts}, commands}),
+  defp fold({:spi, @screen_bus, payload}, {{command, parts}, commands}),
     do: {{command, [payload | parts]}, commands}
 
-  defp fold({:spi, payload}, {:awaiting_command, _commands}) do
+  defp fold({:spi, @screen_bus, payload}, {:awaiting_command, _commands}) do
     raise "a command is one byte, and the screen got #{byte_size(payload)} with the line low"
   end
 
-  defp fold({:spi, payload}, {nil, _commands}) do
+  defp fold({:spi, @screen_bus, payload}, {nil, _commands}) do
     raise "the screen got #{byte_size(payload)} bytes before the line said command or data"
   end
 
@@ -112,14 +126,18 @@ defmodule MyHiFi.Test.RecordingScreen do
 
     @behaviour Circuits.SPI.Backend
 
-    defstruct max_transfer_size: 4096
+    defstruct [:name, max_transfer_size: 4096]
 
     @impl Circuits.SPI.Backend
     def bus_names(_options), do: ["spidev0.0", "spidev0.1"]
 
     @impl Circuits.SPI.Backend
-    def open(_bus_name, options) do
-      {:ok, %__MODULE__{max_transfer_size: Keyword.get(options, :max_transfer_size, 4096)}}
+    def open(bus_name, options) do
+      {:ok,
+       %__MODULE__{
+         name: bus_name,
+         max_transfer_size: Keyword.get(options, :max_transfer_size, 4096)
+       }}
     end
 
     @impl Circuits.SPI.Backend
@@ -130,11 +148,18 @@ defmodule MyHiFi.Test.RecordingScreen do
 
       def config(_bus), do: {:ok, %{mode: 0, bits_per_word: 8, speed_hz: 32_000_000, delay_us: 0}}
 
-      def transfer(_bus, data) do
+      def transfer(bus, data) do
         data = IO.iodata_to_binary(data)
-        RecordingScreen.record({:spi, data})
-        {:ok, :binary.copy(<<0>>, byte_size(data))}
+        RecordingScreen.record({:spi, bus.name, data})
+        {:ok, answer(data)}
       end
+
+      # The STMPE610 reads its identifier before it takes the backlight pin, so this
+      # answers `0x0811` for those two addresses. Every other read gives zeros, as the
+      # screen does: it holds no MISO line that the driver reads.
+      defp answer(<<0x80, _dummy>>), do: <<0x00, 0x08>>
+      defp answer(<<0x81, _dummy>>), do: <<0x00, 0x11>>
+      defp answer(data), do: :binary.copy(<<0>>, byte_size(data))
 
       def write(bus, data) do
         {:ok, _read} = transfer(bus, data)
@@ -179,13 +204,11 @@ defmodule MyHiFi.Test.RecordingScreen do
     defimpl Circuits.GPIO.Handle do
       alias MyHiFi.Test.RecordingScreen
 
-      # The backlight is a GPIO as well, and it says nothing about the bus, so it goes
-      # in the record under a name of its own and `commands/0` passes it by.
+      # The line that says command or data. The backlight is not a GPIO of the
+      # Raspberry Pi on this board, so no line here carries it.
       @data_command 25
-      @backlight 18
 
       def write(%{spec: @data_command}, value), do: RecordingScreen.record({:gpio, value})
-      def write(%{spec: @backlight}, value), do: RecordingScreen.record({:backlight, value})
       def write(_handle, _value), do: :ok
 
       def read(_handle), do: 0
