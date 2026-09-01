@@ -36,8 +36,15 @@ if Mix.target() != :host do
 
     This process also starts ntpd again when a connection reaches the internet. It holds
     the network events already, and a second subscriber of the same property would do
-    that work twice. The comment on `restart_ntpd/3` holds the fault of busybox ntpd
+    that work twice. The comment on `restart_ntpd/1` holds the fault of busybox ntpd
     that makes this necessary.
+
+    The first read does that work as well, and the event alone is not enough. This
+    process is the second to last child of `MyHiFi.Application`, so it starts about six
+    seconds after the boot, and VintageNet reports `:internet` about half a second after
+    the boot. A log of 14 boots of one device held the event 3 times, and the 3 are the
+    boots where Wi-Fi took 8 seconds more than usual. On the other 11 the clock stayed
+    wrong until a person set it.
     """
 
     use GenServer
@@ -75,6 +82,8 @@ if Mix.target() != :host do
     # because a read of the output asks the player and the player answers a call.
     @impl GenServer
     def handle_continue(:first_read, state) do
+      if internet?(), do: restart_ntpd("The network already reaches the internet")
+
       {:noreply, %{state | network: network(), output: output(), storage: storage()}}
     end
 
@@ -128,24 +137,39 @@ if Mix.target() != :host do
     # `NervesTime` starts ntpd 10 ms after the boot, and Wi-Fi associates later than
     # that. busybox ntpd reads the address of each pool server one time, at its start,
     # so a start with no DNS leaves the daemon with no server. It then runs and sets no
-    # clock, and the board holds 1970 until something starts the daemon again.
+    # clock, and the board holds the time of the last shutdown until something starts
+    # the daemon again.
     #
     # A connection that reaches `:internet` is the first moment that a read of an
     # address can succeed, so the daemon starts again there. A clock that is already
     # right needs nothing. The Podcast Index refuses a request from a board whose clock
     # is not right, so this is what makes a podcast work on a cold start. See
     # `MyHiFi.Podcast.Index`.
-    defp restart_ntpd(["interface", _name, "connection"], old, :internet) when old != :internet do
+    #
+    # The message names the caller, because two paths reach this and a log of one boot
+    # must say which one ran.
+    defp restart_ntpd(message) do
       if NervesTime.synchronized?() do
         :ok
       else
-        Logger.info("The network reached the internet, and the clock is not right yet.")
+        Logger.info("#{message}, and the clock is not right yet.")
 
         NervesTime.restart_ntpd()
       end
     end
 
+    defp restart_ntpd(["interface", _name, "connection"], old, :internet) when old != :internet,
+      do: restart_ntpd("The network reached the internet")
+
     defp restart_ntpd(_property, _old, _new), do: :ok
+
+    # A subscriber learns nothing about a property that already holds its value, so the
+    # first read asks for the value itself. See `PropertyTable.subscribe/2`.
+    defp internet? do
+      ["interface", :_, "connection"]
+      |> VintageNet.match()
+      |> Enum.any?(&match?({_property, :internet}, &1))
+    end
 
     defp network, do: Device.network!()
 
