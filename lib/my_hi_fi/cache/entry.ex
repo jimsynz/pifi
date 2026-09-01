@@ -79,12 +79,27 @@ defmodule MyHiFi.Cache.Entry do
 
       The same namespace and key replace what was there, so a caller may write again
       without a read first.
+
+      A caller that writes a variant of another entry, such as a thumbnail, names
+      the three variant fields here. **`:create_variant` of `AshStorage` cannot do
+      that work**, because it accepts neither `namespace` nor `entry_key` and this
+      resource allows no nil in either. A variant is bytes like any other entry, so
+      it takes this action and the cache holds one way to write a file.
       """
 
       upsert? true
       upsert_identity :namespace_entry_key
 
-      accept [:namespace, :entry_key, :content_type, :filename, :keep?]
+      accept [
+        :namespace,
+        :entry_key,
+        :content_type,
+        :filename,
+        :keep?,
+        :variant_of_blob_id,
+        :variant_name,
+        :variant_digest
+      ]
 
       argument :bytes, :string do
         description "The bytes of the file. This never reaches the database."
@@ -207,6 +222,13 @@ defmodule MyHiFi.Cache.Entry do
 
     publish_all :create, "written"
     publish_all :destroy, "written"
+  end
+
+  # A variant names its source, and the database holds a foreign key on that column,
+  # so the variants of an entry must go before the entry does. This covers every
+  # destroy of this resource, whichever caller starts it.
+  changes do
+    change MyHiFi.Cache.Entry.Changes.PurgeVariants, on: [:destroy]
   end
 
   attributes do

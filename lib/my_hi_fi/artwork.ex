@@ -22,7 +22,6 @@ defmodule MyHiFi.Artwork do
   guess about which of four files exists.
   """
 
-  alias AshStorage.Service.{Context, Disk}
   alias MyHiFi.Artwork.Thumbnail
   alias MyHiFi.Cache
 
@@ -70,15 +69,19 @@ defmodule MyHiFi.Artwork do
   @doc """
   Everything that the web interface needs to send one picture.
 
-  It gives the path and the type in one read, and it notes that something used the
-  entry, which is what orders the eviction. See `MyHiFi.Cache`.
+  It gives the path, the type and the entity tag in one read, and it notes that
+  something used the entry, which is what orders the eviction. See `MyHiFi.Cache`.
+
+  The entity tag is the checksum of the bytes, which `MyHiFi.Cache` writes for each
+  entry that arrives as bytes. Every picture and every thumbnail arrives that way, so
+  the field always holds a value here.
 
   `name` comes from a request, so a name that is not a hash gives `:error` and no
   request reads another file of the partition. A type that this module does not serve
   gives `:error` as well, because the cache holds any bytes and this route must send
   an image alone.
   """
-  @spec serve(String.t()) :: {:ok, Path.t(), String.t()} | :error
+  @spec serve(String.t()) :: {:ok, Path.t(), String.t(), String.t()} | :error
   def serve(name) do
     with true <- hash?(name),
          {:ok, entry} <- Cache.fetch(@namespace, name),
@@ -86,7 +89,7 @@ defmodule MyHiFi.Artwork do
          path = path(entry),
          true <- File.exists?(path) do
       Cache.touch(entry)
-      {:ok, path, entry.content_type}
+      {:ok, path, entry.content_type, entry.checksum}
     else
       _other -> :error
     end
@@ -160,14 +163,16 @@ defmodule MyHiFi.Artwork do
   @doc """
   Make a thumbnail of one artwork entry.
 
-  It reads the source file, runs `vipsthumbnail`, and creates a variant entry
-  through `AshStorage`. The variant holds `variant_of_blob_id` pointing to the
-  source, so the cache can find it again.
+  It reads the source file, runs `vipsthumbnail`, and writes the answer to the cache
+  as an entry of its own. That entry holds `variant_of_blob_id`, which names the
+  picture, so a caller finds one from the other.
 
   A source that is not JPEG or PNG gives no thumbnail, because libvips in this
   firmware writes neither WebP nor GIF.
 
-  A source that already holds a thumbnail does nothing and gives the existing one.
+  A source that already holds a thumbnail of these settings does nothing and gives
+  that one. A thumbnail that an older build wrote holds another digest, and this
+  writes a new one over it. See `MyHiFi.Artwork.Thumbnail.digest/0`.
   """
   @spec generate_thumbnail(MyHiFi.Cache.Entry.t()) ::
           {:ok, MyHiFi.Cache.Entry.t()} | {:error, term()}
@@ -175,7 +180,7 @@ defmodule MyHiFi.Artwork do
     if Thumbnail.accept?(entry.content_type) do
       case existing_thumbnail(entry) do
         nil -> create_thumbnail(entry)
-        variant -> {:ok, variant}
+        variant -> current_thumbnail(entry, variant)
       end
     else
       {:error, :unsupported_format}
@@ -218,10 +223,15 @@ defmodule MyHiFi.Artwork do
   @doc """
   Everything that a caller needs to send one thumbnail.
 
-  It gives the path and the type in one read, and it notes that something used the
-  entry. See `serve/1`.
+  It gives the path, the type and the entity tag in one read, and it notes that
+  something used the entry. See `serve/1`.
+
+  The entity tag moves when the thumbnail moves, and a new build of
+  `MyHiFi.Artwork.Thumbnail` is one thing that moves it. The address of a thumbnail
+  holds the name of the picture alone, so the tag is what tells a browser that the
+  bytes at that address are not the bytes that it holds.
   """
-  @spec serve_thumbnail(String.t()) :: {:ok, Path.t(), String.t()} | :error
+  @spec serve_thumbnail(String.t()) :: {:ok, Path.t(), String.t(), String.t()} | :error
   def serve_thumbnail(name) do
     with true <- hash?(name),
          {:ok, entry} <- Cache.fetch(@namespace, name),
@@ -229,7 +239,7 @@ defmodule MyHiFi.Artwork do
          variant_path = path(variant),
          true <- File.exists?(variant_path) do
       Cache.touch(variant)
-      {:ok, variant_path, variant.content_type}
+      {:ok, variant_path, variant.content_type, variant.checksum}
     else
       _other -> :error
     end
@@ -242,75 +252,45 @@ defmodule MyHiFi.Artwork do
     |> Enum.find(fn variant -> variant.variant_name == "thumbnail" end)
   end
 
+  defp current_thumbnail(entry, variant) do
+    if variant.variant_digest == Thumbnail.digest() do
+      {:ok, variant}
+    else
+      create_thumbnail(entry)
+    end
+  end
+
   @sobelow_skip ["Traversal.FileModule"]
   defp create_thumbnail(entry) do
-    source_path = path(entry)
-
     dest_path =
       Path.join(System.tmp_dir!(), "thumbnail_#{:erlang.unique_integer([:positive])}.jpg")
 
     try do
-      case Thumbnail.transform(source_path, dest_path, []) do
-        {:ok, metadata} ->
-          create_variant_entry(entry, dest_path, metadata)
-
-        {:error, reason} ->
-          {:error, reason}
+      with {:ok, metadata} <- Thumbnail.transform(path(entry), dest_path, []),
+           {:ok, bytes} <- File.read(dest_path) do
+        store_thumbnail(entry, bytes, metadata)
       end
     after
       File.rm(dest_path)
     end
   end
 
-  @sobelow_skip ["Traversal.FileModule"]
-  defp create_variant_entry(source_entry, dest_path, metadata) do
-    with {:ok, bytes} <- File.read(dest_path),
-         digest <- variant_digest(),
-         key <- variant_key(source_entry.key) do
-      Ash.create(
-        Cache.Entry,
-        %{
-          key: key,
-          filename: "thumbnail_#{source_entry.filename}",
-          content_type: Map.get(metadata, :content_type, source_entry.content_type),
-          byte_size: byte_size(bytes),
-          checksum: :crypto.hash(:md5, bytes) |> Base.encode64(),
-          service_name: Disk,
-          service_opts: %{root: Cache.directory()},
-          metadata: Map.drop(metadata, [:content_type, :filename]),
-          variant_of_blob_id: source_entry.id,
-          variant_name: "thumbnail",
-          variant_digest: digest
-        },
-        action: :create_variant
-      )
-      |> case do
-        {:ok, variant} ->
-          upload_variant_file(key, bytes)
-          {:ok, variant}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    end
+  # The cache writes the file and holds the row, as it does for the picture itself.
+  # See the `:put` action of `MyHiFi.Cache.Entry` for why the variant action of
+  # `AshStorage` cannot.
+  defp store_thumbnail(source, bytes, metadata) do
+    Cache.put(@namespace, thumbnail_key(source.entry_key), %{
+      bytes: bytes,
+      content_type: Map.get(metadata, :content_type, source.content_type),
+      variant_of_blob_id: source.id,
+      variant_name: "thumbnail",
+      variant_digest: Thumbnail.digest()
+    })
   end
 
-  defp upload_variant_file(key, bytes) do
-    context = %Context{service_opts: [root: Cache.directory()]}
-    Disk.upload(key, bytes, context)
-  end
-
-  defp variant_key(source_key) do
-    Path.join([@namespace, "variants", source_key, "thumbnail"])
-  end
-
-  defp variant_digest do
-    {Thumbnail, []}
-    |> :erlang.term_to_binary()
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
-    |> binary_part(0, 16)
-  end
+  # The key of the picture and a name for what this is. It holds no hash of 64
+  # characters, so `serve/1` refuses it and the thumbnail route is the one way to it.
+  defp thumbnail_key(source_key), do: "#{source_key}.thumbnail"
 
   defp download(url) do
     with {:ok, response} <- get(url),

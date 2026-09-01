@@ -10,6 +10,11 @@ defmodule MyHiFi.Artwork.Thumbnail do
   in memory. The output is JPEG at 85% quality, because the screen is 18-bit colour
   and the loss is invisible.
 
+  **`>` in the size makes it shrink a picture and never grow one.** A size of `320x`
+  alone grows a small picture to 320 pixels, and a station logo is usually smaller
+  than the screen. One logo of 180 by 180 pixels and 3735 bytes became 320 by 320
+  pixels and 10285 bytes on the device, which is more bytes and no more detail.
+
   WebP and GIF do not get thumbnails. libvips in this firmware reads WebP and GIF
   but writes neither, so those formats stay as they are.
   """
@@ -17,7 +22,27 @@ defmodule MyHiFi.Artwork.Thumbnail do
   @behaviour AshStorage.Variant
 
   @width 320
+  @size "#{@width}x>"
   @quality 85
+
+  @doc """
+  What the settings of this variant are, in 16 characters.
+
+  Each thumbnail row holds this, and `MyHiFi.Artwork.generate_thumbnail/1` compares
+  it. A thumbnail that an older build wrote therefore gives way to a new one, and a
+  change here reaches every picture that the device holds.
+
+  **The digest of `AshStorage` cannot do this work.** `AshStorage.VariantDefinition`
+  hashes the module and the options that a resource declares, and this variant
+  declares no option, so the width and the quality never move it.
+  """
+  @spec digest() :: String.t()
+  def digest do
+    :sha256
+    |> :crypto.hash(:erlang.term_to_binary({__MODULE__, @size, @quality}))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
+  end
 
   @impl true
   def accept?("image/jpeg"), do: true
@@ -29,7 +54,7 @@ defmodule MyHiFi.Artwork.Thumbnail do
     args = [
       source_path,
       "--size",
-      "#{@width}x",
+      @size,
       "-o",
       dest_path <> "[Q=#{@quality}]"
     ]

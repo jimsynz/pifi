@@ -26,6 +26,15 @@ defmodule MyHiFi.CacheTest do
 
   defp on_disk(entry), do: Path.join(Cache.directory(), entry.key)
 
+  # What `MyHiFi.Artwork` writes for a thumbnail: an entry that names its source.
+  defp thumbnail_of(source, bytes \\ "a thumbnail") do
+    put(source.namespace, source.entry_key <> ".thumbnail", bytes, %{
+      variant_of_blob_id: source.id,
+      variant_name: "thumbnail",
+      variant_digest: "0123456789abcdef"
+    })
+  end
+
   # `MyHiFi.Device.Monitor` is the one subscriber, and it is a target module, so this
   # tests the wire that carries the notification to it. Free space moves when the cache
   # writes and when it removes, and a page shows that figure. See `MyHiFi.Cache.Entry`.
@@ -250,6 +259,45 @@ defmodule MyHiFi.CacheTest do
 
       assert Cache.list_entries!() == []
       refute File.exists?(path)
+    end
+  end
+
+  describe "a variant of an entry" do
+    test "it is an entry of its own, and the source names it" do
+      source = put("artwork", "abc123", "a picture")
+      variant = thumbnail_of(source)
+
+      assert variant.key == "artwork/abc123.thumbnail"
+      assert File.exists?(on_disk(variant))
+      assert [found] = Ash.load!(source, :variants).variants
+      assert found.id == variant.id
+    end
+
+    # The database holds a foreign key on `variant_of_blob_id`, so a purge of the
+    # source alone fails and the cache then frees nothing.
+    test "a purge of the source takes it, and its file" do
+      source = put("artwork", "abc123", "a picture")
+      variant = thumbnail_of(source)
+
+      assert :ok = Cache.purge(source)
+
+      assert Cache.list_entries!() == []
+      refute File.exists?(on_disk(variant))
+    end
+
+    test "an eviction that takes the source takes it as well" do
+      source = put("artwork", "abc123", String.duplicate("x", 100))
+      variant = thumbnail_of(source)
+
+      # The source alone covers the excess, so the eviction chooses it and not the
+      # variant, which is smaller and warmer.
+      Application.put_env(:my_hi_fi, :cache_limit, 50)
+
+      assert {:ok, report} = Cache.prune()
+
+      assert report.removed == 1
+      assert keys() == []
+      refute File.exists?(on_disk(variant))
     end
   end
 

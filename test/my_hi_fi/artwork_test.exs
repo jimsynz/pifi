@@ -27,6 +27,19 @@ defmodule MyHiFi.ArtworkTest do
 
   defp held, do: Path.wildcard(Path.join(Artwork.directory(), "*")) |> Enum.map(&Path.basename/1)
 
+  # `vipsthumbnail` comes from `nbpr_libvips`, and that dependency belongs to the
+  # target alone. A test on the host therefore writes what `generate_thumbnail/1`
+  # writes, and it reads that back.
+  defp put_thumbnail(entry, bytes) do
+    Cache.put!("artwork", entry.entry_key <> ".thumbnail", %{
+      bytes: bytes,
+      content_type: "image/jpeg",
+      variant_of_blob_id: entry.id,
+      variant_name: "thumbnail",
+      variant_digest: MyHiFi.Artwork.Thumbnail.digest()
+    })
+  end
+
   defp stub(type, body) do
     Req.Test.stub(Artwork, fn conn ->
       conn
@@ -78,7 +91,7 @@ defmodule MyHiFi.ArtworkTest do
       stub("image/jpeg", @jpeg)
 
       assert {:ok, name} = Artwork.fetch("https://station.test/logo.png")
-      assert {:ok, _path, "image/jpeg"} = Artwork.serve(name)
+      assert {:ok, _path, "image/jpeg", _etag} = Artwork.serve(name)
     end
 
     # 11 New Zealand stations answer `image/x-icon`, and 8 of those send a PNG or a
@@ -87,17 +100,17 @@ defmodule MyHiFi.ArtworkTest do
       stub("image/x-icon", @png)
 
       assert {:ok, name} = Artwork.fetch("https://station.test/favicon.ico")
-      assert {:ok, _path, "image/png"} = Artwork.serve(name)
+      assert {:ok, _path, "image/png", _etag} = Artwork.serve(name)
     end
 
     test "reads a GIF and a WebP from their bytes" do
       stub("application/octet-stream", @gif)
       assert {:ok, gif} = Artwork.fetch("https://station.test/one")
-      assert {:ok, _path, "image/gif"} = Artwork.serve(gif)
+      assert {:ok, _path, "image/gif", _etag} = Artwork.serve(gif)
 
       stub("application/octet-stream", @webp)
       assert {:ok, webp} = Artwork.fetch("https://station.test/two")
-      assert {:ok, _path, "image/webp"} = Artwork.serve(webp)
+      assert {:ok, _path, "image/webp", _etag} = Artwork.serve(webp)
     end
 
     test "refuses an answer that is not an image" do
@@ -175,7 +188,7 @@ defmodule MyHiFi.ArtworkTest do
       stub("image/png", @png)
       {:ok, name} = Artwork.fetch("https://station.test/logo.png")
 
-      assert {:ok, path, "image/png"} = Artwork.serve(name)
+      assert {:ok, path, "image/png", _etag} = Artwork.serve(name)
       assert path == on_disk(name)
       assert File.read!(path) == @png
     end
@@ -186,7 +199,7 @@ defmodule MyHiFi.ArtworkTest do
       {:ok, before} = Cache.fetch("artwork", name)
 
       Process.sleep(5)
-      assert {:ok, _path, _type} = Artwork.serve(name)
+      assert {:ok, _path, _type, _etag} = Artwork.serve(name)
 
       {:ok, after_serving} = Cache.fetch("artwork", name)
       assert DateTime.compare(after_serving.last_accessed_at, before.last_accessed_at) == :gt
@@ -232,6 +245,74 @@ defmodule MyHiFi.ArtworkTest do
     end
   end
 
+  describe "the thumbnail of a picture" do
+    test "a picture that libvips cannot write gives none" do
+      stub("image/webp", @webp)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.webp")
+      {:ok, entry} = Cache.fetch("artwork", name)
+
+      assert {:error, :unsupported_format} = Artwork.generate_thumbnail(entry)
+      assert Artwork.thumbnail(entry) == nil
+    end
+
+    test "it belongs to the picture, and the thumbnail route serves it" do
+      stub("image/jpeg", @jpeg)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.jpg")
+      {:ok, entry} = Cache.fetch("artwork", name)
+      thumbnail = put_thumbnail(entry, "a small picture")
+
+      assert Artwork.thumbnail(entry).id == thumbnail.id
+      assert Artwork.thumbnail_name("https://station.test/logo.jpg") == thumbnail.entry_key
+      assert {:ok, path, "image/jpeg", _etag} = Artwork.serve_thumbnail(name)
+      assert File.read!(path) == "a small picture"
+    end
+
+    test "the name of a thumbnail holds no hash, so the picture route refuses it" do
+      stub("image/jpeg", @jpeg)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.jpg")
+      {:ok, entry} = Cache.fetch("artwork", name)
+      thumbnail = put_thumbnail(entry, "a small picture")
+
+      assert Artwork.serve(thumbnail.entry_key) == :error
+    end
+
+    test "a picture that holds one already gets no second one" do
+      stub("image/jpeg", @jpeg)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.jpg")
+      {:ok, entry} = Cache.fetch("artwork", name)
+      thumbnail = put_thumbnail(entry, "a small picture")
+
+      assert {:ok, found} = Artwork.generate_thumbnail(entry)
+      assert found.id == thumbnail.id
+    end
+
+    test "a thumbnail that an older build wrote is not given back" do
+      stub("image/jpeg", @jpeg)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.jpg")
+      {:ok, entry} = Cache.fetch("artwork", name)
+
+      Cache.put!("artwork", entry.entry_key <> ".thumbnail", %{
+        bytes: "a small picture",
+        content_type: "image/jpeg",
+        variant_of_blob_id: entry.id,
+        variant_name: "thumbnail",
+        variant_digest: "an older build"
+      })
+
+      # `vipsthumbnail` belongs to the target, so the host answers an error here. What
+      # this holds is that the answer is not the thumbnail of the older build.
+      refute match?(
+               {:ok, %{variant_digest: "an older build"}},
+               Artwork.generate_thumbnail(entry)
+             )
+    end
+
+    test "a picture that the cache does not hold gives no thumbnail" do
+      assert Artwork.thumbnail_name("https://station.test/logo.jpg") == nil
+      assert Artwork.serve_thumbnail(String.duplicate("a", 64)) == :error
+    end
+  end
+
   describe "the eviction" do
     test "a read of a new picture removes a colder one when the cache is full" do
       stub("image/png", @png)
@@ -264,7 +345,7 @@ defmodule MyHiFi.ArtworkTest do
 
       # Serving the first one makes the second the colder of the two.
       Process.sleep(5)
-      {:ok, _path, _type} = Artwork.serve(first)
+      {:ok, _path, _type, _etag} = Artwork.serve(first)
 
       # The limit holds two pictures of this size, so one of the three goes.
       Application.put_env(:my_hi_fi, :cache_limit, byte_size(@png) * 2 + 10)
