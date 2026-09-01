@@ -56,8 +56,8 @@ defmodule MyHiFi.Peripheral.PiTftTest do
     assert List.last(RecordingScreen.backlight()) == 0
   end
 
-  test "it reads the player topic only" do
-    assert PiTft.subscriptions() == [:player]
+  test "it reads the player topic and the device topic" do
+    assert PiTft.subscriptions() == [:player, :device]
   end
 
   describe "handle_event/2" do
@@ -213,6 +213,30 @@ defmodule MyHiFi.Peripheral.PiTftTest do
       assert state.awake?
       assert RecordingScreen.backlight() == []
       assert sent() == []
+    end
+
+    test "the charge reaches the view, so the screen can draw it", %{state: state} do
+      {:ok, state} =
+        PiTft.handle_event(%MyHiFi.Event.Device.BatteryChanged{percent: 64, low?: false}, state)
+
+      assert state.view.battery_percent == 64
+      refute state.view.low_battery?
+    end
+
+    # A device on the mains publishes none of these, and a battery at 0 would be a lie.
+    test "a device that reported no charge draws no battery", %{state: state} do
+      assert state.view.battery_percent == nil
+    end
+
+    # A stop clears the track, and it does not clear the cell.
+    test "a stop keeps the charge", %{state: state} do
+      {:ok, state} =
+        PiTft.handle_event(%MyHiFi.Event.Device.BatteryChanged{percent: 64, low?: false}, state)
+
+      {:ok, state} = PiTft.handle_event(%Player.Stopped{reason: :requested}, state)
+
+      assert state.view.state == :stopped
+      assert state.view.battery_percent == 64
     end
 
     test "a failure says what went wrong", %{state: state} do

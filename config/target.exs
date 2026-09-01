@@ -36,7 +36,9 @@ config :emerge, compiled_backends: [:wayland]
 config :my_hi_fi,
   peripherals: [
     {MyHiFi.Peripheral.PiTft, []},
-    {MyHiFi.Peripheral.PirateAudio, []}
+    {MyHiFi.Peripheral.PirateAudio, []},
+    {MyHiFi.Peripheral.Battery, []},
+    {MyHiFi.Peripheral.ActivityLed, []}
   ]
 
 # Erlinit can be configured without a rootfs_overlay. See

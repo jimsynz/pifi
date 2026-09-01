@@ -17,6 +17,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   use Emerge.UI
 
   alias Emerge.UI.{Background, Border, Font}
+  alias MyHiFi.Peripheral.BatteryIcon
 
   @width 320
   @height 240
@@ -44,6 +45,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
           artwork_path: String.t() | nil,
           accent: {0..255, 0..255, 0..255} | nil,
           live?: boolean(),
+          battery_percent: 0..100 | nil,
+          low_battery?: boolean(),
           percent: 0..100,
           position_ms: non_neg_integer(),
           duration_ms: pos_integer() | nil
@@ -64,6 +67,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       artwork_path: nil,
       accent: nil,
       live?: false,
+      battery_percent: nil,
+      low_battery?: false,
       percent: 0,
       position_ms: 0,
       duration_ms: nil
@@ -128,11 +133,22 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
         ],
         text(status_text(view))
       ),
-      el(
-        [width(fill()), Font.size(13), Font.color(color(:slate, 500)), align_right()],
-        text(elapsed(view))
-      )
+      # A spacer, and not `align_right/0` on the time. That attribute pins one child to
+      # the right of the row, so the battery after it flowed back beside the pill. A
+      # child that fills the space instead pushes everything after it to the corner,
+      # which is where a person looks for a battery.
+      el([width(fill())], none()),
+      el([Font.size(13), Font.color(color(:slate, 500))], text(elapsed(view))),
+      battery(view)
     ])
+  end
+
+  # **A device on the mains draws no battery at all.** It holds no gauge, so it publishes
+  # no charge, and a battery at 0 would be a lie. See `MyHiFi.Peripheral.Battery`.
+  defp battery(%{battery_percent: nil}), do: none()
+
+  defp battery(view) do
+    el([center_y()], BatteryIcon.render(view.battery_percent, view.low_battery?))
   end
 
   # The body takes the space that the status row and the progress bar leave, so the

@@ -12,6 +12,11 @@ defmodule MyHiFi.AutoStandby do
   when the audio stops: after a pause, after the last track of the queue, and after a
   fault.
 
+  **A low battery is the second reason to enter standby**, and it needs no period at all.
+  A device that runs on a battery cannot turn its own power off, so the moment that the
+  cell reaches the low point is the moment to stop writing and tell a person to charge
+  it. See `MyHiFi.Peripheral.Battery` and `MyHiFi.Peripheral.ActivityLed`.
+
   A control of a person starts the period again, whether the control is a button of
   the board or a click of the web page. Both reach `MyHiFi.Player`, and the player
   publishes what it did. A press that can do nothing, such as a next with nothing
@@ -35,6 +40,7 @@ defmodule MyHiFi.AutoStandby do
   require Logger
 
   alias MyHiFi.Event
+  alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
@@ -93,11 +99,13 @@ defmodule MyHiFi.AutoStandby do
     # lost. See `MyHiFi.Device.Monitor`, which learnt this the hard way.
     :ok = Event.subscribe(:player)
     :ok = Event.subscribe(:input)
+    :ok = Event.subscribe(:device)
 
     state = %{
       minutes: stored_minutes(),
       minute_ms: Keyword.get(options, :minute_ms, :timer.minutes(1)),
-      timer: nil
+      timer: nil,
+      low?: false
     }
 
     {:ok, state, {:continue, :first_read}}
@@ -144,6 +152,25 @@ defmodule MyHiFi.AutoStandby do
   def handle_info(%Events.Standby{}, state), do: {:noreply, reschedule(state)}
 
   def handle_info(%Input.ButtonPressed{}, state), do: {:noreply, reschedule(state)}
+
+  # **A cell that reaches the low point puts the device in standby**, because this device
+  # cannot turn its own power off and a person who reads nothing loses what the card
+  # holds. See `MyHiFi.Peripheral.Battery`.
+  #
+  # It acts on the change to low, and not on each event under it. The gauge publishes
+  # again at each percentage, so a device that acted on every one of them would go back
+  # to standby a minute after a person woke it, and again a minute after that. A person
+  # who wakes a device that says "charge now" asked for it while they charge it.
+  def handle_info(%DeviceEvents.BatteryChanged{low?: true}, %{low?: false} = state) do
+    Logger.warning("The battery reached the low point. The device enters standby.")
+
+    report(Playback.standby(true))
+
+    {:noreply, %{state | low?: true}}
+  end
+
+  def handle_info(%DeviceEvents.BatteryChanged{low?: low?}, state),
+    do: {:noreply, %{state | low?: low?}}
 
   def handle_info(%_{}, state), do: {:noreply, state}
 

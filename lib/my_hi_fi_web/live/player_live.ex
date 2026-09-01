@@ -39,7 +39,10 @@ defmodule MyHiFiWeb.PlayerLive do
 
   alias MyHiFi.Artwork
   alias MyHiFi.Artwork.Accent
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Player, as: Events
+  alias MyHiFi.Peripheral.Battery
   alias MyHiFi.Playback
 
   @impl Phoenix.LiveView
@@ -58,11 +61,25 @@ defmodule MyHiFiWeb.PlayerLive do
       |> assign(:capabilities, capabilities(state.source))
       |> assign(:expanded?, false)
       |> assign(:reason, nil)
+      |> assign(:battery, Battery.last_reading())
       |> accent(state.artwork_path)
+
+    # `MyHiFiWeb.Shell` subscribes each LiveView to the `:player` topic, and the battery
+    # is on the `:device` topic. **The reading at mount is what earns its place beside
+    # this**: the gauge reports a change once a minute at most, so a page that waited for
+    # an event would draw no battery for a minute, or for an hour if the cell is steady.
+    if connected?(socket), do: Event.subscribe(:device)
 
     # The faceplate holds this LiveView, and `MyHiFiWeb.Layouts` renders the
     # faceplate. The layout of the page therefore must not wrap it again.
     {:ok, socket, layout: false}
+  end
+
+  # A device on the mains publishes none of these, so a page on that device draws no
+  # battery at all. See `MyHiFi.Peripheral.Battery`.
+  @impl Phoenix.LiveView
+  def handle_info(%DeviceEvents.BatteryChanged{} = event, socket) do
+    {:noreply, assign(socket, :battery, event)}
   end
 
   @impl Phoenix.LiveView
@@ -263,6 +280,8 @@ defmodule MyHiFiWeb.PlayerLive do
           <p id="position" class="numerals shrink-0 border-l border-edge pl-3 text-sm text-accent">
             {elapsed(assigns)}
           </p>
+
+          <.battery :if={@battery} battery={@battery} />
         </div>
 
         <.play_control id="play-pause" status={@status} track={@track} standby?={@standby?} />
@@ -423,6 +442,53 @@ defmodule MyHiFiWeb.PlayerLive do
       class={@class}
     />
     """
+  end
+
+  attr(:battery, :map, required: true)
+
+  # **Heroicons holds `battery-0`, `battery-50` and `battery-100` and nothing between
+  # them**, so a cell at 30 percent would read as half full. Three elements draw the
+  # exact charge, and the width of the bar is the one thing that a style attribute can
+  # say and a class cannot.
+  #
+  # The colour says the warning and the bar says the charge, and the two are separate: a
+  # cell at 15 percent means one thing under a threshold of 10 and another under 20. See
+  # `MyHiFi.Peripheral.BatteryIcon`, which draws the same shape for the two screens.
+  defp battery(assigns) do
+    ~H"""
+    <div
+      id="battery"
+      class="flex shrink-0 items-center gap-px"
+      title={"#{@battery.percent}%"}
+      aria-label={"Battery #{@battery.percent} percent"}
+    >
+      <div class={[
+        "relative h-3 w-6 rounded-[3px] border",
+        if(@battery.low?, do: "border-rose-400", else: "border-ink-dim")
+      ]}>
+        <div
+          class={[
+            "absolute inset-y-[2px] left-[2px] rounded-[1px]",
+            if(@battery.low?, do: "bg-rose-400", else: "bg-ink-dim")
+          ]}
+          style={"width: #{bar_width(@battery.percent)}"}
+        >
+        </div>
+      </div>
+
+      <div class={[
+        "h-1.5 w-[2px] rounded-[1px]",
+        if(@battery.low?, do: "bg-rose-400", else: "bg-ink-dim")
+      ]}>
+      </div>
+    </div>
+    """
+  end
+
+  # The body is 24 pixels wide and it holds a border of 1 and a gap of 2 on each side, so
+  # 18 of them are the bar. A cell with any charge left never draws nothing.
+  defp bar_width(percent) do
+    "#{percent |> Kernel./(100) |> Kernel.*(18) |> round() |> max(1) |> min(18)}px"
   end
 
   attr(:id, :string, required: true)

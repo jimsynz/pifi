@@ -1,10 +1,17 @@
 defmodule MyHiFi.Peripheral do
   @moduledoc """
-  A piece of hardware that a person sees or touches.
+  A piece of hardware that a board may hold, and may not.
 
-  A screen, a knob, and a touch panel are all peripherals, and they share this one
-  behaviour. A peripheral gets the events that it asks for, and it publishes what
-  the person does. It never calls another part of the firmware directly.
+  A screen, a knob, a touch panel and a battery gauge are all peripherals, and they
+  share this one behaviour. A peripheral gets the events that it asks for, and it
+  publishes what it reads or what the person does. It never calls another part of the
+  firmware directly.
+
+  **The rule is the bus, and not the finger.** An earlier version of this sentence said
+  "a piece of hardware that a person sees or touches", which fits a screen and a knob and
+  not `MyHiFi.Peripheral.Battery`. What every one of them shares is the reason for
+  `enabled?/1`: the same image runs on a board that holds the part and on a board that
+  does not, and a bus with nothing on it gives an error at each start.
 
   One behaviour, and not one for a screen and one for a control, has a hardware
   reason. On the PiTFT the ILI9341 screen and the STMPE610 touch controller share

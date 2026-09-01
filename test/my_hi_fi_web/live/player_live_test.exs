@@ -1,6 +1,7 @@
 defmodule MyHiFiWeb.PlayerLiveTest do
   use MyHiFiWeb.ConnCase, async: false
 
+  alias MyHiFi.Artwork.Thumbnail
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
 
@@ -56,7 +57,7 @@ defmodule MyHiFiWeb.PlayerLiveTest do
         metadata: %{accent: %{lightness: 0.78, chroma: 0.15, hue: 74.0}},
         variant_of_blob_id: entry.id,
         variant_name: "thumbnail",
-        variant_digest: MyHiFi.Artwork.Thumbnail.digest()
+        variant_digest: Thumbnail.digest()
       })
 
       on_exit(fn -> MyHiFi.Cache.purge(entry) end)
@@ -458,6 +459,46 @@ defmodule MyHiFiWeb.PlayerLiveTest do
 
       assert player |> element("#next") |> render_click()
       assert player |> element("#previous") |> render_click()
+    end
+  end
+
+  describe "the battery" do
+    # A device on the mains holds no gauge and publishes no charge, so a page on that
+    # device draws no battery at all. Never a battery at 0.
+    test "a device that reports no charge draws none", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      refute has_element?(player, "#battery")
+    end
+
+    test "a charge that arrives draws one", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      Event.publish(:device, %MyHiFi.Event.Device.BatteryChanged{
+        percent: 64,
+        volts: 3.9,
+        low?: false
+      })
+
+      html = render(player)
+
+      assert html =~ "Battery 64 percent"
+      assert has_element?(player, "#battery")
+    end
+
+    test "a cell that is low draws in the warning colour", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      Event.publish(:device, %MyHiFi.Event.Device.BatteryChanged{
+        percent: 8,
+        volts: 3.5,
+        low?: true
+      })
+
+      html = render(player)
+
+      assert html =~ "Battery 8 percent"
+      assert html =~ "rose-400"
     end
   end
 end

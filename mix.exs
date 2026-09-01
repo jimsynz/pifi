@@ -118,8 +118,11 @@ defmodule MyHiFi.MixProject do
       # `ash_phoenix`, which it needs.
       {:cinder, "~> 0.16"},
       # `MyHiFi.Peripheral.PiTft` owns the SPI bus of the screen and the data line
-      # that goes with it.
+      # that goes with it. `MyHiFi.Peripheral.Battery` owns the I2C bus of the fuel
+      # gauge, and `max1704x` and `wafer` both name `circuits_i2c` as optional, so this
+      # is the project that must ask for it.
       {:circuits_gpio, "~> 2.1"},
+      {:circuits_i2c, "~> 2.1"},
       {:circuits_spi, "~> 2.1"},
       # `membrane_core` needs `ratio`, and `ratio` names
       # `decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`, so the
@@ -143,6 +146,10 @@ defmodule MyHiFi.MixProject do
       # sees `MIX_TARGET` and chooses the DRM one by itself, and it holds the reason
       # that the choice is what it is.
       {:emerge, "~> 0.3"},
+      # The fuel gauge of the UPS-Lite pHAT. It reads the charge of the cell over I2C,
+      # and it holds no native code of its own: `wafer` is the layer that talks to
+      # `circuits_i2c`. See `MyHiFi.Peripheral.Battery`.
+      {:max1704x, "~> 0.1.1"},
       {:membrane_aac_fdk_plugin, "~> 0.18"},
       {:membrane_aac_plugin, "~> 0.19"},
       {:membrane_core, "~> 1.0"},

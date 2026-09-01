@@ -60,9 +60,11 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   alias MyHiFi.Artwork
   alias MyHiFi.Artwork.Accent
-  alias MyHiFi.Event.Player
   alias MyHiFi.Event
+  alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Input
+  alias MyHiFi.Event.Player
+  alias MyHiFi.Peripheral.Battery
   alias MyHiFi.Peripheral.PiTft.{Buttons, Ili9341, Screen, Stmpe610}
   alias MyHiFi.Playback
 
@@ -86,9 +88,20 @@ defmodule MyHiFi.Peripheral.PiTft do
         screen: screen,
         stmpe: stmpe,
         buttons: buttons,
-        view: Screen.new(),
+        view: with_battery(Screen.new()),
         awake?: true
       })
+    end
+  end
+
+  # **An event says that the charge moved, and this screen may start long after the last
+  # one.** The gauge reports a change once a minute at most, so a screen that waited for
+  # an event would draw no battery for a minute or for an hour. See
+  # `MyHiFi.Peripheral.Battery.last_reading/0`.
+  defp with_battery(view) do
+    case Battery.last_reading() do
+      nil -> view
+      reading -> %{view | battery_percent: reading.percent, low_battery?: reading.low?}
     end
   end
 
@@ -100,9 +113,15 @@ defmodule MyHiFi.Peripheral.PiTft do
     if Playback.state!().standby?, do: doze(state), else: draw(state)
   end
 
-  @doc "The screen reads what the player does, and it uses no other topic."
+  @doc """
+  The screen reads what the player does, and what the hardware does.
+
+  The `:device` topic carries `MyHiFi.Event.Device.BatteryChanged`. A device on the mains
+  publishes none of those and this screen then draws no battery, which is the whole of
+  what it needs to know. See `MyHiFi.Peripheral.Battery`.
+  """
   @impl MyHiFi.Peripheral
-  def subscriptions, do: [:player]
+  def subscriptions, do: [:player, :device]
 
   @doc false
   @impl MyHiFi.Peripheral
@@ -200,6 +219,9 @@ defmodule MyHiFi.Peripheral.PiTft do
     }
   end
 
+  defp view(%DeviceEvents.BatteryChanged{} = event, view),
+    do: %{view | battery_percent: event.percent, low_battery?: event.low?}
+
   defp view(%Player.Buffering{} = event, view),
     do: %{view | state: :buffering, percent: event.percent}
 
@@ -209,7 +231,9 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp view(%Player.Failed{} = event, view),
     do: %{view | state: :failed, message: message(event.reason)}
 
-  defp view(%Player.Stopped{}, _view), do: Screen.new()
+  # A stop clears the track, and it does not clear the cell.
+  defp view(%Player.Stopped{}, view),
+    do: %{Screen.new() | battery_percent: view.battery_percent, low_battery?: view.low_battery?}
 
   # A hint or a view event changes nothing that this screen shows. An ignored event is
   # normal. See `MyHiFi.Peripheral`.
