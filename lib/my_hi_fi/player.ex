@@ -530,6 +530,18 @@ defmodule MyHiFi.Player do
     {:noreply, restart(%State{state | pipeline: nil, monitor: nil})}
   end
 
+  # **A restart belongs to the stream that failed, and to nothing else.** A pipeline
+  # that runs now is one that a person asked for after the fault, and a start here
+  # would leave it playing with nothing holding it. A player that a person paused must
+  # stay quiet as well. `cancel_restart/1` takes the message out of the mailbox, and
+  # these two clauses hold the cases that reach the process another way.
+  @impl GenServer
+  def handle_info(:restart, %State{pipeline: pipeline} = state) when pipeline != nil,
+    do: {:noreply, state}
+
+  @impl GenServer
+  def handle_info(:restart, %State{paused?: true} = state), do: {:noreply, state}
+
   @impl GenServer
   def handle_info(:restart, %State{source: source, item: item} = state)
       when source != nil and item != nil do
@@ -545,8 +557,14 @@ defmodule MyHiFi.Player do
     {:noreply, state}
   end
 
+  # **Every start ends the pipeline that the state holds.** `Membrane.Pipeline.start/2`
+  # links nothing to this process, so a state that loses the reference leaves a
+  # pipeline that holds `aplay` and keeps the room loud. The next pipeline then finds
+  # the sound card busy and dies with `:epipe`, the notices of the one that plays reach
+  # a player that does not know it, and a person who presses stop stops nothing. This
+  # is the one place that answers for it, so no caller can forget.
   defp start(source, item, %State{} = state) do
-    state = cancel_restart(state)
+    state = state |> cancel_restart() |> stop_pipeline()
 
     with {:ok, playable} <- source.resolve(item),
          {:ok, sink} <- sink(state) do
@@ -694,7 +712,6 @@ defmodule MyHiFi.Player do
 
   defp play_now(source, item, %State{} = state) do
     store_position(state)
-    state = stop_pipeline(state)
 
     case start(source, item, state) do
       {:ok, state} ->
@@ -764,7 +781,6 @@ defmodule MyHiFi.Player do
 
   defp restart_for_output(%State{} = state) do
     store_position(state)
-    state = stop_pipeline(state)
 
     case start(state.source, state.item, state) do
       {:ok, state} -> state
@@ -861,8 +877,19 @@ defmodule MyHiFi.Player do
   # hears nothing.
   defp cancel_restart(%State{restart_timer: nil} = state), do: state
 
+  # **A timer that has already fired cannot be cancelled, and its message waits in the
+  # mailbox.** `Process.cancel_timer/1` answers `false` for that, and the message then
+  # reaches `handle_info(:restart, …)` after the person asked for something else. This
+  # takes it out of the mailbox, which is the one way to stop it.
   defp cancel_restart(%State{restart_timer: timer} = state) do
-    Process.cancel_timer(timer)
+    if Process.cancel_timer(timer) == false do
+      receive do
+        :restart -> :ok
+      after
+        0 -> :ok
+      end
+    end
+
     %State{state | restart_timer: nil}
   end
 

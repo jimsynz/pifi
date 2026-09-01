@@ -333,6 +333,34 @@ defmodule MyHiFi.PlayerControlsTest do
       refute_receive %Events.Started{}, 3000
       assert %{item: %{title: "Episode 2"}, playing?: true} = Player.state()
     end
+
+    # A timer that has already fired cannot be cancelled, so the message reaches the
+    # player whatever it does. On the board this left a pipeline that held `aplay` and
+    # kept the room loud: the notices of that pipeline reached a player that no longer
+    # knew it, the page held the buffering state for ever, and a stop stopped nothing.
+    test "a start that arrives after the person moved on builds no second pipeline" do
+      playing(1)
+      pipeline = :sys.get_state(Player).pipeline
+
+      send(Player, :restart)
+      Process.sleep(200)
+
+      assert :sys.get_state(Player).pipeline == pipeline
+      assert Process.alive?(pipeline)
+      refute_receive %Events.Started{}, 500
+    end
+
+    test "a start that arrives while the player is paused makes no sound" do
+      playing(1)
+      assert :ok = Player.pause(true)
+      assert_receive %Events.Paused{}, 2000
+
+      send(Player, :restart)
+      Process.sleep(200)
+
+      assert %{paused?: true, playing?: false} = Player.state()
+      refute_receive %Events.Started{}, 500
+    end
   end
 
   describe "a skip" do
