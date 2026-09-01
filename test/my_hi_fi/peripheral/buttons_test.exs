@@ -1,9 +1,9 @@
-defmodule MyHiFi.Peripheral.PiTft.ButtonsTest do
+defmodule MyHiFi.Peripheral.ButtonsTest do
   # `MyHiFi.Test.RecordingScreen` is a named process, so two of these cannot run at
   # the same time.
   use ExUnit.Case, async: false
 
-  alias MyHiFi.Peripheral.PiTft.Buttons
+  alias MyHiFi.Peripheral.Buttons
   alias MyHiFi.Test.RecordingScreen
 
   @a_millisecond 1_000_000
@@ -20,7 +20,7 @@ defmodule MyHiFi.Peripheral.PiTft.ButtonsTest do
 
   # A press and the release that arms the next one.
   defp pressed(buttons, line, at) do
-    {:ok, button, buttons} = Buttons.press(buttons, fell(line, at))
+    {:ok, button, :short, buttons} = Buttons.press(buttons, fell(line, at))
     {:none, buttons} = Buttons.press(buttons, rose(line, at + 100))
 
     {button, buttons}
@@ -50,7 +50,7 @@ defmodule MyHiFi.Peripheral.PiTft.ButtonsTest do
 
     # A press of one of these gave six changes of level on the board.
     test "the bounce of a press is one press", %{buttons: buttons} do
-      {:ok, 1, buttons} = Buttons.press(buttons, fell(18, 0))
+      {:ok, 1, :short, buttons} = Buttons.press(buttons, fell(18, 0))
 
       assert {:none, buttons} = Buttons.press(buttons, rose(18, 5))
       assert {:none, buttons} = Buttons.press(buttons, fell(18, 9))
@@ -62,7 +62,7 @@ defmodule MyHiFi.Peripheral.PiTft.ButtonsTest do
     # break of the contact is outside that window. A reader of the falling edge alone
     # counted each one as a new press.
     test "the bounce of a release is no press at all", %{buttons: buttons} do
-      {:ok, 1, buttons} = Buttons.press(buttons, fell(18, 0))
+      {:ok, 1, :short, buttons} = Buttons.press(buttons, fell(18, 0))
 
       # The finger leaves at 300 ms, and the contact then breaks and makes again.
       {:none, buttons} = Buttons.press(buttons, rose(18, 300))
@@ -79,15 +79,15 @@ defmodule MyHiFi.Peripheral.PiTft.ButtonsTest do
     end
 
     test "a button that is held down gives one press", %{buttons: buttons} do
-      {:ok, 1, buttons} = Buttons.press(buttons, fell(18, 0))
+      {:ok, 1, :short, buttons} = Buttons.press(buttons, fell(18, 0))
 
       assert {:none, _buttons} = Buttons.press(buttons, fell(18, 2000))
     end
 
     test "the bounce of one button does not quiet another", %{buttons: buttons} do
-      {:ok, 1, buttons} = Buttons.press(buttons, fell(18, 0))
+      {:ok, 1, :short, buttons} = Buttons.press(buttons, fell(18, 0))
 
-      assert {:ok, 2, _buttons} = Buttons.press(buttons, fell(27, 5))
+      assert {:ok, 2, :short, _buttons} = Buttons.press(buttons, fell(27, 5))
     end
   end
 
@@ -97,8 +97,61 @@ defmodule MyHiFi.Peripheral.PiTft.ButtonsTest do
       # proves that the answer holds what it opened and nothing else.
       {:ok, buttons} = Buttons.open(lines: [18])
 
-      assert {:ok, 1, _} = Buttons.press(buttons, fell(18, 0))
+      assert {:ok, 1, :short, _} = Buttons.press(buttons, fell(18, 0))
       assert {:none, _buttons} = Buttons.press(buttons, fell(27, 0))
+    end
+  end
+
+  # A board that names `hold_ms` reads a tap and a hold apart, so it answers at the
+  # release and not at the press. See `MyHiFi.Peripheral.Buttons`.
+  describe "a board that reads a long press" do
+    setup do
+      RecordingScreen.use_it()
+      {:ok, buttons} = Buttons.open(lines: [5, 6], hold_ms: 50)
+
+      %{held: buttons}
+    end
+
+    test "a press alone answers nothing, because it says nothing yet", %{held: buttons} do
+      assert {:none, _buttons} = Buttons.press(buttons, fell(5, 0))
+    end
+
+    test "a tap answers short at the release", %{held: buttons} do
+      {:none, buttons} = Buttons.press(buttons, fell(5, 0))
+
+      assert {:ok, 1, :short, _buttons} = Buttons.press(buttons, rose(5, 100))
+    end
+
+    test "a hold answers long when the period passes, and not at the release" do
+      RecordingScreen.use_it()
+      {:ok, buttons} = Buttons.open(lines: [5], hold_ms: 10)
+
+      {:none, buttons} = Buttons.press(buttons, fell(5, 0))
+
+      assert_receive {Buttons, :held, 5, ref}, 500
+      assert {:ok, 1, :long, buttons} = Buttons.press(buttons, {Buttons, :held, 5, ref})
+
+      # The release of a hold that answered already answers no second time.
+      assert {:none, _buttons} = Buttons.press(buttons, rose(5, 1000))
+    end
+
+    # The timer is not cancelled at a release, so a message that arrives after one must
+    # match no press at all.
+    test "the timer of a tap answers nothing after the release" do
+      RecordingScreen.use_it()
+      {:ok, buttons} = Buttons.open(lines: [5], hold_ms: 10)
+
+      {:none, buttons} = Buttons.press(buttons, fell(5, 0))
+      assert_receive {Buttons, :held, 5, ref}, 500
+      {:ok, 1, :short, buttons} = Buttons.press(buttons, rose(5, 100))
+
+      assert {:none, _buttons} = Buttons.press(buttons, {Buttons, :held, 5, ref})
+    end
+
+    test "a second button is the second button, and it holds too", %{held: buttons} do
+      {:none, buttons} = Buttons.press(buttons, fell(6, 0))
+
+      assert {:ok, 2, :short, _buttons} = Buttons.press(buttons, rose(6, 100))
     end
   end
 end

@@ -290,6 +290,15 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
     assert Keyword.fetch!(paths, :allowlist) == [MyHiFi.Cache.directory()]
   end
 
+  # A tap is a press and the release that follows it. This board reads a long press, so
+  # the press alone says nothing until one of the two arrives.
+  defp tap_button(state, line) do
+    now = System.monotonic_time(:nanosecond)
+    {:ok, state} = PirateAudio.handle_info({:circuits_gpio, line, now, 0}, state)
+
+    PirateAudio.handle_info({:circuits_gpio, line, now + 100_000_000, 1}, state)
+  end
+
   defp frames do
     RecordingScreen.commands()
     |> Enum.count(&match?({@memory_write, _pixels}, &1))
@@ -304,5 +313,37 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
       live?: false,
       position_ms: 30_000
     }
+  end
+
+  # This board holds four buttons at the corners of the screen, and two of them work.
+  # See the moduledoc for the measurement that found that.
+  describe "the buttons" do
+    test "a press says which button, and never what it means", %{state: state} do
+      MyHiFi.Event.subscribe(:input)
+
+      {:ok, _state} = tap_button(state, 5)
+
+      assert_receive %MyHiFi.Event.Input.ButtonPressed{
+        peripheral: MyHiFi.Peripheral.PirateAudio,
+        button: 1
+      }
+    end
+
+    test "the second line is the second button", %{state: state} do
+      MyHiFi.Event.subscribe(:input)
+
+      {:ok, _state} = tap_button(state, 6)
+
+      assert_receive %MyHiFi.Event.Input.ButtonPressed{button: 2}
+    end
+
+    # GPIO 16 and 24 hold the two buttons that this board cannot read.
+    test "a line that this board does not read says nothing", %{state: state} do
+      MyHiFi.Event.subscribe(:input)
+
+      {:ok, _state} = tap_button(state, 16)
+
+      refute_receive %MyHiFi.Event.Input.ButtonPressed{}, 200
+    end
   end
 end

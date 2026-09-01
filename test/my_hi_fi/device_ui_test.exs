@@ -21,10 +21,11 @@ defmodule MyHiFi.DeviceUiTest do
     :ok
   end
 
-  defp press(button) do
+  defp press(button, peripheral \\ MyHiFi.Peripheral.PiTft, hold \\ :short) do
     Event.publish(:input, %Input.ButtonPressed{
-      peripheral: MyHiFi.Peripheral.PiTft,
-      button: button
+      peripheral: peripheral,
+      button: button,
+      hold: hold
     })
   end
 
@@ -72,5 +73,66 @@ defmodule MyHiFi.DeviceUiTest do
     Process.sleep(100)
 
     assert Process.alive?(Process.whereis(MyHiFi.DeviceUi))
+  end
+
+  # A row of four and a pad of two cannot share one mapping, so the event carries the
+  # board and this module reads it. See `MyHiFi.Peripheral.PirateAudio`.
+  describe "the buttons of the Pirate Audio" do
+    # The first button of the PiTFT is standby, and of this board it is play. A press of
+    # one must never do what the other one does.
+    test "the first button plays and pauses, and never enters standby" do
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: :warning) end)
+
+      log =
+        capture_log(fn ->
+          press(1, MyHiFi.Peripheral.PirateAudio)
+          Process.sleep(200)
+        end)
+
+      # The queue is empty, so a play can do nothing and says so.
+      assert log =~ "The control did nothing"
+      refute_receive %Player.Standby{}, 200
+    end
+
+    test "the second button asks for the track after this one" do
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: :warning) end)
+
+      log =
+        capture_log(fn ->
+          press(2, MyHiFi.Peripheral.PirateAudio)
+          Process.sleep(200)
+        end)
+
+      assert log =~ "The control did nothing"
+      refute_receive %Player.Standby{}, 200
+    end
+
+    # Two buttons hold three controls, so the hold of the first is the third.
+    test "a hold of the first button enters standby, and the next hold leaves it" do
+      press(1, MyHiFi.Peripheral.PirateAudio, :long)
+      assert_receive %Player.Standby{entered?: true}, 5000
+
+      press(1, MyHiFi.Peripheral.PirateAudio, :long)
+      assert_receive %Player.Standby{entered?: false}, 5000
+    end
+
+    # A board of four holds a button for standby and reads no hold at all.
+    test "a hold of a button of the row of four does nothing" do
+      press(1, MyHiFi.Peripheral.PiTft, :long)
+      Process.sleep(100)
+
+      refute_receive %Player.Standby{}, 200
+    end
+
+    # This board holds two that answer, and the other two are broken.
+    test "a third button does nothing, because this board holds no third" do
+      press(3, MyHiFi.Peripheral.PirateAudio)
+      Process.sleep(100)
+
+      assert Process.alive?(Process.whereis(MyHiFi.DeviceUi))
+      refute_receive %Player.Standby{}, 200
+    end
   end
 end

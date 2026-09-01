@@ -65,7 +65,8 @@ defmodule MyHiFi.Peripheral.PiTft do
   alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.Battery
-  alias MyHiFi.Peripheral.PiTft.{Buttons, Ili9341, Screen, Stmpe610}
+  alias MyHiFi.Peripheral.Buttons
+  alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen, Stmpe610}
   alias MyHiFi.Playback
 
   @doc "The name that the settings page draws."
@@ -146,8 +147,12 @@ defmodule MyHiFi.Peripheral.PiTft do
   @impl MyHiFi.Peripheral
   def handle_info(message, state) do
     case Buttons.press(state.buttons, message) do
-      {:ok, button, buttons} ->
-        Event.publish(:input, %Input.ButtonPressed{peripheral: __MODULE__, button: button})
+      {:ok, button, hold, buttons} ->
+        Event.publish(:input, %Input.ButtonPressed{
+          peripheral: __MODULE__,
+          button: button,
+          hold: hold
+        })
 
         {:ok, %{state | buttons: buttons}}
 

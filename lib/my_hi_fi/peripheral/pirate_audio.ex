@@ -17,15 +17,24 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   It answers to the `hifiberry-dac` profile of `MyHiFi.Hardware`, which writes the
   overlay into `config.txt`, and `MyHiFi.Output.Alsa` then lists it as a card.
 
-  ## What it does not do yet
+  ## Two buttons hold three controls
 
-  It takes the `:player` topic alone, and it publishes nothing. **The four buttons of
-  this board have no driver here.** They sit at GPIO 5, 6, 16 and 24, and
-  `MyHiFi.Peripheral.PiTft.Buttons` already reads a row of lines that an option names,
-  so the driver is nearly free. What is not free is the meaning: `MyHiFi.DeviceUi` maps
-  a row of four from left to right, and these four sit in two columns of two on either
-  side of the screen. That mapping is a decision and not a translation, so the buttons
-  wait for it.
+  A tap of the first plays or pauses, a hold of it reaches standby, and a tap of the
+  second plays the track after this one. `MyHiFi.DeviceUi` decides all three, and this
+  module says which button and how long a person held it.
+
+  ## Two buttons, and not four
+
+  The board holds four, at GPIO 5, 6, 16 and 24, one at each corner of the screen. **Two
+  of them work on this board and the other two are broken**, so this reads 5 and 6 alone.
+
+  A measurement on 2026-09-02 found that. Twelve free lines held an interrupt, a person
+  pressed the three buttons that they believed worked, twice, and only 5 and 6 ever
+  answered: `[5, 6, 6, 6, 6, 5, 6]`, where a line that repeats is the bounce that
+  `MyHiFi.Peripheral.Buttons` takes away. GPIO 16 opened and armed with the rest and
+  never went low.
+
+  `:lines` names them, so a board whose four all work needs no change here.
 
   ## It ignores the progress of a track
 
@@ -66,11 +75,24 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   @behaviour MyHiFi.Peripheral
 
   alias MyHiFi.Artwork
+  alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: DeviceEvents
+  alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.Battery
+  alias MyHiFi.Peripheral.Buttons
   alias MyHiFi.Peripheral.PirateAudio.{Screen, St7789}
   alias MyHiFi.Playback
+
+  # The two buttons that answer on this board, in the order that they sit down the left
+  # of the screen. See the moduledoc for the measurement that found them.
+  @lines [5, 6]
+
+  # **Two buttons hold three controls, so one of them holds two.** A person who holds the
+  # first button for this long asks for standby, and a tap of it plays or pauses. See
+  # `MyHiFi.DeviceUi` for what each one means, and `MyHiFi.Peripheral.Buttons` for why a
+  # tap still answers at once.
+  @hold_ms 600
 
   @doc "The name that the settings page draws."
   @impl MyHiFi.Peripheral
@@ -84,8 +106,18 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   """
   @impl MyHiFi.Peripheral
   def init(opts) do
-    with {:ok, screen} <- St7789.open(opts) do
-      first_frame(%{screen: screen, view: with_battery(Screen.new()), awake?: true})
+    with {:ok, screen} <- St7789.open(opts),
+         {:ok, buttons} <-
+           Buttons.open(
+             lines: Keyword.get(opts, :lines, @lines),
+             hold_ms: Keyword.get(opts, :hold_ms, @hold_ms)
+           ) do
+      first_frame(%{
+        screen: screen,
+        buttons: buttons,
+        view: with_battery(Screen.new()),
+        awake?: true
+      })
     end
   end
 
@@ -131,9 +163,35 @@ defmodule MyHiFi.Peripheral.PirateAudio do
     end
   end
 
+  @doc """
+  Say that a person pressed a button.
+
+  **This module says which button and not what the button does.** `MyHiFi.DeviceUi`
+  holds that, because a pad of two and a row of four do not mean the same thing.
+  """
+  @impl MyHiFi.Peripheral
+  def handle_info(message, state) do
+    case Buttons.press(state.buttons, message) do
+      {:ok, button, hold, buttons} ->
+        Event.publish(:input, %Input.ButtonPressed{
+          peripheral: __MODULE__,
+          button: button,
+          hold: hold
+        })
+
+        {:ok, %{state | buttons: buttons}}
+
+      {:none, buttons} ->
+        {:ok, %{state | buttons: buttons}}
+    end
+  end
+
   @doc "Turn the backlight off and give the hardware back."
   @impl MyHiFi.Peripheral
-  def terminate(_reason, state), do: St7789.close(state.screen)
+  def terminate(_reason, state) do
+    Buttons.close(state.buttons)
+    St7789.close(state.screen)
+  end
 
   @doc """
   What Emerge may read from the disk while it draws.

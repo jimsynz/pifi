@@ -20,6 +20,20 @@ defmodule MyHiFi.DeviceUi do
   Standby is the leftmost, as it is on the web page, because a person who wants the
   device quiet reaches for the end of the row.
 
+  The Pirate Audio holds two that answer, down the left of the screen:
+
+  | Button | How long | What it does |
+  | ------ | -------- | ------------ |
+  | 1      | A tap    | Play, or pause |
+  | 1      | A hold   | Standby, in and out |
+  | 2      | A tap    | The track after |
+
+  **Two buttons hold three controls, so one of them holds two.** A board of four has a
+  button for standby and therefore reads no hold at all.
+
+  The track before is the one that a person asks for least, so it is the one that no
+  button holds.
+
   It uses `MyHiFi.Playback`, as the web interface does, so a press and a click take
   the same path.
 
@@ -35,6 +49,7 @@ defmodule MyHiFi.DeviceUi do
 
   alias MyHiFi.Event
   alias MyHiFi.Event.Input
+  alias MyHiFi.Peripheral
   alias MyHiFi.Playback
 
   require Logger
@@ -55,8 +70,8 @@ defmodule MyHiFi.DeviceUi do
 
   @doc false
   @impl GenServer
-  def handle_info(%Input.ButtonPressed{button: button}, state) do
-    press(button)
+  def handle_info(%Input.ButtonPressed{} = event, state) do
+    press(event.peripheral, event.button, event.hold)
 
     {:noreply, state}
   end
@@ -65,13 +80,23 @@ defmodule MyHiFi.DeviceUi do
   # here before the part of this module that reads it exists.
   def handle_info(%_{}, state), do: {:noreply, state}
 
-  defp press(1), do: standby()
-  defp press(2), do: report(Playback.previous())
-  defp press(3), do: play_pause()
-  defp press(4), do: report(Playback.next())
+  # **The board decides the meaning, so the event carries the board.** A row of four and
+  # a pad of two cannot share one mapping, and the driver of a board must never hold the
+  # meaning of a press.
+  # **Two buttons hold three controls, so a hold of the first is the third.** A board of
+  # four has a button for standby and needs no hold at all.
+  defp press(Peripheral.PirateAudio, 1, :long), do: standby()
+  defp press(Peripheral.PirateAudio, 1, :short), do: play_pause()
+  defp press(Peripheral.PirateAudio, 2, :short), do: report(Playback.next())
 
-  # A board may hold more buttons than this device knows what to do with.
-  defp press(_button), do: :ok
+  defp press(_row_of_four, 1, :short), do: standby()
+  defp press(_row_of_four, 2, :short), do: report(Playback.previous())
+  defp press(_row_of_four, 3, :short), do: play_pause()
+  defp press(_row_of_four, 4, :short), do: report(Playback.next())
+
+  # A board may hold more buttons than this device knows what to do with, and a hold of
+  # a button that holds no second control is not a second control.
+  defp press(_peripheral, _button, _hold), do: :ok
 
   defp standby do
     report(Playback.standby(not Playback.state!().standby?))

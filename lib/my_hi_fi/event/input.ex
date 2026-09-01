@@ -18,10 +18,17 @@ defmodule MyHiFi.Event.Input do
 
     `peripheral` names the module that owns the button, so a device that grows a
     second board of buttons keeps the two apart.
+
+    `hold` says whether a person tapped the button or held it. A board that reads no
+    long press gives `:short` for every press. See `MyHiFi.Peripheral.Buttons`.
     """
 
-    @type t :: %__MODULE__{peripheral: module(), button: pos_integer()}
+    @type t :: %__MODULE__{
+            peripheral: module(),
+            button: pos_integer(),
+            hold: :short | :long
+          }
 
-    defstruct [:peripheral, :button]
+    defstruct [:peripheral, :button, hold: :short]
   end
 end
