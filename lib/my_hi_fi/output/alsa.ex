@@ -49,10 +49,22 @@ defmodule MyHiFi.Output.Alsa do
   @doc """
   Give a sink that plays to one device.
 
-  The `id` of a device is its ALSA hardware name. A card that needs the 48000 Hz
-  workaround gets the `rate48` definition of `/etc/asound.conf` in its place. That
-  definition holds the `plug` layer, so ALSA converts the sample format, and it holds
-  the card at 48000 Hz.
+  The `id` of a device is its ALSA hardware name, which begins `hw:`. **No card ever
+  gets that name, because `hw:` converts nothing.** A USB card gets the `rate48`
+  definition of `/etc/asound.conf`, and every other card gets `plughw:`. Both hold the
+  `plug` layer, and the rate is the only difference between them.
+
+  **The sample format of the decoder is not a choice, and a card refuses what it does
+  not hold.** `Membrane.RawAudio` calls 24 bits in 3 bytes `:s24le`, and ALSA calls the
+  same thing `S24_3LE`. libmad gives that for every MP3. The PCM5102A of a Pirate Audio
+  offers `S16_LE`, `S24_LE` and `S32_LE`, and `S24_LE` is 24 bits in 4 bytes, so none of
+  the three is what arrives. `aplay` therefore stopped at once, the port write gave
+  `:epipe`, and the pipeline of every track died with
+  `{:membrane_child_crash, :sink, :epipe}`. A measurement on the board on 2026-09-01
+  showed `S24_3LE` refused on `hw:` and played on `plughw:`.
+
+  The USB DAC hid this. `rate48` holds the `plug` layer, so that card converted the
+  format from the first day, and only a card that reached `hw:` could show the fault.
 
   **The rate is not a preference, and it is not a fact about every card.** USB audio
   sends one isochronous packet in each 1 ms frame, so 44100 Hz needs 44.1 samples in a
@@ -72,12 +84,14 @@ defmodule MyHiFi.Output.Alsa do
   """
   @impl MyHiFi.Output
   def sink_spec(device_id) do
-    if forced_48k?(device_id) do
-      %MyHiFi.Output.APlaySink{device: String.replace_prefix(device_id, "hw:", "rate48:")}
-    else
-      %MyHiFi.Output.APlaySink{device: device_id}
-    end
+    %MyHiFi.Output.APlaySink{device: String.replace_prefix(device_id, "hw:", plug(device_id))}
   end
+
+  # `plughw:` is a device of ALSA itself, so it needs no definition and a host holds it
+  # as well. `rate48` is ours, and `:alsa_rate48?` says whether the configuration that
+  # holds it is there to name: naming a definition that no configuration holds gives
+  # `Unknown PCM rate48:...` and no sound at all.
+  defp plug(device_id), do: if(forced_48k?(device_id), do: "rate48:", else: "plughw:")
 
   defp forced_48k?(device_id) do
     Application.get_env(:my_hi_fi, :alsa_rate48?, false) and usb?(device_id)

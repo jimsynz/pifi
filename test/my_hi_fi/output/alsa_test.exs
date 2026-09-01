@@ -115,8 +115,8 @@ defmodule MyHiFi.Output.AlsaTest do
 
     # `/proc/asound/cards` says which driver holds a card, and a host that runs this
     # test holds whatever cards it holds. The name below is one that no machine has.
-    test "a card that this machine does not hold is not a USB card" do
-      assert %MyHiFi.Output.APlaySink{device: "hw:CARD=Nothing,DEV=0"} =
+    test "a card that this machine does not hold takes the plug layer and not the rate" do
+      assert %MyHiFi.Output.APlaySink{device: "plughw:CARD=Nothing,DEV=0"} =
                Alsa.sink_spec("hw:CARD=Nothing,DEV=0")
     end
 
@@ -126,11 +126,28 @@ defmodule MyHiFi.Output.AlsaTest do
 
     # Naming a definition that no configuration holds gives `Unknown PCM rate48:...`
     # and no sound at all. `rootfs_overlay` holds it, so a host build must not name it.
-    test "a build with no such definition names the card itself" do
+    # `plughw:` is a device of ALSA itself, so a host holds that one.
+    test "a build with no such definition still takes the plug layer" do
       Application.put_env(:my_hi_fi, :alsa_rate48?, false)
 
       for %{id: id} <- Alsa.devices() do
-        assert %MyHiFi.Output.APlaySink{device: ^id} = Alsa.sink_spec(id)
+        assert %MyHiFi.Output.APlaySink{device: device} = Alsa.sink_spec(id)
+        assert device == String.replace_prefix(id, "hw:", "plughw:")
+        refute device =~ "rate48"
+      end
+    end
+
+    # libmad gives `:s24le` for every MP3, which is `S24_3LE` to ALSA, and the PCM5102A
+    # of a Pirate Audio offers `S16_LE`, `S24_LE` and `S32_LE` and none of those three.
+    # A raw `hw:` converts nothing, so `aplay` stopped and every pipeline died with
+    # `{:membrane_child_crash, :sink, :epipe}`. See `MyHiFi.Output.Alsa.sink_spec/1`.
+    test "no card ever reaches aplay as a raw hw: device, whatever the rate setting" do
+      for rate48? <- [true, false],
+          id <- ["hw:CARD=Nothing,DEV=0" | Enum.map(Alsa.devices(), & &1.id)] do
+        Application.put_env(:my_hi_fi, :alsa_rate48?, rate48?)
+
+        assert %MyHiFi.Output.APlaySink{device: device} = Alsa.sink_spec(id)
+        refute String.starts_with?(device, "hw:")
       end
     end
   end
