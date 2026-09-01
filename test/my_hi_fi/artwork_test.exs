@@ -2,6 +2,7 @@ defmodule MyHiFi.ArtworkTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Artwork
+  alias MyHiFi.Artwork.Thumbnail
   alias MyHiFi.Cache
 
   @png <<0x89, "PNG\r\n", 0x1A, "\n", "the rest of a small image">>
@@ -36,7 +37,7 @@ defmodule MyHiFi.ArtworkTest do
       content_type: "image/jpeg",
       variant_of_blob_id: entry.id,
       variant_name: "thumbnail",
-      variant_digest: MyHiFi.Artwork.Thumbnail.digest()
+      variant_digest: Thumbnail.digest()
     })
   end
 
@@ -318,7 +319,7 @@ defmodule MyHiFi.ArtworkTest do
         metadata: %{accent: %{lightness: 0.78, chroma: 0.15, hue: 74.0}},
         variant_of_blob_id: entry.id,
         variant_name: "thumbnail",
-        variant_digest: MyHiFi.Artwork.Thumbnail.digest()
+        variant_digest: Thumbnail.digest()
       })
 
       assert Artwork.accent(name) == %{lightness: 0.78, chroma: 0.15, hue: 74.0}
