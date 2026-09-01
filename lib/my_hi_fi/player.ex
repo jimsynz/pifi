@@ -108,6 +108,11 @@ defmodule MyHiFi.Player do
 
   `MyHiFi.Playback.play/2` puts the list in the queue and calls this with the row that
   a person pressed. See `MyHiFi.Playback.Queue`.
+
+  **This leaves standby**, as `pause/1` and `next/0` do, because a person who asks for
+  music asks the device to be awake. A device that played on with the state still in
+  standby made sound behind a screen that was dark, and the automatic standby then read
+  a device that plays and never went quiet.
   """
   @spec play(MyHiFi.Playback.Item.t()) :: :ok | {:error, term()}
   def play(item), do: GenServer.call(__MODULE__, {:play, item}, :timer.seconds(30))
@@ -258,7 +263,9 @@ defmodule MyHiFi.Player do
     case Source.from_slug(item.source) do
       {:ok, source} ->
         if Source.enabled?(source) do
-          play_now(source, item, state)
+          # `waking/1` goes here and not at the head of the clause, so a play that
+          # cannot happen leaves the device as quiet as it found it.
+          play_now(source, item, waking(state))
         else
           {:reply, {:error, :source_not_in_use}, state}
         end
@@ -321,11 +328,13 @@ defmodule MyHiFi.Player do
 
   # A move is a play of another row of the queue, so this gives the work to the clause
   # that plays one. That clause writes the place of this track, it stops the pipeline,
-  # and it keeps the new track in the settings.
+  # it keeps the new track in the settings, and it leaves standby. This called
+  # `waking/1` of its own before that clause did, and two calls woke a device that then
+  # found the source out of use and played nothing.
   @impl GenServer
   def handle_call({:move, direction}, from, %State{} = state) do
     case moved(direction) do
-      {:ok, item} -> handle_call({:play, item}, from, waking(state))
+      {:ok, item} -> handle_call({:play, item}, from, state)
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end

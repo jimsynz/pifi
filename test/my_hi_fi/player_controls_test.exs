@@ -246,6 +246,38 @@ defmodule MyHiFi.PlayerControlsTest do
       assert_receive %Events.Started{}, 2000
       assert %{standby?: false, playing?: true} = Player.state()
     end
+
+    # A device in standby made sound and stayed in standby, because this path took the
+    # state as it found it and every other control woke it. The screen then stayed dark
+    # over a track that played, and the automatic standby read a device that plays and
+    # never went quiet. The test above covers `pause/1` and not this.
+    test "a play of a row leaves standby as well, and not the resume alone" do
+      playing(1)
+      assert :ok = Player.standby(true)
+      assert_receive %Events.Standby{entered?: true}, 2000
+
+      assert :ok = Player.play(Enum.at(Episodes.episodes(), 1))
+
+      assert_receive %Events.Standby{entered?: false}, 2000
+      assert_receive %Events.Started{}, 2000
+      assert %{standby?: false, playing?: true} = Player.state()
+    end
+
+    # A person who asks for music that the device cannot play asked for nothing, so the
+    # device stays as quiet as they found it.
+    test "a play that cannot happen holds the device in standby" do
+      item = playing(1)
+      assert :ok = Player.standby(true)
+      assert_receive %Events.Standby{entered?: true}, 2000
+
+      assert :ok = Player.enable_source(Episodes, false)
+      on_exit(fn -> Player.enable_source(Episodes, true) end)
+
+      assert {:error, :source_not_in_use} = Player.play(item)
+
+      refute_receive %Events.Standby{entered?: false}, 500
+      assert %{standby?: true} = Player.state()
+    end
   end
 
   describe "next and previous" do
