@@ -174,6 +174,34 @@ defmodule MyHiFi.Playback.Player do
       end
     end
 
+    action :standby_minutes, :integer do
+      description """
+      The minutes of quiet that the device waits for before it enters standby.
+
+      0 means that it enters standby by itself never.
+      """
+
+      run fn _input, _context -> {:ok, MyHiFi.AutoStandby.minutes()} end
+    end
+
+    action :set_standby_minutes, :atom do
+      description """
+      Set the minutes of quiet that the device waits for before it enters standby.
+
+      A track that plays holds the timer off, and a control of a person starts the
+      period again. 0 turns the automatic standby off. See `MyHiFi.AutoStandby`.
+      """
+
+      argument :minutes, :integer, allow_nil?: false
+
+      run fn input, _context ->
+        case MyHiFi.AutoStandby.set_minutes(input.arguments.minutes) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
     action :enable_source, :atom do
       description """
       Put a source in use, or take it out of use.

@@ -11,6 +11,7 @@ defmodule MyHiFiWeb.SettingsLive do
       /settings/sources                the sources, and which ones are in use
       /settings/sources/internet-radio one source
       /settings/peripherals            the screens and the controls of the board
+      /settings/standby                the period of quiet before standby
       /settings/network                a report
       /settings/storage                a report
 
@@ -162,6 +163,17 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("set_standby_minutes", %{"minutes" => minutes}, socket) do
+    case MyHiFi.Playback.set_standby_minutes(String.to_integer(minutes)) do
+      {:ok, :ok} ->
+        {:noreply, socket |> put_flash(:info, standby_flash(minutes)) |> refresh()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "The device kept the period: #{inspect(reason)}")}
+    end
+  end
+
+  @impl Phoenix.LiveView
   def handle_event("select_output", %{"id" => id}, socket) do
     case MyHiFi.Playback.select_output(id) do
       {:ok, :ok} ->
@@ -191,6 +203,10 @@ defmodule MyHiFiWeb.SettingsLive do
         title="Peripherals"
       >
         {peripherals_summary(@peripheral_list)}
+      </.row>
+
+      <.row id="standby-row" to={~p"/settings/standby"} icon="hero-moon" title="Standby">
+        {standby_summary(@standby_minutes)}
       </.row>
 
       <.row id="network-row" to={~p"/settings/network"} icon="hero-wifi" title="Network">
@@ -438,6 +454,46 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def render(%{live_action: :standby} = assigns) do
+    ~H"""
+    <.section id="settings-standby" title="Standby" back={~p"/settings"}>
+      <p class="mb-3 text-sm text-ink-dim">
+        The device enters standby when it plays nothing for this long and no person
+        presses a control. A track that plays holds the period off, so an episode of
+        two hours reaches its end.
+      </p>
+
+      <ul class="divide-y divide-edge">
+        <li :for={minutes <- periods()}>
+          <button
+            type="button"
+            id={"standby-period-#{minutes}"}
+            phx-click="set_standby_minutes"
+            phx-value-minutes={minutes}
+            class={[
+              "flex w-full items-center gap-3 py-2 text-left",
+              minutes == @standby_minutes && "text-accent"
+            ]}
+          >
+            <span class={[
+              "flex size-5 shrink-0 items-center justify-center rounded-full",
+              if(minutes == @standby_minutes,
+                do: "bg-accent/15 shadow-[inset_0_0_0_1px_var(--color-accent)]",
+                else: "shadow-[inset_0_0_0_1px_var(--color-edge)]"
+              )
+            ]}>
+              <span :if={minutes == @standby_minutes} class="size-2 rounded-full bg-accent" />
+            </span>
+
+            <span class="min-w-0 grow truncate">{period_title(minutes)}</span>
+          </button>
+        </li>
+      </ul>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
   def render(%{live_action: :network} = assigns) do
     ~H"""
     <.section id="settings-network" title="Network" back={~p"/settings"}>
@@ -648,7 +704,24 @@ defmodule MyHiFiWeb.SettingsLive do
     |> assign(:storage, Device.storage!())
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
+    |> assign(:standby_minutes, MyHiFi.Playback.standby_minutes!())
   end
+
+  # The periods that a person can pick. A free number would need a check of its own on
+  # this page, and no person of a stereo wants 37 minutes.
+  defp periods, do: [0, 5, 10, 15, 20, 30, 45, 60, 90, 120]
+
+  defp period_title(0), do: "Never"
+  defp period_title(60), do: "After 1 hour"
+  defp period_title(90), do: "After 1 hour and 30 minutes"
+  defp period_title(120), do: "After 2 hours"
+  defp period_title(minutes), do: "After #{minutes} minutes"
+
+  defp standby_summary(0), do: "The device stays awake"
+  defp standby_summary(minutes), do: period_title(minutes)
+
+  defp standby_flash("0"), do: "The device stays awake."
+  defp standby_flash(minutes), do: "The device enters standby after #{minutes} minutes of quiet."
 
   # `:sources` belongs to `MyHiFiWeb.Shell`, and the top row of the faceplate draws
   # it. That list holds the sources in use, and this one holds every source and the

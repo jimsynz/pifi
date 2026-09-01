@@ -65,6 +65,8 @@ defmodule MyHiFi.Playback do
       define :previous, action: :previous
       define :skip, action: :skip, args: [:ms]
       define :standby, action: :standby, args: [:entered?]
+      define :standby_minutes, action: :standby_minutes
+      define :set_standby_minutes, action: :set_standby_minutes, args: [:minutes]
       define :enable_source, action: :enable_source, args: [:source, :enabled?]
       define :output, action: :output
       define :select_output, action: :select_output, args: [:id]

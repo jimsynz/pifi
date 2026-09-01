@@ -23,9 +23,14 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     Application.put_env(:my_hi_fi, Index, plug: {Req.Test, Index}, retry: false)
     on_exit(fn -> Application.delete_env(:my_hi_fi, Index) end)
 
+    # `MyHiFi.AutoStandby` holds the period in its own state as well as in a row, so a
+    # test that changed it must put the process back where it was.
+    on_exit(fn -> MyHiFi.Playback.set_standby_minutes(20) end)
+
     on_exit(fn ->
       # The settings outlive a test, because they are rows and not process state.
       for key <- [
+            MyHiFi.AutoStandby.key(),
             FromRemote.countries_key(),
             MyHiFi.Player.output_device_key(),
             Index.key_setting(),
@@ -52,6 +57,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       assert has_element?(view, "#output-row")
       assert has_element?(view, "#sources-row")
       assert has_element?(view, "#peripherals-row")
+      assert has_element?(view, "#standby-row")
       assert has_element?(view, "#network-row")
       assert has_element?(view, "#storage-row")
     end
@@ -236,6 +242,42 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, _view, html} = live(conn, ~p"/settings/peripherals")
 
       assert html =~ "In use"
+    end
+  end
+
+  describe "the standby section" do
+    test "marks the period that the device holds", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/standby")
+
+      assert html =~ "After 20 minutes"
+      assert has_element?(view, "#standby-period-0")
+      assert has_element?(view, "#standby-period-120")
+    end
+
+    test "a press of a period writes it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/standby")
+
+      html = view |> element("#standby-period-45") |> render_click()
+
+      assert html =~ "The device enters standby after 45 minutes of quiet."
+      assert MyHiFi.Playback.standby_minutes!() == 45
+    end
+
+    test "a person can keep the device awake", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/standby")
+
+      html = view |> element("#standby-period-0") |> render_click()
+
+      assert html =~ "The device stays awake."
+      assert MyHiFi.Playback.standby_minutes!() == 0
+    end
+
+    test "the menu row says what the device holds", %{conn: conn} do
+      {:ok, :ok} = MyHiFi.Playback.set_standby_minutes(0)
+
+      {:ok, _view, html} = live(conn, ~p"/settings")
+
+      assert html =~ "The device stays awake"
     end
   end
 

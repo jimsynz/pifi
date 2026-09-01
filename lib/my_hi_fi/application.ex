@@ -32,6 +32,8 @@ defmodule MyHiFi.Application do
         {Registry, keys: :unique, name: Download.Registry},
         {DynamicSupervisor, strategy: :one_for_one, name: Download.Supervisor},
         MyHiFi.Player,
+        # It reads the player, so it comes after it. See `MyHiFi.AutoStandby`.
+        MyHiFi.AutoStandby,
         MyHiFi.DeviceUi,
         MyHiFi.Peripheral.Supervisor,
         MyHiFiWeb.Endpoint
