@@ -38,6 +38,43 @@ defmodule MyHiFiWeb.PlayerLiveTest do
     {:ok, conn: conn}
   end
 
+  describe "the accent colour" do
+    # The device reads the picture when it makes the thumbnail, and the page draws
+    # what the device found. The page holds no reader of its own now. See
+    # `MyHiFi.Artwork.Accent`.
+    test "the page is told the colour of the artwork that plays", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      hash = String.duplicate("c", 64)
+
+      {:ok, entry} =
+        MyHiFi.Cache.put("artwork", hash, %{bytes: "a picture", content_type: "image/jpeg"})
+
+      MyHiFi.Cache.put!("artwork", hash <> ".thumbnail", %{
+        bytes: "a small picture",
+        content_type: "image/jpeg",
+        metadata: %{accent: %{lightness: 0.78, chroma: 0.15, hue: 74.0}},
+        variant_of_blob_id: entry.id,
+        variant_name: "thumbnail",
+        variant_digest: MyHiFi.Artwork.Thumbnail.digest()
+      })
+
+      on_exit(fn -> MyHiFi.Cache.purge(entry) end)
+
+      Event.publish(:player, %Events.MetadataChanged{artwork_path: "/artwork/" <> hash})
+
+      assert_push_event(player, "accent", %{colour: "oklch(0.78 0.15 74.0)"})
+    end
+
+    test "a track with no artwork gives the page no colour", %{conn: conn} do
+      {_view, player} = mount_player(conn)
+
+      Event.publish(:player, %Events.Stopped{reason: :requested})
+
+      assert_push_event(player, "accent", %{colour: nil})
+    end
+  end
+
   describe "mount" do
     test "shows that nothing plays", %{conn: conn} do
       {_view, player} = mount_player(conn)

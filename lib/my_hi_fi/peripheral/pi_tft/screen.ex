@@ -29,6 +29,12 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   `artwork_path` is the disk path of a thumbnail image, or `nil` for no artwork.
   The path must be absolute and allowed by Emerge's runtime paths configuration.
+
+  `accent` is the colour of that artwork, as red, green and blue, or `nil` for a
+  picture that gives no colour. The bar of the progress and the pill of the status
+  take it, and the text does not: a colour that a picture gives is held inside a band
+  that reads well, and text is where a colour that misses that band stops a person
+  from reading the screen. See `MyHiFi.Artwork.Accent`.
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
@@ -36,6 +42,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
           subtitle: String.t() | nil,
           message: String.t() | nil,
           artwork_path: String.t() | nil,
+          accent: {0..255, 0..255, 0..255} | nil,
           live?: boolean(),
           percent: 0..100,
           position_ms: non_neg_integer(),
@@ -55,6 +62,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       subtitle: nil,
       message: nil,
       artwork_path: nil,
+      accent: nil,
       live?: false,
       percent: 0,
       position_ms: 0,
@@ -178,7 +186,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
           width(px(played_width(view))),
           height(px(6)),
           Border.rounded(3),
-          Background.color(color(:emerald, 500))
+          Background.color(accent(view, color(:emerald, 500)))
         ],
         none()
       )
@@ -199,10 +207,18 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   defp elapsed(%{duration_ms: nil} = view), do: clock(view.position_ms)
   defp elapsed(view), do: "#{clock(view.position_ms)} / #{clock(view.duration_ms)}"
 
+  # **The pill says which state the player is in, so a colour of the artwork takes the
+  # place of one state alone.** Buffering is amber and a fault is rose on every track,
+  # because a person reads those two by their colour before they read the word.
   defp status_colour(%{state: :failed}), do: color(:rose, 400)
-  defp status_colour(%{state: :playing}), do: color(:emerald, 400)
+  defp status_colour(%{state: :playing} = view), do: accent(view, color(:emerald, 400))
   defp status_colour(%{state: :buffering}), do: color(:amber, 400)
   defp status_colour(_view), do: color(:slate, 500)
+
+  # A picture of greys gives no colour, and a track with no artwork gives none either,
+  # so each place that draws one names what it draws instead.
+  defp accent(%{accent: {red, green, blue}}, _instead), do: color_rgb(red, green, blue)
+  defp accent(_view, instead), do: instead
 
   defp pad(seconds), do: String.pad_leading(to_string(seconds), 2, "0")
 end

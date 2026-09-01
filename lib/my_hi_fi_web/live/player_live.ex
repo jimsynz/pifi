@@ -32,6 +32,8 @@ defmodule MyHiFiWeb.PlayerLive do
 
   use MyHiFiWeb, :live_view
 
+  alias MyHiFi.Artwork
+  alias MyHiFi.Artwork.Accent
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
@@ -55,6 +57,7 @@ defmodule MyHiFiWeb.PlayerLive do
       |> assign(:capabilities, capabilities(state.source))
       |> assign(:expanded?, false)
       |> assign(:reason, nil)
+      |> accent(state.artwork_path)
 
     # The faceplate holds this LiveView, and `MyHiFiWeb.Layouts` renders the
     # faceplate. The layout of the page therefore must not wrap it again.
@@ -69,7 +72,9 @@ defmodule MyHiFiWeb.PlayerLive do
   @impl Phoenix.LiveView
   def handle_info(%Events.Started{} = event, socket) do
     {:noreply,
-     assign(socket,
+     socket
+     |> accent(event.artwork_path)
+     |> assign(
        status: :playing,
        track: event.track,
        artwork_path: event.artwork_path,
@@ -98,7 +103,7 @@ defmodule MyHiFiWeb.PlayerLive do
   @impl Phoenix.LiveView
   def handle_info(%Events.MetadataChanged{title: nil, artwork_path: path}, socket)
       when is_binary(path) do
-    {:noreply, assign(socket, artwork_path: path)}
+    {:noreply, socket |> accent(path) |> assign(artwork_path: path)}
   end
 
   @impl Phoenix.LiveView
@@ -109,7 +114,9 @@ defmodule MyHiFiWeb.PlayerLive do
   @impl Phoenix.LiveView
   def handle_info(%Events.Stopped{}, socket) do
     {:noreply,
-     assign(socket,
+     socket
+     |> accent(nil)
+     |> assign(
        status: :idle,
        track: nil,
        stream_title: nil,
@@ -210,7 +217,6 @@ defmodule MyHiFiWeb.PlayerLive do
             <img
               :if={@artwork_path}
               id="artwork"
-              phx-hook="Accent"
               src={thumbnail_url(@artwork_path)}
               alt=""
               class="size-full object-cover"
@@ -458,6 +464,19 @@ defmodule MyHiFiWeb.PlayerLive do
 
   # A restored track is a paused track, so a boot shows the station and a play control.
   # See `MyHiFi.Player`.
+  # The colour of the artwork comes from the device, which read the picture when it
+  # made the thumbnail. A page that opens in the middle of a track therefore holds the
+  # colour before the picture arrives, and a page that shows no artwork keeps the
+  # colour that the stylesheet names. See `MyHiFi.Artwork.Accent`.
+  defp accent(socket, "/artwork/" <> name) do
+    push_event(socket, "accent", %{colour: colour(Artwork.accent(name))})
+  end
+
+  defp accent(socket, _path), do: push_event(socket, "accent", %{colour: nil})
+
+  defp colour(nil), do: nil
+  defp colour(accent), do: Accent.to_css(accent)
+
   defp status(%{playing?: true}), do: :playing
   defp status(%{paused?: true}), do: :paused
   defp status(_state), do: :idle

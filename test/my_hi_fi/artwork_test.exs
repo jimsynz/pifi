@@ -307,6 +307,37 @@ defmodule MyHiFi.ArtworkTest do
              )
     end
 
+    test "the colour of the picture rides on the thumbnail" do
+      stub("image/jpeg", @jpeg)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.jpg")
+      {:ok, entry} = Cache.fetch("artwork", name)
+
+      Cache.put!("artwork", entry.entry_key <> ".thumbnail", %{
+        bytes: "a small picture",
+        content_type: "image/jpeg",
+        metadata: %{accent: %{lightness: 0.78, chroma: 0.15, hue: 74.0}},
+        variant_of_blob_id: entry.id,
+        variant_name: "thumbnail",
+        variant_digest: MyHiFi.Artwork.Thumbnail.digest()
+      })
+
+      assert Artwork.accent(name) == %{lightness: 0.78, chroma: 0.15, hue: 74.0}
+    end
+
+    test "a picture of greys gives no colour, and neither does one with no thumbnail" do
+      stub("image/jpeg", @jpeg)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.jpg")
+      {:ok, entry} = Cache.fetch("artwork", name)
+
+      assert Artwork.accent(name) == nil
+
+      put_thumbnail(entry, "a small picture")
+
+      assert Artwork.accent(name) == nil
+      assert Artwork.accent(String.duplicate("a", 64)) == nil
+      assert Artwork.accent(nil) == nil
+    end
+
     test "a picture that the cache does not hold gives no thumbnail" do
       assert Artwork.thumbnail_name("https://station.test/logo.jpg") == nil
       assert Artwork.serve_thumbnail(String.duplicate("a", 64)) == :error

@@ -59,6 +59,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   @behaviour MyHiFi.Peripheral
 
   alias MyHiFi.Artwork
+  alias MyHiFi.Artwork.Accent
   alias MyHiFi.Event.Player
   alias MyHiFi.Event
   alias MyHiFi.Event.Input
@@ -178,6 +179,7 @@ defmodule MyHiFi.Peripheral.PiTft do
         subtitle: subtitle(event.track),
         message: nil,
         artwork_path: artwork_disk_path(event.artwork_path),
+        accent: accent(event.artwork_path),
         live?: event.live?,
         position_ms: event.position_ms,
         duration_ms: duration(event.track)
@@ -193,7 +195,8 @@ defmodule MyHiFi.Peripheral.PiTft do
       view
       | title: event.title || view.title,
         subtitle: event.artist || view.subtitle,
-        artwork_path: artwork_disk_path(event.artwork_path) || view.artwork_path
+        artwork_path: artwork_disk_path(event.artwork_path) || view.artwork_path,
+        accent: accent(event.artwork_path) || view.accent
     }
   end
 
@@ -270,6 +273,19 @@ defmodule MyHiFi.Peripheral.PiTft do
   end
 
   defp artwork_disk_path(_url), do: nil
+
+  # The screen draws in red, green and blue, so the colour of the artwork becomes that
+  # here and `MyHiFi.Peripheral.PiTft.Screen` holds no knowledge of OKLab.
+  defp accent(nil), do: nil
+
+  defp accent("/artwork/" <> name) do
+    case Artwork.accent(name) do
+      nil -> nil
+      colour -> Accent.to_rgb(colour)
+    end
+  end
+
+  defp accent(_url), do: nil
 
   # A track holds a title, a subtitle and a duration. A source that gives less is
   # normal, and the screen then shows less.

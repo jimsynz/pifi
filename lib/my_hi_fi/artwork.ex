@@ -22,6 +22,7 @@ defmodule MyHiFi.Artwork do
   guess about which of four files exists.
   """
 
+  alias MyHiFi.Artwork.Accent
   alias MyHiFi.Artwork.Thumbnail
   alias MyHiFi.Cache
 
@@ -221,6 +222,30 @@ defmodule MyHiFi.Artwork do
   def thumbnail_name(_url), do: nil
 
   @doc """
+  The colour that one picture gives to the interface, or `nil` for a picture that
+  gives none.
+
+  `MyHiFi.Artwork.Thumbnail` writes it when it makes the thumbnail, so this reads a
+  row and no picture. The device screen and the web page both read this, and neither
+  one holds a rule of its own. See `MyHiFi.Artwork.Accent`.
+
+  A picture of greys gives `nil`, and so does a picture that holds no thumbnail: a
+  WebP and a GIF each hold none.
+  """
+  @spec accent(String.t() | nil) :: Accent.t() | nil
+  def accent(name) when is_binary(name) and name != "" do
+    with true <- hash?(name),
+         {:ok, entry} <- Cache.fetch(@namespace, name),
+         variant when not is_nil(variant) <- existing_thumbnail(entry) do
+      colour(variant.metadata)
+    else
+      _other -> nil
+    end
+  end
+
+  def accent(_name), do: nil
+
+  @doc """
   Everything that a caller needs to send one thumbnail.
 
   It gives the path, the type and the entity tag in one read, and it notes that
@@ -244,6 +269,13 @@ defmodule MyHiFi.Artwork do
       _other -> :error
     end
   end
+
+  # The row holds the colour as the database gives it back, which is a map of strings.
+  defp colour(%{"accent" => %{"lightness" => lightness, "chroma" => chroma, "hue" => hue}}) do
+    %{lightness: lightness, chroma: chroma, hue: hue}
+  end
+
+  defp colour(_metadata), do: nil
 
   defp existing_thumbnail(entry) do
     entry
@@ -282,6 +314,7 @@ defmodule MyHiFi.Artwork do
     Cache.put(@namespace, thumbnail_key(source.entry_key), %{
       bytes: bytes,
       content_type: Map.get(metadata, :content_type, source.content_type),
+      metadata: Map.drop(metadata, [:content_type, :filename]),
       variant_of_blob_id: source.id,
       variant_name: "thumbnail",
       variant_digest: Thumbnail.digest()

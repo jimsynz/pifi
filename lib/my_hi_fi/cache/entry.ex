@@ -96,6 +96,7 @@ defmodule MyHiFi.Cache.Entry do
         :content_type,
         :filename,
         :keep?,
+        :metadata,
         :variant_of_blob_id,
         :variant_name,
         :variant_digest

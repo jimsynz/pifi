@@ -83,6 +83,40 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
     end
   end
 
+  describe "the colour of the artwork" do
+    # The bar of the progress and the pill of the status take the colour, so a view
+    # that holds one draws pixels that a view without one does not.
+    test "it reaches the pixels of the screen" do
+      {width, height} = Screen.size()
+
+      playing = %{
+        Screen.new()
+        | state: :playing,
+          title: "The Detail",
+          position_ms: 30_000,
+          duration_ms: 60_000
+      }
+
+      assert pixels(playing, width, height) !=
+               pixels(%{playing | accent: {230, 90, 60}}, width, height)
+    end
+
+    # A picture of greys gives no colour, and the screen then draws what it drew
+    # before. See `MyHiFi.Artwork.Accent`.
+    test "a view that holds no colour draws the colours of the states" do
+      {width, height} = Screen.size()
+      view = %{Screen.new() | state: :playing, title: "The Detail"}
+
+      assert pixels(view, width, height) == pixels(%{view | accent: nil}, width, height)
+    end
+  end
+
+  defp pixels(view, width, height) do
+    view
+    |> Screen.render()
+    |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+  end
+
   defp views do
     [
       Screen.new(),
