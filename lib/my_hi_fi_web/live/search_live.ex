@@ -60,6 +60,8 @@ defmodule MyHiFiWeb.SearchLive do
     with {:ok, module} <- Source.from_slug(slug),
          true <- Source.enabled?(module),
          true <- :search in module.capabilities() do
+      :ok = Source.choose(module)
+
       {:noreply,
        socket
        |> at(module, params["search"] || "")

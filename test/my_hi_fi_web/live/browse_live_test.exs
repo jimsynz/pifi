@@ -583,6 +583,46 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   # A person who opens a country can send that address to somebody, and a reload gives
   # the same list back.
+  # The top row of the faceplate is the source switch of this device, and a switch stays
+  # where a hand put it. See `MyHiFi.Source.chosen/0`.
+  describe "the source switch" do
+    setup do
+      on_exit(fn ->
+        case MyHiFi.Settings.fetch(MyHiFi.Source.chosen_key()) do
+          {:ok, setting} -> MyHiFi.Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "a device that no person has used opens the first source in use", %{conn: conn} do
+      assert {:error, {:live_redirect, %{to: @radio}}} = live(conn, ~p"/")
+    end
+
+    test "an address with no source opens the source that a person chose", %{conn: conn} do
+      {:ok, _view, _html} = live(conn, @podcasts)
+
+      assert {:error, {:live_redirect, %{to: @podcasts}}} = live(conn, ~p"/")
+    end
+
+    test "a search of a source moves the switch as well", %{conn: conn} do
+      {:ok, _view, _html} = live(conn, ~p"/search/podcasts")
+
+      assert MyHiFi.Source.chosen() == MyHiFi.Source.Podcasts
+    end
+
+    # A person who took the chosen source out of use must still find a page.
+    test "a source that goes out of use gives the first source in use", %{conn: conn} do
+      {:ok, _view, _html} = live(conn, @podcasts)
+      MyHiFi.Source.enable(MyHiFi.Source.Podcasts, false)
+      on_exit(fn -> MyHiFi.Source.enable(MyHiFi.Source.Podcasts, true) end)
+
+      assert {:error, {:live_redirect, %{to: @radio}}} = live(conn, ~p"/")
+    end
+  end
+
   describe "the address" do
     test "opening a branch and a facet writes each level into it", %{conn: conn} do
       Stations.create(%{country_code: "NZ", title: "RNZ National"})

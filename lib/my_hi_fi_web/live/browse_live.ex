@@ -73,6 +73,8 @@ defmodule MyHiFiWeb.BrowseLive do
   def handle_params(%{"source" => slug} = params, uri, socket) do
     with {:ok, module} <- Source.from_slug(slug),
          true <- Source.enabled?(module) do
+      :ok = Source.choose(module)
+
       # `Cinder.UrlSync.handle_params/3` gives the socket, and it writes `:url_state`
       # on it. Do not put what it gives into an assign.
       {:noreply,
@@ -81,12 +83,12 @@ defmodule MyHiFiWeb.BrowseLive do
        |> at(module, params["path"] || [])
        |> then(&Cinder.UrlSync.handle_params(params, uri, &1))}
     else
-      _other -> {:noreply, first_source(socket)}
+      _other -> {:noreply, chosen_source(socket)}
     end
   end
 
   @impl Phoenix.LiveView
-  def handle_params(_params, _uri, socket), do: {:noreply, first_source(socket)}
+  def handle_params(_params, _uri, socket), do: {:noreply, chosen_source(socket)}
 
   @impl Phoenix.LiveView
   def handle_event("open_root", %{"index" => index}, socket) do
@@ -533,10 +535,12 @@ defmodule MyHiFiWeb.BrowseLive do
     if function_exported?(source, :opened, 1), do: source.opened(item), else: :ok
   end
 
-  defp first_source(socket) do
-    case Source.enabled() do
-      [module | _rest] -> push_navigate(socket, to: ~p"/browse/#{Source.slug(module)}")
-      [] -> start_at(socket, nil)
+  # An address with no source is a person who asked for "the device", so the device
+  # answers with the switch where they left it. See `MyHiFi.Source.chosen/0`.
+  defp chosen_source(socket) do
+    case Source.chosen() do
+      nil -> start_at(socket, nil)
+      module -> push_navigate(socket, to: ~p"/browse/#{Source.slug(module)}")
     end
   end
 

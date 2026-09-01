@@ -11,6 +11,8 @@ defmodule MyHiFi.Source do
   implements this behaviour and changes nothing else.
   """
 
+  require Logger
+
   @typedoc """
   What a source holds, beyond the tree that every source holds.
 
@@ -403,6 +405,67 @@ defmodule MyHiFi.Source do
   end
 
   @doc """
+  Remember the source that a person is looking at.
+
+  The top row of the faceplate lights one control, and that control is the source
+  switch of this device. A person who turns the device off and on again finds the
+  switch where they left it, in the same way that the selector of an amplifier stays
+  where a hand put it.
+
+  It writes nothing when the setting names this source already. A move through the
+  tree of one source therefore costs no write, and the SD card lasts longer.
+
+  **It raises nothing.** No person asked for this write: it is what the device
+  remembers while they look at a list. A write that fails must therefore leave the
+  switch where it was and let them keep reading. `enable/2` raises, because a person
+  pressed a control there and must be told when it did nothing.
+  """
+  @spec choose(module()) :: :ok
+  def choose(module) do
+    slug = slug(module)
+
+    if chosen_slug() != slug do
+      case MyHiFi.Settings.put(chosen_key(), slug) do
+        {:ok, _setting} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("The device did not remember the source: #{inspect(reason)}")
+      end
+    end
+
+    :ok
+  end
+
+  @doc """
+  The source that a person chose last.
+
+  It gives the first source in use when the choice names a source that this firmware
+  no longer holds, or one that a person took out of use. A selector lands on the first
+  input in the same way when the socket behind it is empty. It gives `nil` when no
+  source is in use at all.
+  """
+  @spec chosen() :: module() | nil
+  def chosen do
+    with slug when is_binary(slug) <- chosen_slug(),
+         {:ok, module} <- from_slug(slug),
+         true <- enabled?(module) do
+      module
+    else
+      _other -> List.first(enabled())
+    end
+  end
+
+  @doc """
+  The settings key that holds the source that a person chose last.
+
+      iex> MyHiFi.Source.chosen_key()
+      "source.chosen"
+  """
+  @spec chosen_key() :: String.t()
+  def chosen_key, do: "source.chosen"
+
+  @doc """
   Put a source in use, or take it out of use.
 
   This writes the setting and nothing else. `MyHiFi.Playback.enable_source/2` is
@@ -546,6 +609,13 @@ defmodule MyHiFi.Source do
     |> List.last()
     |> Macro.underscore()
     |> String.replace("_", "-")
+  end
+
+  defp chosen_slug do
+    case MyHiFi.Settings.fetch(chosen_key()) do
+      {:ok, %{value: slug}} -> slug
+      {:error, _reason} -> nil
+    end
   end
 
   # `settings/0` and the three beside it are optional, so a source that holds
