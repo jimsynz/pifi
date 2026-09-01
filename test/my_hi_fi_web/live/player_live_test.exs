@@ -244,6 +244,86 @@ defmodule MyHiFiWeb.PlayerLiveTest do
     end
   end
 
+  # A device in standby offers one control, and the control is the power button. See
+  # `MyHiFiWeb.Shell`.
+  describe "standby" do
+    defp enter_standby(view) do
+      MyHiFi.Player.standby(true)
+      render(view)
+    end
+
+    test "the source controls and the settings control go dead", %{conn: conn} do
+      {view, _player} = mount_player(conn)
+
+      assert has_element?(view, "a#source-internet-radio")
+      assert has_element?(view, "a#settings-link")
+
+      enter_standby(view)
+
+      refute has_element?(view, "a#source-internet-radio")
+      refute has_element?(view, "a#settings-link")
+      assert has_element?(view, "span#source-internet-radio[aria-disabled=true]")
+      assert has_element?(view, "span#settings-link[aria-disabled=true]")
+    end
+
+    test "the area under the faceplate holds nothing", %{conn: conn} do
+      {view, _player} = mount_player(conn)
+
+      assert has_element?(view, "main")
+
+      enter_standby(view)
+
+      refute has_element?(view, "main")
+    end
+
+    test "the page comes back when the device wakes", %{conn: conn} do
+      {view, _player} = mount_player(conn)
+      enter_standby(view)
+
+      MyHiFi.Player.standby(false)
+      render(view)
+
+      assert has_element?(view, "main")
+      assert has_element?(view, "a#source-internet-radio")
+    end
+
+    test "the power button is the one control of the faceplate that lives", %{conn: conn} do
+      {view, player} = mount_player(conn)
+      enter_standby(view)
+      render(player)
+
+      assert has_element?(player, "#artwork-button[disabled]")
+      assert has_element?(player, "#play-pause[disabled]")
+      assert has_element?(player, "#stop[disabled]")
+      refute has_element?(player, "#standby[disabled]")
+    end
+
+    test "the power button brings the page back", %{conn: conn} do
+      {view, player} = mount_player(conn)
+      enter_standby(view)
+      refute has_element?(view, "main")
+
+      player |> element("#standby") |> render_click()
+      render(view)
+
+      assert has_element?(view, "main")
+    end
+
+    # The large view fills the screen, so a view that stayed open would cover the one
+    # control that standby leaves alive.
+    test "the large view closes", %{conn: conn} do
+      {view, player} = mount_player(conn)
+
+      player |> element("#artwork-button") |> render_click()
+      assert has_element?(player, "#expanded")
+
+      enter_standby(view)
+      render(player)
+
+      refute has_element?(player, "#expanded")
+    end
+  end
+
   describe "the play control" do
     test "it is not offered while nothing is selected", %{conn: conn} do
       {_view, player} = mount_player(conn)

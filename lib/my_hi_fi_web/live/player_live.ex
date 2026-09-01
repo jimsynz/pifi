@@ -7,9 +7,14 @@ defmodule MyHiFiWeb.PlayerLive do
   browser tab, and a move to another page keeps it. That is why the controls stay
   on the screen all the time.
 
-  It subscribes to the `:player` topic and follows the events of
-  `MyHiFi.Event.Player`, so the display changes without a reload and without
-  asking the player anything.
+  It follows the events of `MyHiFi.Event.Player`, so the display changes without a
+  reload and without asking the player anything. The hook of `MyHiFiWeb.Shell`
+  subscribes to the `:player` topic for each LiveView of this firmware, and this one
+  is no exception: two subscriptions of one process give two copies of each event.
+
+  A device in standby offers one control, and the control is the power button. The
+  artwork, the play control and the stop control are therefore dead here while the
+  device sleeps, and the large view closes.
 
   A radio stream has no length, so the display shows the time from the start and
   no bar. See `MyHiFi.Source` for the reason: `duration_ms` is `nil` for a live
@@ -34,21 +39,17 @@ defmodule MyHiFiWeb.PlayerLive do
 
   alias MyHiFi.Artwork
   alias MyHiFi.Artwork.Accent
-  alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Event.subscribe(:player)
-
     state = Playback.state!()
 
     socket =
       socket
       |> assign(:status, status(state))
       |> assign(:track, state.item)
-      |> assign(:standby?, state.standby?)
       |> assign(:position_ms, state.position_ms)
       |> assign(:duration_ms, nil)
       |> assign(:stream_title, state.stream_title)
@@ -132,9 +133,12 @@ defmodule MyHiFiWeb.PlayerLive do
     {:noreply, assign(socket, status: :failed, reason: reason)}
   end
 
+  # The hook of `MyHiFiWeb.Shell` owns `standby?`, because the whole page reads it and
+  # not this LiveView alone. This closes the large view, which fills the screen and
+  # would cover the one control that standby leaves alive.
   @impl Phoenix.LiveView
-  def handle_info(%Events.Standby{entered?: entered?}, socket) do
-    {:noreply, assign(socket, standby?: entered?)}
+  def handle_info(%Events.Standby{entered?: true}, socket) do
+    {:noreply, assign(socket, :expanded?, false)}
   end
 
   @impl Phoenix.LiveView
@@ -211,6 +215,7 @@ defmodule MyHiFiWeb.PlayerLive do
             id="artwork-button"
             type="button"
             phx-click="expand"
+            disabled={@standby?}
             aria-label="Show the large view"
             class="relative size-12 shrink-0 overflow-hidden rounded-lg bg-shell shadow-[inset_0_0_0_1px_var(--color-edge)]"
           >
@@ -260,9 +265,15 @@ defmodule MyHiFiWeb.PlayerLive do
           </p>
         </div>
 
-        <.play_control id="play-pause" status={@status} track={@track} />
+        <.play_control id="play-pause" status={@status} track={@track} standby?={@standby?} />
 
-        <.round_control id="stop" click="stop" icon="hero-stop" label="Stop" disabled={@status == :idle} />
+        <.round_control
+          id="stop"
+          click="stop"
+          icon="hero-stop"
+          label="Stop"
+          disabled={@status == :idle or @standby?}
+        />
       </div>
 
       <div
@@ -398,6 +409,7 @@ defmodule MyHiFiWeb.PlayerLive do
   attr(:id, :string, required: true)
   attr(:status, :atom, required: true)
   attr(:track, :map, default: nil)
+  attr(:standby?, :boolean, default: false)
   attr(:class, :any, default: "size-11")
 
   defp play_control(assigns) do
@@ -407,7 +419,7 @@ defmodule MyHiFiWeb.PlayerLive do
       click="play_pause"
       icon={if sounding?(assigns), do: "hero-pause", else: "hero-play"}
       label={if sounding?(assigns), do: "Pause", else: "Play"}
-      disabled={is_nil(@track)}
+      disabled={is_nil(@track) or @standby?}
       class={@class}
     />
     """

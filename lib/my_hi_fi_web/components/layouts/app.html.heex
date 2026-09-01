@@ -3,40 +3,37 @@
     <div class="mx-auto max-w-3xl px-3 sm:px-5">
       <div class="flex items-center gap-2 border-b border-edge py-2">
         <nav id="sources" aria-label="Sources" class="scroller flex grow items-center gap-1 overflow-x-auto">
-          <.link
+          <.faceplate_control
             :for={source <- @sources}
             id={"source-#{source.slug}"}
             navigate={~p"/browse/#{source.slug}"}
-            aria-current={source.slug == @current_source && "page"}
-            class={[
-              "control flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm",
-              source.slug == @current_source && "control-on"
-            ]}
+            label={source.title}
+            current?={source.slug == @current_source}
+            standby?={@standby?}
+            class="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm"
           >
             <.source_icon name={source.icon} />
             <span class="hidden sm:inline">{source.title}</span>
-          </.link>
+          </.faceplate_control>
         </nav>
 
-        <.link
+        <.faceplate_control
           id="settings-link"
           navigate={~p"/settings"}
-          aria-label="Settings"
-          aria-current={is_nil(@current_source) && "page"}
-          class={[
-            "control flex shrink-0 items-center rounded-lg p-2",
-            is_nil(@current_source) && "control-on"
-          ]}
+          label="Settings"
+          current?={is_nil(@current_source)}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
         >
           <.icon name="hero-cog-6-tooth" class="size-5" />
-        </.link>
+        </.faceplate_control>
       </div>
     </div>
 
     {live_render(@socket, MyHiFiWeb.PlayerLive, id: "player", sticky: true)}
   </div>
 
-  <main class="mx-auto max-w-3xl px-3 py-6 sm:px-5">
+  <main :if={not @standby?} class="mx-auto max-w-3xl px-3 py-6 sm:px-5">
     {@inner_content}
   </main>
 
