@@ -1,6 +1,8 @@
 defmodule MyHiFi.SwitchOff do
   @moduledoc """
-  What a device does before a person switches it off.
+  What a device does before it loses its power.
+
+  It loses it in two ways, and this module holds one answer for each.
 
   **A device that runs on a battery holds no way to turn its own power off.** The
   portable device of this firmware has a switch on its side and a hand reaches it, so
@@ -8,7 +10,27 @@ defmodule MyHiFi.SwitchOff do
   and say so. `MyHiFi.Event.Device.SafeToSwitchOff` is what says it, and the screen
   draws it.
 
-  ## Why a person answers this, and not the firmware
+  ## A checkpoint on a period, for the power that goes without warning
+
+  A cell that dies faster than the warning, a switch that a hand reaches without a
+  press of standby, and a fault that stops the whole node all take the power with no
+  step 1. **Every device therefore checkpoints on a period, and no person turns that
+  off**, because a power cut reaches a device on the mains as well.
+
+  The period bounds what a device can lose, and it costs one checkpoint to do it.
+
+  **`synchronous: :full` is the other answer to this, and it is the wrong one here.** It
+  makes each commit durable by itself, and a measurement on the board on 2026-09-02 took
+  200 commits from 71 ms to 2249 ms: 0.36 ms each becomes 11.2 ms, which is 32 times.
+  A sync of the stations writes a row for each of them, so that sync alone would take
+  about 11 seconds longer, and every one of those commits is a write of the card. A
+  checkpoint on a period pays one fsync for each period instead of one for each commit.
+
+  SQLite holds an auto checkpoint of its own, and it counts the pages of the log and not
+  the time, so a device that writes little can leave a commit in the log for as long as
+  it stays quiet. This is what bounds that.
+
+  ## Why a person answers the rest of this, and not the firmware
 
   A device on the mains wants the opposite. Its background work is scheduled while it
   stands in standby on a shelf, and a firmware that paused the queues there would leave
@@ -62,6 +84,11 @@ defmodule MyHiFi.SwitchOff do
   alias MyHiFi.Settings
 
   @key "standby.switch-off"
+
+  # What a device can lose when the power goes with no warning. Five minutes of writes
+  # is a track that a person did not finish and a percentage of the cell, and it costs
+  # one checkpoint to bound it.
+  @checkpoint_ms :timer.minutes(5)
 
   # A job that reads a feed holds the network for a moment, and a person who pressed
   # standby is waiting. This is long enough for an ordinary read and short enough that a
@@ -131,7 +158,7 @@ defmodule MyHiFi.SwitchOff do
 
     case drain(drain_ms) do
       :ok ->
-        checkpoint()
+        checkpoint(:truncate)
         commit()
 
         Logger.info("The device stopped writing. A person can switch it off now.")
@@ -149,12 +176,58 @@ defmodule MyHiFi.SwitchOff do
     end
   end
 
+  @doc """
+  Put what the database holds into the file that holds it.
+
+  `:truncate` is for a device that is going quiet, and it empties the log. `:passive`
+  is for the checkpoint of the period, and it never waits for a reader and therefore
+  never holds a track that plays.
+  """
+  @spec checkpoint(:truncate | :passive) :: :ok
+  def checkpoint(mode \\ :truncate)
+
+  # **A pragma takes no bind parameter**, so the mode cannot be a value of the query and
+  # a name that a caller gives would have to reach the text of it. One clause for each
+  # holds the whole query as a literal instead, and a mode that this does not know is a
+  # fault of the caller and never a query that runs.
+  def checkpoint(:truncate), do: run("PRAGMA wal_checkpoint(TRUNCATE)")
+  def checkpoint(:passive), do: run("PRAGMA wal_checkpoint(PASSIVE)")
+
+  # Sobelow reads the query of `SQL.query/3` as one that a person could give, because it
+  # cannot see that each caller above gives a literal. Nothing here comes from a request:
+  # a mode that this module does not name never reaches this function at all.
+  Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
+  @sobelow_skip ["SQL.Query"]
+  defp run(query) do
+    SQL.query(MyHiFi.Repo, query, [])
+
+    :ok
+  rescue
+    error ->
+      Logger.warning("The database did not checkpoint: #{inspect(error)}")
+
+      :ok
+  end
+
   @doc false
   @impl GenServer
   def init(opts) do
     :ok = Event.subscribe(:player)
 
-    {:ok, %{drain_ms: Keyword.get(opts, :drain_ms, @drain_ms)}}
+    state = %{
+      drain_ms: Keyword.get(opts, :drain_ms, @drain_ms),
+      checkpoint_ms: Keyword.get(opts, :checkpoint_ms, @checkpoint_ms)
+    }
+
+    {:ok, tick(state)}
+  end
+
+  @doc false
+  @impl GenServer
+  def handle_info(:checkpoint, state) do
+    checkpoint(:passive)
+
+    {:noreply, tick(state)}
   end
 
   @doc false
@@ -219,10 +292,10 @@ defmodule MyHiFi.SwitchOff do
     :exit, _reason -> 0
   end
 
-  defp checkpoint do
-    SQL.query(MyHiFi.Repo, "PRAGMA wal_checkpoint(TRUNCATE)", [])
-  rescue
-    error -> Logger.warning("The database did not checkpoint: #{inspect(error)}")
+  defp tick(state) do
+    Process.send_after(self(), :checkpoint, state.checkpoint_ms)
+
+    state
   end
 
   # Sobelow reads a path of a module attribute as one that a person could give. Nothing

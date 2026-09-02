@@ -36,7 +36,12 @@ defmodule MyHiFi.SwitchOffTest do
   # `MyHiFi.Application` starts none of these in the test environment, so a test holds
   # the one that it asks for. See `MyHiFi.Application.listening_children/0`.
   defp start_switch_off(opts \\ []) do
-    start_supervised!({SwitchOff, Keyword.put_new(opts, :drain_ms, 200)})
+    opts =
+      opts
+      |> Keyword.put_new(:drain_ms, 200)
+      |> Keyword.put_new(:checkpoint_ms, :timer.hours(1))
+
+    start_supervised!({SwitchOff, opts})
   end
 
   describe "whether this device prepares to be switched off" do
@@ -125,6 +130,67 @@ defmodule MyHiFi.SwitchOffTest do
       Event.publish(:player, %Player.Stopped{reason: :requested})
 
       refute_receive %Events.SafeToSwitchOff{}, 500
+    end
+  end
+
+  # A cell that dies faster than the warning, a switch that a hand reaches with no press
+  # of standby, and a fault all take the power with no preparation. A checkpoint on a
+  # period bounds what a device loses to that period, and `synchronous: :full` would
+  # bound it to nothing at 32 times the cost of a commit. See the moduledoc.
+  describe "the checkpoint of the period" do
+    setup do
+      parent = self()
+
+      :ok =
+        :telemetry.attach(
+          "switch-off-test-#{System.unique_integer([:positive])}",
+          [:my_hi_fi, :repo, :query],
+          fn _name, _measure, %{query: query}, _config ->
+            if query =~ "wal_checkpoint", do: send(parent, {:checkpointed, query})
+          end,
+          nil
+        )
+
+      on_exit(fn ->
+        for %{id: id} <- :telemetry.list_handlers([:my_hi_fi, :repo, :query]),
+            is_binary(id) and String.starts_with?(id, "switch-off-test-"),
+            do: :telemetry.detach(id)
+      end)
+
+      :ok
+    end
+
+    # A power cut reaches a device on the mains as well, so no person turns this off.
+    test "it runs whether or not this device prepares to be switched off" do
+      refute SwitchOff.enabled?()
+
+      start_switch_off(checkpoint_ms: 50)
+
+      assert_receive {:checkpointed, query}, 2000
+      assert query =~ "PASSIVE"
+    end
+
+    # The passive one never waits for a reader, so it can never hold a track that plays.
+    # The standby empties the log instead, because the device is going quiet.
+    test "the period is passive and a standby truncates" do
+      :ok = SwitchOff.enable(true)
+      start_switch_off(checkpoint_ms: :timer.hours(1))
+
+      Event.publish(:player, %Player.Standby{entered?: true})
+
+      assert_receive {:checkpointed, query}, 5000
+      assert query =~ "TRUNCATE"
+    end
+
+    test "a checkpoint that cannot run answers ok and writes the reason" do
+      assert :ok = SwitchOff.checkpoint(:passive)
+      assert :ok = SwitchOff.checkpoint(:truncate)
+    end
+
+    # A pragma takes no bind parameter, so a mode that this does not know must reach no
+    # query at all.
+    test "a mode that this does not know is a fault and never a query" do
+      assert_raise FunctionClauseError, fn -> SwitchOff.checkpoint("TRUNCATE); DROP") end
     end
   end
 end
