@@ -94,6 +94,21 @@ Licence: Apache-2.0.
   shared workflow then sets `NBPR_BUILD_BACKEND=shell` and installs the four
   Buildroot packages that the image lacks. A new version of the system starts a
   new build of every `nbpr_*` package, and that build takes 10 minutes.
+- **A production firmware holds no SSH daemon, and `mix upload` needs one.**
+  `config/target.exs` gives `nerves_ssh` an application environment only when
+  `Mix.env()` is `dev`. A `MIX_ENV=prod` image on a board that a hand cannot reach
+  is therefore one way, and the SD card is the only way back. **NervesCloud is what
+  makes a production image safe to send.** `nerves_hub_link` connects out to
+  `devices.nervescloud.com`, so it opens no port, and it carries a firmware and a
+  console. `.envrc` reads the two secrets from 1Password, and a build that holds
+  neither one writes `connect: false`. Two traps, and the NervesCloud section of
+  `config/target.exs` holds the reasons.
+  - **`data_path` must not keep its default of `/data/nerves-hub`**, because this
+    system has no `/data`. It holds the archives and the files that a person sends
+    to the console. A firmware update streams into `fwup` and needs no file.
+  - **An absent secret needs `connect: false`.** This is the opposite of
+    `nerves_ssh`. `NervesHubLink.Application.start/2` starts its supervisor unless a
+    person says not to, and `host` then becomes `localhost`.
 - **A skip moves the reader, and it does not start a pipeline again.**
   `MyHiFi.Output.APlaySink` starts `aplay` for each pipeline, `aplay` opens the sound
   card, and the card is the part of this board that fails. A start also holds a silence

@@ -67,8 +67,10 @@ config :nerves, :erlinit,
   mount: "pstore:/sys/fs/pstore:pstore:nodev,noexec,nosuid:",
   shutdown_report: "/root/shutdown_report.txt"
 
-# SSH belongs to a development firmware only. A stereo component in a home needs
-# no shell, and a production firmware therefore accepts no connection.
+# SSH on the local network belongs to a development firmware only. A stereo
+# component in a home listens on no port that a person did not ask for, so a
+# production firmware opens none. NervesCloud is what reaches a production
+# board, and the section after this one holds it.
 #
 # `nerves_ssh` starts a daemon only when it holds an application environment. A
 # production build writes none of the configuration below, so the daemon never
@@ -94,6 +96,45 @@ if development_firmware? do
       """)
 
   config :nerves_ssh, authorized_keys: Enum.map(keys, &File.read!/1)
+end
+
+# NervesCloud is the one way to reach a board that holds no SSH daemon. A
+# production firmware opens no port, and `mix upload` needs one, so a board in a
+# case and out of reach used to need the SD card in a hand. The device starts
+# this connection itself, so it needs no port and no address of its own.
+#
+# **The two secrets come from the environment, and never from this repository.**
+# `.envrc` reads them from 1Password, so a clone of this repository holds no
+# credential and a person who reads it cannot enrol a device. A build that holds
+# neither one writes `connect: false`.
+#
+# **`connect: false` is what an absent secret needs.** This is the opposite of
+# `nerves_ssh` above, which starts nothing when it holds no configuration.
+# `NervesHubLink.Application.start/2` starts its supervisor unless a person says
+# not to, and `host` becomes `localhost`, so a build with no secret would ask
+# `wss://localhost/socket/websocket` for a firmware for as long as it ran.
+#
+# **`remote_iex` gives the console that the local SSH daemon does not.** The
+# device reaches NervesCloud, and NervesCloud holds the account of a person, so
+# this opens nothing on the home network. It runs on a production firmware for
+# that reason: a board that plays music in a case is the board that most needs a
+# way back.
+#
+# **`data_path` must not keep its default.** It is `/data/nerves-hub`, and this
+# system has no `/data`. The application data partition mounts at `/root`. A
+# firmware update streams into `fwup` and needs no file, so this path holds the
+# archives and the files that a person sends to the console, and nothing else.
+product_key = System.get_env("NERVES_HUB_PRODUCT_KEY")
+product_secret = System.get_env("NERVES_HUB_PRODUCT_SECRET")
+
+if product_key && product_secret do
+  config :nerves_hub_link,
+    host: "devices.nervescloud.com",
+    shared_secret: [product_key: product_key, product_secret: product_secret],
+    remote_iex: true,
+    data_path: "/root/nerves-hub"
+else
+  config :nerves_hub_link, connect: false
 end
 
 # Configure the network using vintage_net
