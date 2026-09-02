@@ -109,6 +109,10 @@ Licence: Apache-2.0.
   - **An absent secret needs `connect: false`.** This is the opposite of
     `nerves_ssh`. `NervesHubLink.Application.start/2` starts its supervisor unless a
     person says not to, and `host` then becomes `localhost`.
+  - **A credential trims to what it is.** A field of a password manager can hold a
+    space at its end that no person sees. Such a key makes the wrong HMAC, and the
+    socket upgrade answers 401 with no body and no reason. Read the length of the
+    key on the device before you look anywhere else.
 - **A skip moves the reader, and it does not start a pipeline again.**
   `MyHiFi.Output.APlaySink` starts `aplay` for each pipeline, `aplay` opens the sound
   card, and the card is the part of this board that fails. A start also holds a silence

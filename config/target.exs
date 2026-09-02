@@ -124,10 +124,19 @@ end
 # system has no `/data`. The application data partition mounts at `/root`. A
 # firmware update streams into `fwup` and needs no file, so this path holds the
 # archives and the files that a person sends to the console, and nothing else.
-product_key = System.get_env("NERVES_HUB_PRODUCT_KEY")
-product_secret = System.get_env("NERVES_HUB_PRODUCT_SECRET")
+#
+# **A credential trims to what it is.** A field of a password manager can hold a
+# space at its end that no person sees, and `op read` gives the value as it is. Such
+# a key makes the wrong HMAC, the socket upgrade answers 401, and the answer holds
+# no body and no reason. The product key of this device held one trailing space, and
+# it cost a build, an upload and a read of the device to find. An empty value is the
+# same as an absent one.
+product_key = "NERVES_HUB_PRODUCT_KEY" |> System.get_env() |> to_string() |> String.trim()
 
-if product_key && product_secret do
+product_secret =
+  "NERVES_HUB_PRODUCT_SECRET" |> System.get_env() |> to_string() |> String.trim()
+
+if product_key != "" and product_secret != "" do
   config :nerves_hub_link,
     host: "devices.nervescloud.com",
     shared_secret: [product_key: product_key, product_secret: product_secret],
