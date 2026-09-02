@@ -10,7 +10,6 @@ defmodule MyHiFi.Source.PodcastsTest do
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Settings
   alias MyHiFi.Source.Podcasts
-  alias MyHiFi.Test.Podcasts, as: Subscribing
 
   setup do
     Application.put_env(:my_hi_fi, Index, plug: {Req.Test, Index}, retry: false)
@@ -113,8 +112,6 @@ defmodule MyHiFi.Source.PodcastsTest do
   end
 
   # A `ref` of the source names the item, and not the row of the show.
-  defp ref(show), do: {:show, show.item_id}
-
   # A show that a read reached, long enough ago that the source reads it again. No
   # action writes this attribute, because nothing but a read should.
   defp aged(show, hours) do

@@ -129,7 +129,7 @@ defmodule MyHiFi.PlayerFinishTest do
 
   describe "a track that reaches its end" do
     test "the player stops, and it does not start the track again" do
-      one = play_it()
+      play_it()
 
       # Every play publishes this once, before there is anything to hear.
       assert_receive %Events.Buffering{}, 2000
@@ -174,7 +174,7 @@ defmodule MyHiFi.PlayerFinishTest do
     test "the player starts it again" do
       Recorder.live!(true)
 
-      one = play_it()
+      play_it()
 
       assert_receive %Events.Buffering{}, 2000
       assert_receive %Events.Started{live?: true}, 2000
@@ -231,7 +231,7 @@ defmodule MyHiFi.PlayerFinishTest do
       Recorder.live!(true)
       Recorder.begins_at!(300_000)
 
-      one = play_it()
+      play_it()
       assert_receive %Events.Started{}, 2000
 
       # The stream holds the bytes from 5 minutes in, so the place in the whole

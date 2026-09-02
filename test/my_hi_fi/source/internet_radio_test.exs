@@ -10,7 +10,7 @@ defmodule MyHiFi.Source.InternetRadioTest do
 
   # `MyHiFi.Radio.Fill` writes a station into the catalogue, and this source reads it
   # from there. A test therefore seeds the way that the sync job does.
-  defp station(overrides \\ %{}) do
+  defp station(overrides) do
     attributes =
       Map.merge(
         %{

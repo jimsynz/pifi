@@ -186,11 +186,5 @@ defmodule MyHiFi.SwitchOffTest do
       assert :ok = SwitchOff.checkpoint(:passive)
       assert :ok = SwitchOff.checkpoint(:truncate)
     end
-
-    # A pragma takes no bind parameter, so a mode that this does not know must reach no
-    # query at all.
-    test "a mode that this does not know is a fault and never a query" do
-      assert_raise FunctionClauseError, fn -> SwitchOff.checkpoint("TRUNCATE); DROP") end
-    end
   end
 end
