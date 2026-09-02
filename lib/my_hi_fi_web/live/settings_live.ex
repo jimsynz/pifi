@@ -11,7 +11,7 @@ defmodule MyHiFiWeb.SettingsLive do
       /settings/sources                the sources, and which ones are in use
       /settings/sources/internet-radio one source
       /settings/peripherals            the screens and the controls of the board
-      /settings/standby                the period of quiet before standby
+      /settings/standby                the period of quiet, and the switch off
       /settings/network                a report
       /settings/storage                a report
 
@@ -51,6 +51,7 @@ defmodule MyHiFiWeb.SettingsLive do
   alias MyHiFi.Hardware
   alias MyHiFi.Peripheral
   alias MyHiFi.Source
+  alias MyHiFi.SwitchOff
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
@@ -174,6 +175,14 @@ defmodule MyHiFiWeb.SettingsLive do
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "That did not work: #{inspect(reason)}")}
     end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("toggle_switch_off", _params, socket) do
+    :ok = SwitchOff.enable(not socket.assigns.switch_off?)
+
+    {:noreply,
+     socket |> put_flash(:info, switch_off_flash(not socket.assigns.switch_off?)) |> refresh()}
   end
 
   @impl Phoenix.LiveView
@@ -509,6 +518,36 @@ defmodule MyHiFiWeb.SettingsLive do
         two hours reaches its end.
       </p>
 
+      <div id="switch-off" class="mb-4 border-b border-edge pb-4">
+        <button
+          type="button"
+          id="toggle-switch-off"
+          phx-click="toggle_switch_off"
+          aria-pressed={to_string(@switch_off?)}
+          class={["flex w-full items-center gap-3 text-left", @switch_off? && "text-accent"]}
+        >
+          <span class={[
+            "flex size-5 shrink-0 items-center justify-center rounded-full",
+            if(@switch_off?,
+              do: "bg-accent/15 shadow-[inset_0_0_0_1px_var(--color-accent)]",
+              else: "shadow-[inset_0_0_0_1px_var(--color-edge)]"
+            )
+          ]}>
+            <span :if={@switch_off?} class="size-2 rounded-full bg-accent" />
+          </span>
+
+          <span class="min-w-0 grow">Prepare to be switched off</span>
+        </button>
+
+        <p class="mt-1 text-sm text-ink-dim">
+          A device that runs on a battery is switched off by hand. This stops the
+          background work when the device enters standby, puts what it holds on the
+          card, and says on the screen that a hand can reach the switch. Leave it off
+          for a device on the mains, whose background work runs while it stands in
+          standby.
+        </p>
+      </div>
+
       <ul class="divide-y divide-edge">
         <li :for={minutes <- periods()}>
           <button
@@ -752,6 +791,7 @@ defmodule MyHiFiWeb.SettingsLive do
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, MyHiFi.Playback.standby_minutes!())
+    |> assign(:switch_off?, SwitchOff.enabled?())
   end
 
   # The periods that a person can pick. A free number would need a check of its own on
@@ -804,6 +844,11 @@ defmodule MyHiFiWeb.SettingsLive do
 
   defp standby_summary(0), do: "The device stays awake"
   defp standby_summary(minutes), do: period_title(minutes)
+
+  defp switch_off_flash(true),
+    do: "The device stops its work in standby, and it says when a hand can reach the switch."
+
+  defp switch_off_flash(false), do: "The device keeps its work going in standby."
 
   defp standby_flash("0"), do: "The device stays awake."
   defp standby_flash(minutes), do: "The device enters standby after #{minutes} minutes of quiet."

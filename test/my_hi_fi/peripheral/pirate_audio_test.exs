@@ -346,4 +346,61 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
       refute_receive %MyHiFi.Event.Input.ButtonPressed{}, 200
     end
   end
+
+  # The panel sleeps in standby, and this message is the one thing worth waking it for.
+  # See `MyHiFi.SwitchOff`.
+  describe "safe to switch off" do
+    test "it wakes the panel and says so", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(%Player.Standby{entered?: true}, state)
+      refute state.awake?
+      RecordingScreen.forget()
+
+      {:ok, state} =
+        PirateAudio.handle_event(%DeviceEvents.SafeToSwitchOff{safe?: true}, state)
+
+      assert state.awake?
+      assert state.view.safe_to_switch_off?
+      assert Screen.headline(state.view) == "SAFE TO\nSWITCH OFF"
+      assert frames() == 1
+      assert RecordingScreen.backlight_line() == [1]
+    end
+
+    # A screen that stayed lit would use the cell that a person is about to stop using.
+    test "it sleeps again after the period", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(%Player.Standby{entered?: true}, state)
+
+      {:ok, state} =
+        PirateAudio.handle_event(%DeviceEvents.SafeToSwitchOff{safe?: true}, state)
+
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_info(:sleep_again, state)
+
+      refute state.awake?
+      assert RecordingScreen.backlight_line() == [0]
+    end
+
+    # A person who woke the device asked for the work to go on.
+    test "a person who wakes the device takes the message away", %{state: state} do
+      {:ok, state} =
+        PirateAudio.handle_event(%DeviceEvents.SafeToSwitchOff{safe?: true}, state)
+
+      {:ok, state} =
+        PirateAudio.handle_event(%DeviceEvents.SafeToSwitchOff{safe?: false}, state)
+
+      refute state.view.safe_to_switch_off?
+    end
+
+    # The timer fires whether or not the message is still there, so it must read the
+    # view and not sleep a screen that a person woke.
+    test "the timer sleeps nothing when the message is gone", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(started(), state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_info(:sleep_again, state)
+
+      assert state.awake?
+      assert RecordingScreen.backlight_line() == []
+    end
+  end
 end

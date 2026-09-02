@@ -39,6 +39,27 @@ defmodule MyHiFi.Event.Device do
     defstruct [:percent, :volts, low?: false]
   end
 
+  defmodule SafeToSwitchOff do
+    @moduledoc """
+    The device stopped writing to the card, so a hand can reach the switch.
+
+    A device that runs on a battery holds no way to turn its own power off, so a person
+    turns it off. This says that the moment is now: the background work is paused, what
+    the database held is on the card, and the journal of the file system is committed.
+
+    `safe?` is false while the device still writes, and it is false again the moment
+    that a person wakes it.
+
+    **A device that never prepares publishes none of these**, so a reader draws nothing
+    and never says that a device is safe when no part of it checked. See
+    `MyHiFi.SwitchOff`.
+    """
+
+    @type t :: %__MODULE__{safe?: boolean()}
+
+    defstruct safe?: false
+  end
+
   defmodule NetworkChanged do
     @moduledoc """
     An interface came up, went down, or took an address.

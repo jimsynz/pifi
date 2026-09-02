@@ -63,7 +63,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
           message: String.t() | nil,
           artwork_path: String.t() | nil,
           low_battery?: boolean(),
-          battery_percent: 0..100 | nil
+          battery_percent: 0..100 | nil,
+          safe_to_switch_off?: boolean()
         }
 
   @doc "The size that this screen draws at."
@@ -80,7 +81,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
       message: nil,
       artwork_path: nil,
       low_battery?: false,
-      battery_percent: nil
+      battery_percent: nil,
+      safe_to_switch_off?: false
     }
   end
 
@@ -103,9 +105,14 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   **A cell that is nearly flat wins over all of that.** This device cannot turn its own
   power off, so the one thing that a person must do is charge it, and a track title
   beside that warning would only hide it.
+
+  A device that is ready for the switch says so, under the warning of a flat cell. A
+  person who reads both must charge it before they read anything else. See
+  `MyHiFi.SwitchOff`.
   """
   @spec headline(view()) :: String.t()
   def headline(%{low_battery?: true}), do: "LOW BATTERY\nCHARGE NOW"
+  def headline(%{safe_to_switch_off?: true}), do: "SAFE TO\nSWITCH OFF"
   def headline(%{title: title}) when is_binary(title), do: title
   def headline(%{state: :failed} = view), do: view.message || "Failed"
   def headline(%{state: :buffering}), do: "Buffering"
@@ -178,10 +185,14 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # is what `MyHiFi.Peripheral.PiTft.Screen` already gives a fault. The band holds more
   # of it than the scrim holds of black, because the words must win over the artwork.
   defp band(%{low_battery?: true}), do: color_rgba(136, 19, 55, 0.88)
+  # Green says that a person may act, where rose says that they must.
+  defp band(%{safe_to_switch_off?: true}), do: color_rgba(6, 78, 59, 0.9)
   defp band(_view), do: color_rgba(0, 0, 0, 0.72)
 
-  # The subtitle of a track says nothing beside a warning to charge the cell.
+  # The subtitle of a track says nothing beside a warning to charge the cell, nor beside
+  # a device that waits for a hand on the switch.
   defp subtitle(%{low_battery?: true}), do: none()
+  defp subtitle(%{safe_to_switch_off?: true}), do: none()
   defp subtitle(%{subtitle: nil}), do: none()
 
   defp subtitle(view) do

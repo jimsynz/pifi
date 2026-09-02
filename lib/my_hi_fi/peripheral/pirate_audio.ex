@@ -94,6 +94,11 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # tap still answers at once.
   @hold_ms 600
 
+  # How long the screen holds `SAFE TO SWITCH OFF` before it sleeps again. A person
+  # reads three words in far less, and a screen that stayed lit would use the cell that
+  # they are about to stop using.
+  @show_ms :timer.seconds(20)
+
   @doc "The name that the settings page draws."
   @impl MyHiFi.Peripheral
   def title, do: "Pirate Audio 1.3 inch screen"
@@ -115,6 +120,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
       first_frame(%{
         screen: screen,
         buttons: buttons,
+        show_ms: Keyword.get(opts, :show_ms, @show_ms),
         view: with_battery(Screen.new()),
         awake?: true
       })
@@ -156,6 +162,16 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   def handle_event(%Player.Standby{entered?: false}, state), do: wake(state)
 
+  # **The panel sleeps in standby, and this message is the one thing worth waking it
+  # for.** A person who pressed standby is holding the device and waiting to know that
+  # the card is at rest, so the screen shows them and then sleeps again. See
+  # `MyHiFi.SwitchOff`.
+  def handle_event(%DeviceEvents.SafeToSwitchOff{safe?: true}, state) do
+    Process.send_after(self(), :sleep_again, state.show_ms)
+
+    wake(%{state | view: %{state.view | safe_to_switch_off?: true}})
+  end
+
   def handle_event(event, %{view: current} = state) do
     case view(event, current) do
       ^current -> {:ok, state}
@@ -170,6 +186,10 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   holds that, because a pad of two and a row of four do not mean the same thing.
   """
   @impl MyHiFi.Peripheral
+  def handle_info(:sleep_again, state) do
+    if state.view.safe_to_switch_off?, do: doze(state), else: {:ok, state}
+  end
+
   def handle_info(message, state) do
     case Buttons.press(state.buttons, message) do
       {:ok, button, hold, buttons} ->
@@ -238,6 +258,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # moment, so a person reads this when they wake it.
   defp view(%DeviceEvents.BatteryChanged{} = event, view),
     do: %{view | battery_percent: event.percent, low_battery?: event.low?}
+
+  defp view(%DeviceEvents.SafeToSwitchOff{safe?: safe?}, view),
+    do: %{view | safe_to_switch_off?: safe?}
 
   defp view(%Player.Buffering{}, view), do: %{view | state: :buffering}
 

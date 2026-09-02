@@ -306,6 +306,47 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     end
   end
 
+  describe "preparing to be switched off" do
+    setup do
+      on_exit(fn ->
+        case Settings.fetch(MyHiFi.SwitchOff.key()) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    # The device on a stereo wants its background work to go on while it stands in
+    # standby, so a device that no person changed does not prepare.
+    test "a device that no person changed does not prepare", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/standby")
+
+      assert has_element?(view, "#toggle-switch-off[aria-pressed=false]")
+      refute MyHiFi.SwitchOff.enabled?()
+    end
+
+    test "a person turns it on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/standby")
+
+      html = view |> element("#toggle-switch-off") |> render_click()
+
+      assert html =~ "says when a hand can reach the switch"
+      assert MyHiFi.SwitchOff.enabled?()
+    end
+
+    test "a person turns it off again", %{conn: conn} do
+      :ok = MyHiFi.SwitchOff.enable(true)
+
+      {:ok, view, _html} = live(conn, ~p"/settings/standby")
+      html = view |> element("#toggle-switch-off") |> render_click()
+
+      assert html =~ "keeps its work going in standby"
+      refute MyHiFi.SwitchOff.enabled?()
+    end
+  end
+
   describe "the standby section" do
     test "marks the period that the device holds", %{conn: conn} do
       {:ok, view, html} = live(conn, ~p"/settings/standby")

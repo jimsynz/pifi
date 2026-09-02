@@ -2,6 +2,11 @@ import Config
 
 config :my_hi_fi, Oban, testing: :manual
 
+# `MyHiFi.SwitchOff` opens this file and calls `:file.sync/1` on it, which commits the
+# journal of the file system. `/root` is the writable partition of a target and the home
+# of another person on a host, so a test writes somewhere that it may.
+config :my_hi_fi, :switch_off_marker, Path.join(System.tmp_dir!(), "myhifi-switch-off-test")
+
 config :my_hi_fi, MyHiFi.Repo,
   database: Path.join(__DIR__, "../test#{System.get_env("MIX_TEST_PARTITION")}.db"),
   pool: Ecto.Adapters.SQL.Sandbox,

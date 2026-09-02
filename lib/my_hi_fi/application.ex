@@ -50,7 +50,8 @@ defmodule MyHiFi.Application do
   # happen.
   defp make_queue_table, do: Ash.read!(MyHiFi.Playback.Queue)
 
-  # **These two listen to a topic and act on the player, and a test must start its own.**
+  # **These listen to a topic and act on the player or on the card, and a test must start
+  # its own.**
   # Each one is named for the whole node, so a suite that ran them would give every test
   # a listener that it did not ask for: a test of the battery publishes a low cell, this
   # `MyHiFi.AutoStandby` puts the player in standby for it, and the next test then finds
@@ -62,7 +63,7 @@ defmodule MyHiFi.Application do
     defp listening_children, do: []
   else
     # `MyHiFi.AutoStandby` reads the player, so it comes after it.
-    defp listening_children, do: [MyHiFi.AutoStandby, MyHiFi.DeviceUi]
+    defp listening_children, do: [MyHiFi.AutoStandby, MyHiFi.DeviceUi, MyHiFi.SwitchOff]
   end
 
   # See https://elixir.hexdocs.pm/Supervisor.html
