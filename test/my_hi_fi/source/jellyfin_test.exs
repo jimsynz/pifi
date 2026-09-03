@@ -71,7 +71,8 @@ defmodule MyHiFi.Source.JellyfinTest do
   describe "what the source says about itself" do
     test "it names itself and its icon" do
       assert Jellyfin.title() == "Jellyfin"
-      assert Jellyfin.icon() == :library
+      # The mark of the service, and not the shelf that `:library` draws.
+      assert Jellyfin.icon() == :jellyfin
       assert Jellyfin.kinds() == [container: "Albums", track: "Tracks"]
     end
 

@@ -3,6 +3,7 @@
 
 @import "tailwindcss";
 @plugin "../vendor/heroicons";
+@plugin "../vendor/brand";
 @source "../js";
 @source "../../lib/my_hi_fi_web";
 

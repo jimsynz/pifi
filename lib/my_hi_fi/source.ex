@@ -182,9 +182,15 @@ defmodule MyHiFi.Source do
   way. The web interface draws a heroicon, and the device screen draws a shape of
   its own. Neither one holds a list of the sources.
 
-  The interfaces draw `:radio`, `:library`, `:podcast` and `:cloud` today. Any
-  other name gives the default icon, so a new source works before an interface
-  learns its icon.
+  The interfaces draw `:radio`, `:library`, `:podcast`, `:cloud` and `:jellyfin`
+  today. Any other name gives the default icon, so a new source works before an
+  interface learns its icon.
+
+  **A name may be the mark of one service, as `:jellyfin` is.** A person reads the
+  top row and finds the service that they set up, by the mark that every other client
+  of it shows them. The web interface draws such a mark in the way that it draws a
+  heroicon, so it takes the accent colour and the list of names stays one list. The
+  mark belongs to the project that made it, and it carries its own licence.
   """
   @callback icon() :: atom()
 

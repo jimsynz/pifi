@@ -64,8 +64,12 @@ defmodule MyHiFi.Source.Jellyfin do
   @impl MyHiFi.Source
   def title, do: "Jellyfin"
 
+  # The mark of the service itself, and not the shelf that `:library` draws. A person
+  # who reads the top row finds the service that they set up, by the mark that every
+  # other Jellyfin client shows them. See `MyHiFiWeb.CoreComponents` and
+  # `assets/vendor/brand.js`.
   @impl MyHiFi.Source
-  def icon, do: :library
+  def icon, do: :jellyfin
 
   # A song lasts three minutes, so no person moves inside one. `MyHiFi.Player.Skip`
   # reads MP3 frames as well, and this source gives FLAC and AAC, so a skip would

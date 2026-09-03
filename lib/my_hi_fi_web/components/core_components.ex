@@ -18,8 +18,13 @@ defmodule MyHiFiWeb.CoreComponents do
   # `MyHiFi.Source` names the icon of a source, and it names the icon of each
   # settings control of that source. Both names come from the same module, so both
   # are drawn here.
+  #
+  # A name of `brand-` is the mark of one service, and `assets/vendor/brand.js` draws
+  # it in the way that `heroicons.js` draws the rest. Both become the mask of a span,
+  # so a mark takes the accent colour of the interface like every other icon.
   @source_icons %{
     cloud: "hero-cloud",
+    jellyfin: "brand-jellyfin",
     library: "hero-rectangle-stack",
     podcast: "hero-microphone",
     radio: "hero-signal",
@@ -108,6 +113,12 @@ defmodule MyHiFiWeb.CoreComponents do
   attr(:class, :any, default: "size-4")
 
   def icon(%{name: "hero-" <> _} = assigns) do
+    ~H"""
+    <span class={[@name, @class]} />
+    """
+  end
+
+  def icon(%{name: "brand-" <> _} = assigns) do
     ~H"""
     <span class={[@name, @class]} />
     """
