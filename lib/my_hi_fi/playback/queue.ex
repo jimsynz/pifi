@@ -114,6 +114,24 @@ defmodule MyHiFi.Playback.Queue do
       run MyHiFi.Playback.Queue.Remove
     end
 
+    action :next_up, :struct do
+      description """
+      The row after the one that plays, and this moves no mark.
+
+      `MyHiFi.Player` reads the audio of the next track before the current one ends,
+      so it must know which row that is without playing it. `:move` cannot answer,
+      because it moves the mark and a person in the middle of a track has not asked
+      for the next one yet.
+
+      It gives `{:error, :no_more}` at the end of the list, and for a queue that no
+      row holds, in the way that `:move` does.
+      """
+
+      constraints instance_of: __MODULE__
+
+      run MyHiFi.Playback.Queue.NextUp
+    end
+
     action :clear, :integer do
       description "Empty the queue, and give the number of rows that went."
 

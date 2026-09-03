@@ -53,6 +53,7 @@ defmodule MyHiFi.Playback do
       define :replace_queue, action: :replace, args: [:item_ids]
       define :append_to_queue, action: :append, args: [:item_ids]
       define :move_queue, action: :move, args: [:direction]
+      define :queue_next_up, action: :next_up
       define :remove_from_queue, action: :remove, args: [:id]
       define :clear_queue, action: :clear
     end

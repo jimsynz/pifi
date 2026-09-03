@@ -43,6 +43,7 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Playback
   alias MyHiFi.Player.Download
   alias MyHiFi.Player.Pipeline
+  alias MyHiFi.Player.Prefetch
   alias MyHiFi.Settings
   alias MyHiFi.Source
 
@@ -62,6 +63,11 @@ defmodule MyHiFi.Player do
   @last_item_key "last_item"
   @standby_key "standby"
 
+  # How long before the end of a track the device reads the next one. A track of 8 MB
+  # over slow Wi-Fi takes about this long, and a person who skips in the last half
+  # minute of a track costs the card one file that no person hears.
+  @prefetch_lead_ms :timer.seconds(30)
+
   defmodule State do
     @moduledoc false
 
@@ -79,7 +85,8 @@ defmodule MyHiFi.Player do
             restarts: non_neg_integer(),
             restart_timer: reference() | nil,
             paused?: boolean(),
-            standby?: boolean()
+            standby?: boolean(),
+            prefetched?: boolean()
           }
 
     defstruct source: nil,
@@ -95,7 +102,8 @@ defmodule MyHiFi.Player do
               restarts: 0,
               restart_timer: nil,
               paused?: false,
-              standby?: false
+              standby?: false,
+              prefetched?: false
   end
 
   @doc false
@@ -453,7 +461,7 @@ defmodule MyHiFi.Player do
     })
 
     schedule_progress()
-    {:noreply, state}
+    {:noreply, prefetch(state)}
   end
 
   @impl GenServer
@@ -601,7 +609,8 @@ defmodule MyHiFi.Player do
                started_at: nil,
                offset_ms: playable.position_ms,
                position_bytes: playable[:position_bytes],
-               paused?: false
+               paused?: false,
+               prefetched?: false
            }}
 
         {:error, reason} ->
@@ -991,6 +1000,40 @@ defmodule MyHiFi.Player do
     })
 
     :ok
+  end
+
+  # The audio of the next track arrives before a person asks for it, so the gap
+  # between two tracks holds no request and no first 64 KB. See
+  # `MyHiFi.Player.Prefetch` for what this does not remove.
+  #
+  # **A track whose own file is not whole reads nothing ahead.** Two downloads then
+  # share one network, and the one that a person is hearing is the one that must not
+  # wait. A cache entry of this track is the answer: `MyHiFi.Player.Download` writes
+  # it when the file is whole, and never before.
+  defp prefetch(%State{prefetched?: true} = state), do: state
+
+  defp prefetch(%State{item: %{duration_ms: duration}} = state)
+       when is_integer(duration) do
+    if duration - position_ms(state) <= @prefetch_lead_ms and whole?(state.item) do
+      ask_for_next()
+
+      %State{state | prefetched?: true}
+    else
+      state
+    end
+  end
+
+  defp prefetch(%State{} = state), do: state
+
+  defp ask_for_next do
+    with {:ok, row} <- Playback.queue_next_up(),
+         {:ok, item} <- item(row.item_id) do
+      Prefetch.ask(item)
+    end
+  end
+
+  defp whole?(%{id: id}) do
+    match?({:ok, _entry}, MyHiFi.Cache.fetch(Download.namespace(), id))
   end
 
   defp schedule_progress, do: Process.send_after(self(), :progress, @progress_interval)
