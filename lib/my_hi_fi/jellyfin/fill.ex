@@ -94,11 +94,18 @@ defmodule MyHiFi.Jellyfin.Fill do
 
   defp write([], _kind), do: 0
 
+  # **The stamp goes on here, and not in `to_item/3`.** That function holds a clause
+  # for a container and a clause for a track, and a stamp on one of them alone made
+  # each artist and each album look like a row that the server no longer holds. The
+  # read then removed them, and it took every track with them. One place cannot be
+  # missed by a clause that a later version adds.
   defp write(entries, kind) do
     parents = parents(entries)
+    seen_at = DateTime.utc_now()
 
     entries
     |> Enum.map(&to_item(&1, kind, parents))
+    |> Enum.map(&Map.put(&1, :last_seen_at, seen_at))
     |> Ash.bulk_create!(Item, :upsert,
       upsert?: true,
       upsert_identity: :source_ref,
@@ -112,6 +119,7 @@ defmodule MyHiFi.Jellyfin.Fill do
         :artwork_url,
         :duration_ms,
         :byte_size,
+        :last_seen_at,
         :published_at,
         :parent_id,
         :transport,
@@ -180,12 +188,17 @@ defmodule MyHiFi.Jellyfin.Fill do
     }
   end
 
+  # **The stamp is not optional here.** `MyHiFi.Jellyfin.Sync.Library` removes each row
+  # of this source that a whole read did not see, and `MyHiFi.Playback.Item` removes
+  # what a container holds when that container goes. A row of this one with no stamp
+  # would therefore take every album with no artist away with it.
   defp unknown_artist do
     Playback.upsert_item!(%{
       source: @source,
       source_ref: @unknown_artist_ref,
       kind: :container,
-      title: "Unknown artist"
+      title: "Unknown artist",
+      last_seen_at: DateTime.utc_now()
     })
   end
 end

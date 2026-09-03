@@ -276,6 +276,23 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
       end
     end
 
+    # A row that goes reaches neither `c:MyHiFi.Source.finished/1` nor
+    # `MyHiFi.Player.release_file/1`, so without this the file holds the card for ever
+    # and nothing can name it again. See `MyHiFi.Jellyfin.Sync.Library`, which removes
+    # the rows that a server no longer holds.
+    test "a track that goes gives up its audio" do
+      serve(100)
+      one = track("track-1")
+      FavouriteAudio.read(one)
+      Cache.keep!(held(one.id))
+
+      assert held(one.id).keep? == true
+
+      :ok = Playback.destroy_item!(one)
+
+      assert held(one.id).keep? == false
+    end
+
     test "the ordinary eviction takes the file of a favourite" do
       serve(100)
       one = track("track-1")

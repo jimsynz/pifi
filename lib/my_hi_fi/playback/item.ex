@@ -189,7 +189,8 @@ defmodule MyHiFi.Playback.Item do
         :transport,
         :container_format,
         :format,
-        :live?
+        :live?,
+        :last_seen_at
       ]
     end
 
@@ -290,6 +291,13 @@ defmodule MyHiFi.Playback.Item do
       # no entry: one picture serves many records, and the eviction reclaims a file
       # that nothing names any more. See `MyHiFi.Cache.Attachment`.
       change {MyHiFi.Cache.Attachment.Changes.DetachRecord, type: "item"}
+
+      # A track that goes takes its audio with it. `MyHiFi.Player.Download` writes the
+      # file with `keep?`, and `c:MyHiFi.Source.finished/1` and
+      # `MyHiFi.Player.release_file/1` are the two things that take that mark off. A
+      # row that goes reaches neither, so the file would hold the card for ever and
+      # nothing could ever name it again.
+      change MyHiFi.Playback.Item.Changes.ReleaseAudio
     end
   end
 
@@ -476,6 +484,22 @@ defmodule MyHiFi.Playback.Item do
 
     attribute :last_played_at, :utc_datetime_usec do
       description "When a person last played it."
+      public? true
+    end
+
+    attribute :last_seen_at, :utc_datetime_usec do
+      description """
+      When a read of the service last saw this item.
+
+      A source that reads a whole library writes this on each row that it sees. What
+      the read did not see is a thing that the service no longer holds, and the read
+      removes it. See `MyHiFi.Jellyfin.Sync.Library`.
+
+      It is nil for a row that a source wrote before this column, and for a source
+      that reads no whole library. A remover therefore names its own source, and it
+      never reads a row of another one.
+      """
+
       public? true
     end
 

@@ -97,7 +97,7 @@ defmodule MyHiFi.Jellyfin.SyncTest do
 
       assert {:ok, report} = Jellyfin.sync_library()
 
-      assert report == %{artists: 1, albums: 1, tracks: 2, skipped?: false}
+      assert report == %{artists: 1, albums: 1, tracks: 2, removed: 0, skipped?: false}
 
       assert [artist] = items(expr(kind == :container and is_nil(parent_id)))
       assert artist.title == "Artist 1"
@@ -201,6 +201,102 @@ defmodule MyHiFi.Jellyfin.SyncTest do
       Jellyfin.sync_library!()
 
       assert_receive %Event.Source.Changed{source: Source.Jellyfin, ref: :library}
+    end
+
+    # A library of one album, so a later read of a library with none of it removes it.
+    defp sync_one_album do
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1), track(2, 1)]
+      })
+
+      Jellyfin.sync_library!()
+    end
+
+    test "a read that finishes removes what the server no longer holds" do
+      sync_one_album()
+      assert length(all_items()) == 4
+
+      # The server now holds a different album, and nothing of the first one.
+      stub_library(%{
+        "MusicArtist" => [artist(2)],
+        "MusicAlbum" => [album(2, 2)],
+        "Audio" => [track(3, 2)]
+      })
+
+      assert {:ok, report} = Jellyfin.sync_library()
+
+      assert report.removed == 4
+
+      assert Enum.map(all_items(), & &1.source_ref) |> Enum.sort() ==
+               ["album-2", "artist-2", "track-3"]
+    end
+
+    # The one rule that makes the removal safe. A read that stops half way has seen no
+    # track, so a remover that ran then would empty the catalogue.
+    test "a read that fails removes nothing" do
+      sync_one_album()
+      before = Enum.map(all_items(), & &1.id) |> Enum.sort()
+
+      Req.Test.stub(Server, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+
+      assert {:error, _reason} = Jellyfin.sync_library()
+      assert Enum.map(all_items(), & &1.id) |> Enum.sort() == before
+    end
+
+    test "a read that gives up half way removes nothing" do
+      sync_one_album()
+      before = Enum.map(all_items(), & &1.id) |> Enum.sort()
+
+      # The artists arrive, and the albums do not.
+      Req.Test.stub(Server, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+
+        case conn.params["IncludeItemTypes"] do
+          "MusicArtist" ->
+            Req.Test.json(conn, %{"Items" => [artist(1)], "TotalRecordCount" => 1})
+
+          _other ->
+            Req.Test.transport_error(conn, :econnrefused)
+        end
+      end)
+
+      assert {:error, _reason} = Jellyfin.sync_library()
+      assert Enum.map(all_items(), & &1.id) |> Enum.sort() == before
+    end
+
+    # `MyHiFi.Jellyfin.Fill` writes this container for an album that names no artist,
+    # and it writes it by another path. A row of it with no stamp would take every such
+    # album away with it.
+    test "the container of an album with no artist stays" do
+      stub_library(%{
+        "MusicArtist" => [],
+        "MusicAlbum" => [Map.drop(album(1, 1), ["AlbumArtist", "AlbumArtists"])],
+        "Audio" => []
+      })
+
+      Jellyfin.sync_library!()
+      assert {:ok, report} = Jellyfin.sync_library()
+
+      assert report.removed == 0
+
+      refs = Enum.map(all_items(), & &1.source_ref) |> Enum.sort()
+      assert Fill.unknown_artist_ref() in refs
+      assert "album-1" in refs
+    end
+
+    # A person keeps their mark everywhere else, and not here: the catalogue follows
+    # the server.
+    test "a mark does not hold a row back" do
+      sync_one_album()
+      [one | _rest] = items(expr(kind == :track))
+      {:ok, _marked} = MyHiFi.Playback.set_favourite(one)
+
+      stub_library(%{"MusicArtist" => [], "MusicAlbum" => [], "Audio" => []})
+
+      assert {:ok, _report} = Jellyfin.sync_library()
+      assert all_items() == []
     end
 
     test "a person who took this source out of use asks the server nothing" do
