@@ -67,9 +67,21 @@ defmodule MyHiFi.Cache.Entry do
       The entries that an eviction may take, the least recently used first.
 
       An entry that a caller marked with `keep?` is absent.
+
+      `colder_than` holds a floor under the eviction: an entry used at that time or
+      after it stays. A caller that writes files and asks for room between them gives
+      the time that it started, so the eviction cannot take back what the same run
+      has already written. Without that floor a run of one album reads a track,
+      removes it to make room for the next one, and writes the card for ever.
       """
 
-      filter expr(keep? == false)
+      argument :colder_than, :utc_datetime_usec, allow_nil?: true
+
+      filter expr(
+               keep? == false and
+                 (is_nil(^arg(:colder_than)) or last_accessed_at < ^arg(:colder_than))
+             )
+
       prepare build(sort: [last_accessed_at: :asc])
     end
 
@@ -197,9 +209,25 @@ defmodule MyHiFi.Cache.Entry do
       description """
       Remove the coldest entries until the cache is inside its limit.
 
+      `want_bytes` asks for room as well. The eviction then removes down to the limit
+      less that number, so a caller that must write a file of a known size gets the
+      room for it. A caller that asks for nothing gives 0, and the limit alone decides.
+
       A cache that holds nothing but entries to keep stays above the limit, and this
       reports that instead of removing what a person needs.
       """
+
+      argument :want_bytes, :integer do
+        description "How much room the caller needs, under the limit."
+        allow_nil? false
+        default 0
+        constraints min: 0
+      end
+
+      argument :colder_than, :utc_datetime_usec do
+        description "A floor under the eviction. See the `:coldest` read."
+        allow_nil? true
+      end
 
       run MyHiFi.Cache.Entry.Prune
     end

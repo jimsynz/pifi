@@ -6,9 +6,10 @@ defmodule MyHiFi.Source do
   player and each user interface walk that tree, so neither one holds knowledge of
   any particular service.
 
-  `MyHiFi.Source.InternetRadio` and `MyHiFi.Source.Podcasts` are the sources today.
-  Spotify, Plex and Squeezecast come later, and each one is a module that
-  implements this behaviour and changes nothing else.
+  `MyHiFi.Source.InternetRadio`, `MyHiFi.Source.Podcasts` and
+  `MyHiFi.Source.Jellyfin` are the sources today. Spotify, Plex and Squeezecast come
+  later, and each one is a module that implements this behaviour and changes nothing
+  else.
   """
 
   require Logger
@@ -413,7 +414,8 @@ defmodule MyHiFi.Source do
   def all do
     Application.get_env(:my_hi_fi, :sources, [
       MyHiFi.Source.InternetRadio,
-      MyHiFi.Source.Podcasts
+      MyHiFi.Source.Podcasts,
+      MyHiFi.Source.Jellyfin
     ])
   end
 

@@ -22,6 +22,7 @@ config :my_hi_fi,
   ash_domains: [
     MyHiFi.Cache,
     MyHiFi.Device,
+    MyHiFi.Jellyfin,
     MyHiFi.Playback,
     MyHiFi.Podcast,
     MyHiFi.Radio,

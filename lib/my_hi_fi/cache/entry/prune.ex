@@ -10,6 +10,19 @@ defmodule MyHiFi.Cache.Entry.Prune do
   its age. A cache that holds nothing else stays above the limit, and this reports
   that. The caller that marked those entries is the one that can release them, so
   this must not decide for it.
+
+  ## The limit, and the room that a caller asks for
+
+  `want_bytes` moves the target below the limit, and it changes nothing else: the
+  same order, the same `keep?` rule, one eviction for the whole card.
+
+  **A limit alone cannot make room, and that is why the argument is here.** The limit
+  of this cache is the free space of the partition, less a reserve, so it falls as the
+  cache grows and the two meet. A cache at that point holds a total that is inside its
+  limit, so an eviction with no target removes nothing at all, and a caller that needs
+  40 MB for one file is told that the card is full while gigabytes of cold artwork sit
+  beside it. `MyHiFi.Playback.FavouriteAudio` names the size of the track that it is
+  about to read, and the coldest entries then go.
   """
 
   use Ash.Resource.Actions.Implementation
@@ -20,15 +33,16 @@ defmodule MyHiFi.Cache.Entry.Prune do
   alias MyHiFi.Cache
 
   @impl true
-  def run(_input, _options, _context) do
+  def run(input, _options, _context) do
     limit = Cache.limit()
-    total = total_bytes()
+    target = Kernel.max(limit - input.arguments.want_bytes, 0)
+    total = Cache.bytes()
 
-    if total <= limit do
+    if total <= target do
       {:ok, report(total, limit, 0, 0)}
     else
-      {removed, freed} = remove(total - limit)
-      now = total_bytes()
+      {removed, freed} = remove(total - target, Map.get(input.arguments, :colder_than))
+      now = Cache.bytes()
 
       Logger.info(
         "The cache removed #{removed} entries and #{div(freed, 1024)} KB. " <>
@@ -41,8 +55,8 @@ defmodule MyHiFi.Cache.Entry.Prune do
 
   # It chooses the entries first and removes them in one bulk destroy. Choosing needs
   # a running total, which no query expression holds, and removing does not.
-  defp remove(excess) do
-    taking = choose(coldest(), excess, [], 0)
+  defp remove(excess, colder_than) do
+    taking = choose(coldest(colder_than), excess, [], 0)
     ids = Enum.map(taking, & &1.id)
     freed = taking |> Enum.map(&(&1.byte_size || 0)) |> Enum.sum()
 
@@ -69,23 +83,15 @@ defmodule MyHiFi.Cache.Entry.Prune do
     choose(rest, excess, [entry | taking], freed + (entry.byte_size || 0))
   end
 
-  defp coldest do
+  defp coldest(colder_than) do
     Cache.Entry
-    |> Ash.Query.for_read(:coldest)
+    |> Ash.Query.for_read(:coldest, %{colder_than: colder_than})
     |> Ash.read!()
   end
 
   defp failed(errors) do
     Logger.warning("The cache could not remove every entry: #{inspect(errors)}")
     {0, 0}
-  end
-
-  defp total_bytes do
-    Cache.Entry
-    |> Ash.Query.for_read(:read)
-    |> Ash.read!()
-    |> Enum.map(&(&1.byte_size || 0))
-    |> Enum.sum()
   end
 
   defp report(total, limit, removed, freed) do

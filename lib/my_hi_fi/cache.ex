@@ -111,6 +111,25 @@ defmodule MyHiFi.Cache do
   end
 
   @doc """
+  How many bytes the entries of the cache hold.
+
+  It counts every entry, and one that a caller marked with `keep?` counts like any
+  other. The eviction reads this against `limit/0`.
+  """
+  @spec bytes() :: non_neg_integer()
+  def bytes, do: Ash.sum!(Entry, :byte_size) || 0
+
+  @doc """
+  How many bytes the cache may still take before it passes its limit.
+
+  It is 0 for a cache that is at its limit or past it.
+  `MyHiFi.Playback.FavouriteAudio` reads this before it asks for a track, because a
+  read that no eviction can make room for must not start.
+  """
+  @spec free_bytes() :: non_neg_integer()
+  def free_bytes, do: Kernel.max(limit() - bytes(), 0)
+
+  @doc """
   Where the cache holds its files.
 
   It lives on the application data partition, beside the database. That partition is

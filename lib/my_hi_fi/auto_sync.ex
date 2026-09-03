@@ -113,6 +113,33 @@ defmodule MyHiFi.AutoSync do
       action: :refresh_all,
       worker: MyHiFi.Podcast.Show.Workers.RefreshAll,
       default_hours: 6
+    },
+    %{
+      key: "jellyfin-library",
+      title: "Your Jellyfin library",
+      description: "The artists, the albums and the tracks that the server holds.",
+      source: MyHiFi.Source.Jellyfin,
+      resource: MyHiFi.Jellyfin.Sync,
+      action: :sync_library,
+      worker: MyHiFi.Jellyfin.Sync.Workers.Library,
+      default_hours: 24
+    },
+    # A mark asks for the audio at once, and a device that held no network at that
+    # moment reads nothing. This asks again for each mark that the card does not hold.
+    #
+    # **The rule that decides what reads names no source**, and this job names one
+    # because `MyHiFi.AutoSync` gates every job on the source that it needs. Jellyfin
+    # is the one source today whose tracks read on to the card: a station is live, and
+    # an episode of a podcast keeps its place. See `MyHiFi.Playback.FavouriteAudio`.
+    %{
+      key: "jellyfin-favourites",
+      title: "The audio of what you marked",
+      description: "The device reads each marked album and track on to the card.",
+      source: MyHiFi.Source.Jellyfin,
+      resource: MyHiFi.Jellyfin.Sync,
+      action: :cache_favourites,
+      worker: MyHiFi.Jellyfin.Sync.Workers.Favourites,
+      default_hours: 1
     }
   ]
 

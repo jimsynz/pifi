@@ -26,12 +26,22 @@ defmodule MyHiFi.Playback.Item do
   card. An item with no address of its own uses the address of its parent, which the
   `artwork` calculation gives. A publisher writes artwork for 70% of the episodes of
   the measurement, and the cover of the show serves the rest.
+
+  ## The audio of a favourite
+
+  A mark reads the audio on to the card, so a person hears what they marked with no
+  wait and hears it when the service is off. `caches_audio?` says which items that
+  covers, and it names no source: `transport` and `keeps_place?` are the two facts
+  that decide. See `MyHiFi.Playback.FavouriteAudio`.
   """
+
+  alias MyHiFi.Playback.FavouriteAudio
 
   use Ash.Resource,
     otp_app: :my_hi_fi,
     domain: MyHiFi.Playback,
-    data_layer: AshSqlite.DataLayer
+    data_layer: AshSqlite.DataLayer,
+    extensions: [AshOban]
 
   sqlite do
     table "playback_items"
@@ -47,6 +57,28 @@ defmodule MyHiFi.Playback.Item do
     # SQLite reads the whole table for each row of a page.
     custom_indexes do
       index [:parent_id]
+    end
+  end
+
+  oban do
+    triggers do
+      # A person presses one control, and the control must answer at once, so the
+      # read of the audio happens here. `scheduler_cron false` means that nothing
+      # looks for work: `AshOban.run_trigger/2` is the one way that this job arrives,
+      # and `MyHiFi.Jellyfin.Sync.Favourites` is the other caller of it.
+      #
+      # Two presses ask twice, and `where` is what holds the reads to one. Oban
+      # cannot make the job unique, because AshOban puts `tenant: nil` in the
+      # arguments and its SQLite engine compares them as JSON. The job reads the item
+      # again instead, and an item that lost its mark cancels the job.
+      trigger :cache_audio do
+        action :cache_audio
+        where expr(caches_audio?)
+        scheduler_cron false
+        worker_module_name MyHiFi.Playback.Item.Workers.CacheAudio
+        queue :default
+        max_attempts 1
+      end
     end
   end
 
@@ -89,6 +121,26 @@ defmodule MyHiFi.Playback.Item do
       pagination keyset?: true, required?: false
     end
 
+    read :marked_for_audio do
+      description """
+      The items of one source whose audio this device holds because a person marked
+      them.
+
+      It names the item that a person marked, and not the tracks under it. One job
+      takes one of these and reads what it holds.
+
+      **The newest mark comes first.** A card that fills stops the run, so the order
+      decides what the device keeps: what a person marked a moment ago, and not what
+      they marked a year ago. An item that an older firmware marked holds no time,
+      and it comes last. See `MyHiFi.Playback.FavouriteAudio`.
+      """
+
+      argument :source, :string, allow_nil?: false
+
+      filter expr(source == ^arg(:source) and caches_audio?)
+      prepare build(sort: [favourited_at: :desc])
+    end
+
     create :upsert do
       description """
       Write an item from its source.
@@ -114,6 +166,7 @@ defmodule MyHiFi.Playback.Item do
         :description,
         :artwork_url,
         :duration_ms,
+        :byte_size,
         :keeps_place?,
         :rank,
         :published_at,
@@ -126,13 +179,62 @@ defmodule MyHiFi.Playback.Item do
     end
 
     update :set_favourite do
-      description "Mark this item."
+      description """
+      Mark this item.
+
+      A mark also asks for the audio of what it covers, so a person who marks an
+      album hears it with no wait and hears it when the service is off. The ask puts
+      a job in the queue and it reaches no network, because a person pressed a
+      control and the control must answer at once. See
+      `MyHiFi.Playback.FavouriteAudio`.
+      """
+
+      # The hook puts a job in the queue, and no statement of SQLite can do that.
+      require_atomic? false
+
       change set_attribute(:favourite?, true)
+      change set_attribute(:favourited_at, &DateTime.utc_now/0)
+
+      change after_action(fn _changeset, item, _context ->
+               FavouriteAudio.ask(item)
+
+               {:ok, item}
+             end)
     end
 
     update :clear_favourite do
-      description "Remove the mark from this item."
+      description """
+      Remove the mark from this item.
+
+      The audio that the mark read stays on the card, and it becomes an ordinary
+      entry of the cache that an eviction may take. A person who changes their mind
+      twice in a minute therefore reads the album one time. See
+      `MyHiFi.Playback.FavouriteAudio`.
+      """
+
+      require_atomic? false
+
       change set_attribute(:favourite?, false)
+      change set_attribute(:favourited_at, nil)
+
+      change after_action(fn _changeset, item, _context ->
+               FavouriteAudio.release(item)
+
+               {:ok, item}
+             end)
+    end
+
+    update :cache_audio do
+      description """
+      Read the audio of this item on to the card.
+
+      The `:cache_audio` trigger runs this. It changes no attribute of its own:
+      `MyHiFi.Playback.FavouriteAudio` reads the tracks and writes them to the cache.
+      """
+
+      require_atomic? false
+
+      change MyHiFi.Playback.Item.Changes.CacheAudio
     end
 
     update :store_position do
@@ -225,6 +327,19 @@ defmodule MyHiFi.Playback.Item do
       public? true
     end
 
+    attribute :byte_size, :integer do
+      description """
+      How many bytes the audio holds. A container and a live stream hold none.
+
+      `MyHiFi.Playback.FavouriteAudio` reads this before it asks for a track, so it
+      can see whether the cache holds room for one. That check must reach no service,
+      because a device with no network still has to decide. A source that cannot say
+      leaves it absent, and the check estimates the size from `duration_ms` instead.
+      """
+
+      public? true
+    end
+
     attribute :rank, :integer do
       description """
       What the service says about how popular this item is. A bigger number comes
@@ -287,6 +402,22 @@ defmodule MyHiFi.Playback.Item do
       source :favourite
       allow_nil? false
       default false
+      public? true
+    end
+
+    attribute :favourited_at, :utc_datetime_usec do
+      description """
+      When a person put the mark on. It is absent for an item that holds no mark.
+
+      **`updated_at` cannot answer this.** A sync writes every row that a service
+      owns, so that time says when the device last read the service and not when a
+      person chose the item.
+
+      `MyHiFi.Playback.FavouriteAudio` reads the marked items newest first, and this
+      is the order. A card that fills therefore holds what a person marked most
+      recently, and the run settles instead of writing the card for ever.
+      """
+
       public? true
     end
 
@@ -384,6 +515,27 @@ defmodule MyHiFi.Playback.Item do
       How many items name this one as their container.
 
       A show says how many episodes it holds. It is 0 for a track, which holds nothing.
+      """
+    end
+
+    calculate :caches_audio?,
+              :boolean,
+              expr(
+                favourite? == true and
+                  ((kind == :track and transport == :download and keeps_place? == false) or
+                     exists(children, transport == :download and keeps_place? == false))
+              ) do
+      description """
+      A person marked this item, and this device holds the audio of what it covers.
+
+      **It names no source, and it must not.** `transport` says that the audio is a
+      file that this device reads, and `keeps_place?` says that the item is a song
+      and not an episode of a podcast. A subscription to a show therefore reads
+      nothing, and a mark on an album reads every track of it.
+
+      A container names the tracks that it holds, and not the tracks below those. An
+      artist holds albums, so a mark on one reads nothing. See
+      `MyHiFi.Playback.FavouriteAudio`.
       """
     end
 

@@ -2,6 +2,7 @@ defmodule MyHiFi.AutoSyncTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.AutoSync
+  alias MyHiFi.Jellyfin.Server
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Settings
   alias MyHiFi.Source
@@ -11,25 +12,21 @@ defmodule MyHiFi.AutoSyncTest do
   setup do
     # A row of the settings outlives a test in this suite, so a test that reads the
     # absence of one must make that absence itself.
-    forget_index()
+    forget(service_keys())
 
     on_exit(fn ->
       keys =
         Enum.flat_map(AutoSync.jobs(), &[AutoSync.hours_key(&1.key), AutoSync.last_key(&1.key)])
 
-      for name <-
-            keys ++
-              [
-                Source.enabled_key(Source.InternetRadio),
-                Source.enabled_key(Source.Podcasts),
-                Index.key_setting(),
-                Index.secret_setting()
-              ] do
-        case Settings.fetch(name) do
-          {:ok, setting} -> Settings.delete!(setting)
-          {:error, _reason} -> :ok
-        end
-      end
+      forget(
+        keys ++
+          service_keys() ++
+          [
+            Source.enabled_key(Source.InternetRadio),
+            Source.enabled_key(Source.Podcasts),
+            Source.enabled_key(Source.Jellyfin)
+          ]
+      )
     end)
 
     :ok
@@ -187,6 +184,7 @@ defmodule MyHiFi.AutoSyncTest do
   describe "run_due/1" do
     test "it runs every job of a device that never synced" do
       configure_index()
+      configure_jellyfin()
 
       assert keys = AutoSync.run_due()
 
@@ -241,8 +239,27 @@ defmodule MyHiFi.AutoSyncTest do
     Settings.put!(Index.secret_setting(), "a-secret")
   end
 
-  defp forget_index do
-    for name <- [Index.key_setting(), Index.secret_setting()] do
+  # A source names what it needs in `c:MyHiFi.Source.ready?/0`, and a job of a source
+  # that holds none is never due.
+  defp configure_jellyfin do
+    Settings.put!(Server.address_setting(), "http://jellyfin.test")
+    Settings.put!(Server.token_setting(), "a-token")
+    Settings.put!(Server.user_setting(), "a-user")
+  end
+
+  defp service_keys do
+    [
+      Index.key_setting(),
+      Index.secret_setting(),
+      Server.address_setting(),
+      Server.token_setting(),
+      Server.user_setting(),
+      Server.device_id_setting()
+    ]
+  end
+
+  defp forget(names) do
+    for name <- names do
       case Settings.fetch(name) do
         {:ok, setting} -> Settings.delete!(setting)
         {:error, _reason} -> :ok

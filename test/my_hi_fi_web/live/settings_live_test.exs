@@ -66,7 +66,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     test "each row says what the section holds", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
-      assert html =~ "2 of 2 in use"
+      assert html =~ "3 of 3 in use"
       assert html =~ "free of"
     end
 
@@ -486,7 +486,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       assert html =~ "Podcasts is out of use."
       refute Source.enabled?(Source.Podcasts)
-      assert Source.enabled() == [Source.InternetRadio]
+      assert Source.enabled() == [Source.InternetRadio, Source.Jellyfin]
 
       {:ok, _view, html} = live(conn, ~p"/settings")
       refute html =~ ~s(id="source-#{@podcasts}")
