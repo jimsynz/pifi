@@ -64,10 +64,21 @@ defmodule MyHiFi.Jellyfin.Server do
   @client "MyHiFi"
   @version Mix.Project.config()[:version]
 
-  # A page of 200 is one answer of about 200 KB, and a library of 40,000 tracks is
-  # then 200 answers. A larger page holds more of the library in memory at one time,
-  # and this board holds 363.9 MB.
-  @page 200
+  # **A page is the largest thing that a read of a library holds at one time.** The
+  # answer, the entries that `parse/3` builds from it, and the attribute maps that
+  # `MyHiFi.Jellyfin.Fill` builds from those all exist together, so this number decides
+  # the memory of the whole read. A board of 363.9 MB ran out of it, and a page of 100
+  # rows of this table measured 20 MB on the way in.
+  #
+  # 50 and not 200. The write is chunked at 100 by Ash whatever this holds, so a page
+  # above that saves no statement, and one below it decides both.
+  #
+  # **The count of the answers is not free.** A library of 53,105 items is 1063 answers
+  # at this size, where 200 gave 266. A read of that library took 2096 s, and the cost
+  # of one answer falls with its size, so the whole read should take about as long.
+  # Watch that against `rescue_after` of `Oban.Lifeline`: a read that passes two hours
+  # is a read that the rescue starts again beside the one that still runs.
+  @page 50
 
   # The height of the artwork that the cache holds. The device screen is 320 by 240,
   # and the web interface draws a larger picture on a tablet.
