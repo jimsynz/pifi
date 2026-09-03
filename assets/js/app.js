@@ -22,6 +22,7 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 import {accent} from "./accent"
+import {cover} from "./cover"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -30,6 +31,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
 })
 
 accent()
+cover()
 
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#e2a854"}, shadowColor: "rgba(0, 0, 0, .3)"})

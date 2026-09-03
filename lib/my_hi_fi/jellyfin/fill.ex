@@ -47,6 +47,7 @@ defmodule MyHiFi.Jellyfin.Fill do
 
   require Ash.Query
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Jellyfin.Server
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
@@ -103,6 +104,8 @@ defmodule MyHiFi.Jellyfin.Fill do
     parents = parents(entries)
     seen_at = DateTime.utc_now()
 
+    ask_for_pictures(entries, kind)
+
     entries
     |> Enum.map(&to_item(&1, kind, parents))
     |> Enum.map(&Map.put(&1, :last_seen_at, seen_at))
@@ -132,6 +135,19 @@ defmodule MyHiFi.Jellyfin.Fill do
 
     length(entries)
   end
+
+  # **A row of a container draws its picture, so the picture must be on the card before
+  # a person browses.** A list draws the address of a picture without reading anything,
+  # and nothing on that path asks for one, so the read of the library is what asks. See
+  # `MyHiFi.Artwork.thumbnail_path/1`.
+  #
+  # A track asks for none of its own. A list of tracks draws no picture, and the picture
+  # of a track is the cover of its album far more often than not.
+  defp ask_for_pictures(entries, :container) do
+    Enum.each(entries, &Artwork.Worker.enqueue(&1.artwork_url))
+  end
+
+  defp ask_for_pictures(_entries, :track), do: :ok
 
   # One read for a whole page, and not one read for each row. A page of 200 tracks
   # holds far fewer albums than that, so the read is small and the map that it gives

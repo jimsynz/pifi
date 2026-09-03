@@ -326,6 +326,35 @@ defmodule MyHiFi.Jellyfin.SyncTest do
       assert Enum.map(all_items(), & &1.id) |> Enum.sort() == before
     end
 
+    # A row of a container draws its picture, and nothing on the path that draws a list
+    # asks for one, so the read of the library is what asks. See
+    # `MyHiFi.Artwork.thumbnail_path/1`.
+    test "it asks for the picture of each container, and none of a track" do
+      stub_library(%{
+        "MusicArtist" => [Map.put(artist(1), "ImageTags", %{"Primary" => "x"})],
+        "MusicAlbum" => [Map.put(album(1, 1), "ImageTags", %{"Primary" => "x"})],
+        "Audio" => [Map.put(track(1, 1), "ImageTags", %{"Primary" => "x"})]
+      })
+
+      Jellyfin.sync_library!()
+
+      asked =
+        all_enqueued(worker: MyHiFi.Artwork.Worker)
+        |> Enum.map(& &1.args["url"])
+
+      refs = Enum.map(all_items(), &{&1.source_ref, &1.kind})
+
+      for {ref, :container} <- refs do
+        item = Enum.find(all_items(), &(&1.source_ref == ref))
+        assert item.artwork_url in asked, "no picture asked for #{ref}"
+      end
+
+      # A list of tracks draws no picture, and the picture of a track is the cover of
+      # its album far more often than not.
+      track_item = Enum.find(all_items(), &(&1.kind == :track))
+      refute track_item.artwork_url in asked
+    end
+
     test "a person who took this source out of use asks the server nothing" do
       Req.Test.stub(Server, fn _conn -> raise "the server must not be asked" end)
       Source.enable(Source.Jellyfin, false)

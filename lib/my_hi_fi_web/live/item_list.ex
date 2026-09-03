@@ -34,6 +34,7 @@ defmodule MyHiFiWeb.ItemList do
 
   use MyHiFiWeb, :html
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
@@ -59,6 +60,47 @@ defmodule MyHiFiWeb.ItemList do
       |> attach_hook(:item_list_info, :handle_info, &info/2)
 
     {:cont, socket}
+  end
+
+  attr :path, :string, default: nil
+  attr :class, :string, default: "size-8"
+  attr :icon_class, :string, default: "size-4"
+
+  @doc """
+  The picture of a container, with a folder behind it.
+
+  **The folder is not a choice of the caller, and the picture is not certain.**
+  `MyHiFi.Artwork.thumbnail_path/1` builds the address without reading the cache, so a
+  list costs no query to draw and no row knows whether its picture is there. A picture
+  that the cache does not hold answers 404, the browser takes the image away, and the
+  folder behind it stays.
+
+  `loading="lazy"` is what holds the cost down on a long list: a browser asks for the
+  rows that a person can see, and not for the hundred of a page.
+
+  `data-cover` is what `assets/js/cover.js` reads to take a broken picture away. **An
+  `onerror` attribute cannot do it**, because the content security policy of
+  `MyHiFiWeb.Router` names no `script-src` and therefore takes `'self'`, which blocks
+  an inline handler. The first version of this used one, and a person saw the mark that
+  a browser draws for a picture that it could not read.
+  """
+  def cover(assigns) do
+    ~H"""
+    <span class={[
+      "relative flex shrink-0 items-center justify-center overflow-hidden rounded",
+      @class
+    ]}>
+      <.icon name="hero-folder" class={[@icon_class, "text-ink-faint"]} />
+      <img
+        :if={@path}
+        src={@path}
+        alt=""
+        loading="lazy"
+        data-cover
+        class="absolute inset-0 size-full object-cover"
+      />
+    </span>
+    """
   end
 
   attr :row, :any, required: true
@@ -95,6 +137,8 @@ defmodule MyHiFiWeb.ItemList do
   end
 
   def row(%{row: %{kind: :container}} = assigns) do
+    assigns = assign(assigns, :artwork, Artwork.thumbnail_path(Map.get(assigns.row, :artwork)))
+
     ~H"""
     <div class="flex w-full min-w-0 items-center gap-2">
       <button
@@ -104,7 +148,7 @@ defmodule MyHiFiWeb.ItemList do
         phx-value-id={@row.id}
         class="group flex min-w-0 grow items-center gap-3 py-1 text-left"
       >
-        <.icon name="hero-folder" class="size-4 shrink-0 text-ink-faint" />
+        <.cover path={@artwork} class="size-8" />
         <span class="min-w-0 grow truncate text-ink group-hover:text-accent">{@row.title}</span>
         <.count of={@row.child_count} />
         <.icon
@@ -232,6 +276,21 @@ defmodule MyHiFiWeb.ItemList do
     end
   end
 
+  # **The list that a person sees is the queue that they get**, in the order that they
+  # see it. `:list_query` holds the sort and the filters that Cinder read, so a person
+  # who sorted an album by date hears it that way. The head of the collection is not a
+  # row of the list, so this takes no identifier: the whole list goes in, and the first
+  # track plays.
+  defp event("play_collection", _params, socket) do
+    case queue_ids(socket, nil) do
+      [] ->
+        {:halt, put_flash(socket, :error, "There is nothing here to play.")}
+
+      ids ->
+        play_all(socket, ids)
+    end
+  end
+
   defp event("favourite", %{"id" => id}, socket) do
     with {:ok, item} <- Playback.get_item(id),
          {:ok, _item} <- mark(item) do
@@ -244,13 +303,26 @@ defmodule MyHiFiWeb.ItemList do
 
   defp event(_name, _params, socket), do: {:cont, socket}
 
+  defp play_all(socket, [first | _rest] = ids) do
+    with {:ok, item} <- Playback.get_item(first),
+         {:ok, :ok} <- Playback.play(ids, %{playing_index: 0}) do
+      {:halt,
+       socket
+       |> Phoenix.Component.assign(:playing, %{item_id: item.id, status: :buffering})
+       |> put_flash(:info, "Playing #{length(ids)} tracks.")}
+    else
+      {:error, reason} ->
+        {:halt, put_flash(socket, :error, "Could not play that: #{inspect(reason)}")}
+    end
+  end
+
   # Cinder gives the query that it read, with the sort and the filters of the person on
   # it, and a page keeps that in `:list_query`. A page that holds none, such as the
   # branches of a source, queues the one row that a person pressed.
   defp queue_ids(socket, pressed) do
     case socket.assigns[:list_query] do
       nil ->
-        [pressed]
+        List.wrap(pressed)
 
       query ->
         ids =
@@ -260,7 +332,12 @@ defmodule MyHiFiWeb.ItemList do
           |> Ash.read!()
           |> Enum.map(& &1.id)
 
-        if pressed in ids, do: ids, else: [pressed]
+        cond do
+          # The head of a collection pressed play, and it is no row of the list.
+          is_nil(pressed) -> ids
+          pressed in ids -> ids
+          true -> [pressed]
+        end
     end
   end
 

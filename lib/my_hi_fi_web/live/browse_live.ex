@@ -44,13 +44,14 @@ defmodule MyHiFiWeb.BrowseLive do
 
   require Ash.Query
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Event
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Facet
   alias MyHiFi.Playback.Item
   alias MyHiFi.Source
 
-  import MyHiFiWeb.ItemList, only: [row: 1, count: 1]
+  import MyHiFiWeb.ItemList, only: [row: 1, count: 1, cover: 1]
 
   on_mount(MyHiFiWeb.ItemList)
 
@@ -65,6 +66,8 @@ defmodule MyHiFiWeb.BrowseLive do
      |> assign(:page_title, "Browse")
      |> assign(:finding?, false)
      |> assign(:root_counts, %{})
+     |> assign(:opened, nil)
+     |> assign(:tracks_only?, false)
      |> assign(:list_query, nil)
      |> assign(:url_state, nil)}
   end
@@ -198,6 +201,8 @@ defmodule MyHiFiWeb.BrowseLive do
 
         <.roots :if={is_nil(@here)} roots={@roots} counts={@root_counts} />
 
+        <.collection_header :if={@opened} item={@opened} playable?={@tracks_only?} />
+
         <Cinder.collection
           :if={@here}
           id={@collection_id}
@@ -211,7 +216,7 @@ defmodule MyHiFiWeb.BrowseLive do
           sort_label="Sort"
           show_filters={@finding?}
           show_sort={@finding?}
-          query_opts={[load: [counts(@here.kind)]]}
+          query_opts={[load: loads(@here.kind)]}
           on_query_change={:list_query}
         >
           <:col
@@ -345,6 +350,49 @@ defmodule MyHiFiWeb.BrowseLive do
     """
   end
 
+  attr :item, :any, required: true
+  attr :playable?, :boolean, required: true
+
+  # The head of one collection: its picture, its name, and what the publisher says.
+  #
+  # **A collection that holds collections holds no play control.** A press on it would
+  # mean "play every track of every album of this artist", and a person who opened an
+  # artist asked to read the albums. `tracks_only?/1` answers that with one count.
+  #
+  # The description is what a publisher wrote, so its length is not this page to choose.
+  # Three lines is enough to know what a thing is, and it leaves the first rows of the
+  # list in sight on a telephone.
+  defp collection_header(assigns) do
+    ~H"""
+    <div id="collection-header" class="glass mb-3 flex items-start gap-3 rounded-xl p-3">
+      <.cover
+        path={Artwork.thumbnail_path(Map.get(@item, :artwork))}
+        class="size-16 rounded-lg"
+        icon_class="size-7"
+      />
+
+      <div class="min-w-0 grow">
+        <p class="truncate font-medium text-ink">{@item.title}</p>
+        <p :if={@item.subtitle} class="truncate text-xs text-ink-faint">{@item.subtitle}</p>
+        <p :if={@item.description} class="mt-1 line-clamp-3 text-xs text-ink-dim">
+          {@item.description}
+        </p>
+      </div>
+
+      <button
+        :if={@playable?}
+        type="button"
+        id="play-collection"
+        phx-click="play_collection"
+        aria-label={"Play #{@item.title}"}
+        class="control flex size-9 shrink-0 items-center justify-center rounded-full hover:text-accent"
+      >
+        <.icon name="hero-play-mini" class="size-4" />
+      </button>
+    </div>
+    """
+  end
+
   attr :roots, :list, required: true
   attr :counts, :map, required: true
 
@@ -382,11 +430,16 @@ defmodule MyHiFiWeb.BrowseLive do
     if socket.assigns[:source] == module and socket.assigns[:segments] == segments do
       socket
     else
+      path = walk(module, segments)
+      opened = opened_item(%{path: path})
+
       socket
       |> start_at(module)
       |> assign(:segments, segments)
       |> assign(:collection_id, collection_id(segments))
-      |> assign(:path, walk(module, segments))
+      |> assign(:path, path)
+      |> assign(:opened, opened)
+      |> assign(:tracks_only?, tracks_only?(opened))
       |> assign(:root_counts, root_counts(module, segments))
     end
   end
@@ -400,6 +453,28 @@ defmodule MyHiFiWeb.BrowseLive do
   defp opened_item(%{path: []}), do: nil
   defp opened_item(%{path: path}), do: Map.get(List.last(path), :item)
   defp opened_item(_assigns), do: nil
+
+  # **A collection holds a play control when every row of it plays.** An artist holds
+  # albums, and `Playback.play/2` would then take a whole discography, which is not what
+  # a person who opened an artist asked for.
+  #
+  # One count, and it runs when a person opens a level and not when a page draws. The
+  # index of `parent_id` serves it, so the count reads no row of the table.
+  defp tracks_only?(nil), do: false
+
+  defp tracks_only?(%{id: id}) do
+    containers =
+      Item
+      |> Ash.Query.filter(parent_id == ^id and kind == :container)
+      |> Ash.count!()
+
+    tracks =
+      Item
+      |> Ash.Query.filter(parent_id == ^id and kind == :track)
+      |> Ash.count!()
+
+    containers == 0 and tracks > 0
+  end
 
   # See `MyHiFi.Source.refresh/2`. The source says whether it reads a service, so this
   # page holds no knowledge of podcasts.
@@ -423,6 +498,13 @@ defmodule MyHiFiWeb.BrowseLive do
   # gives the whole page to the calculation in one call.
   defp counts(:facet), do: :item_count
   defp counts(:item), do: :child_count
+
+  # A row of a container draws its picture, and `artwork` is the calculation that gives
+  # the address: the picture of the item, or the picture of the container that holds it.
+  # One call of Ash serves the whole page, so this costs one expression and no query for
+  # each row. A facet is a value and it holds no picture.
+  defp loads(:facet), do: [counts(:facet)]
+  defp loads(:item), do: [counts(:item), :artwork]
 
   # The filter and the sort name what a person looks at. `Value` is the field of the
   # facet, and it says nothing to somebody who opened Countries.
@@ -506,7 +588,10 @@ defmodule MyHiFiWeb.BrowseLive do
   defp container(source, id) do
     slug = Source.slug(source)
 
-    case Playback.get_item(id) do
+    # `artwork` is a calculation, and the head of the collection draws it. A read that
+    # does not name it gives `%Ash.NotLoaded{}`, and the head then drew a folder for a
+    # container that holds a picture.
+    case Playback.get_item(id, load: [:artwork]) do
       {:ok, %{kind: :container, source: ^slug} = item} ->
         opened(source, item)
 

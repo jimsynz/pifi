@@ -783,4 +783,130 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     assert html =~ "This firmware holds no source."
   end
+
+  describe "the picture of a collection" do
+    defp collection_tree do
+      artist =
+        Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "artist-1",
+          kind: :container,
+          title: "An artist",
+          artwork_url: "https://example.test/artist.jpg"
+        })
+
+      album =
+        Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "album-1",
+          kind: :container,
+          parent_id: artist.id,
+          title: "An album",
+          description: "What the publisher wrote about it.",
+          artwork_url: "https://example.test/album.jpg"
+        })
+
+      {:ok, artist} = Playback.set_favourite(artist)
+      {:ok, album} = Playback.set_favourite(album)
+
+      {artist, album}
+    end
+
+    defp with_tracks(album, count) do
+      for number <- 1..count do
+        Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "track-#{number}",
+          kind: :track,
+          parent_id: album.id,
+          title: "Track #{number}",
+          url: "https://example.test/#{number}.mp3",
+          transport: :download,
+          format: :mp3,
+          keeps_place?: false
+        })
+      end
+    end
+
+    # The address of a picture is the hash of the address of the picture, so a row draws
+    # it with no read of the cache. See `MyHiFi.Artwork.thumbnail_path/1`.
+    test "a row of a container draws its picture", %{conn: conn} do
+      {_artist, album} = collection_tree()
+      path = MyHiFi.Artwork.thumbnail_path(album.artwork_url)
+
+      {:ok, _view, html} = live(conn, "#{@podcasts}/subscriptions")
+
+      assert html =~ path
+    end
+
+    # A picture that the cache does not hold answers 404, and the folder behind it stays.
+    test "a row keeps a folder behind the picture", %{conn: conn} do
+      collection_tree()
+
+      {:ok, _view, html} = live(conn, "#{@podcasts}/subscriptions")
+
+      assert html =~ "hero-folder"
+      assert html =~ "data-cover"
+    end
+  end
+
+  describe "the head of a collection" do
+    test "it shows the name, the words and the picture of the collection", %{conn: conn} do
+      {_artist, album} = collection_tree()
+      with_tracks(album, 2)
+
+      {:ok, _view, html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      assert html =~ "collection-header"
+      assert html =~ "An album"
+      assert html =~ "What the publisher wrote about it."
+      assert html =~ MyHiFi.Artwork.thumbnail_path(album.artwork_url)
+    end
+
+    test "a collection of tracks alone holds a play control", %{conn: conn} do
+      {_artist, album} = collection_tree()
+      with_tracks(album, 2)
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      assert has_element?(view, "#play-collection")
+    end
+
+    # A press would mean "play every track of every album of this artist", and a person
+    # who opened an artist asked to read the albums.
+    test "a collection that holds collections holds none", %{conn: conn} do
+      {artist, _album} = collection_tree()
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{artist.id}")
+
+      assert has_element?(view, "#collection-header")
+      refute has_element?(view, "#play-collection")
+    end
+
+    test "a collection that holds nothing holds none", %{conn: conn} do
+      empty =
+        Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "empty-1",
+          kind: :container,
+          title: "An empty album"
+        })
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{empty.id}")
+
+      refute has_element?(view, "#play-collection")
+    end
+
+    test "the play control queues every track of the collection", %{conn: conn} do
+      PlayingPipeline.use_it()
+      {_artist, album} = collection_tree()
+      with_tracks(album, 3)
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      view |> element("#play-collection") |> render_click()
+
+      assert length(Playback.queue!()) == 3
+    end
+  end
 end

@@ -10,7 +10,22 @@ defmodule MyHiFi.Artwork.Worker do
   network fault gives one, and Oban holds the count.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  # **A job that waits collapses with the ask that follows it.** `MyHiFi.Jellyfin.Fill`
+  # asks for the picture of each container that it writes, and a library of 5,205 of
+  # them is read again every day. Without this each read wrote 5,205 more rows of the
+  # queue for pictures that the one before it had already asked for, and this device
+  # runs for years on an SD card.
+  #
+  # `states` leaves a job that finished out, so a picture that an eviction took is read
+  # again when something asks for it. The arguments hold one address and no nil, so the
+  # trap of the SQLite engine that `CLAUDE.md` names does not reach this.
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 3,
+    unique: [
+      period: :infinity,
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   require Logger
 

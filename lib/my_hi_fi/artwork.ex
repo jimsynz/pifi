@@ -68,6 +68,30 @@ defmodule MyHiFi.Artwork do
   def name(_url), do: nil
 
   @doc """
+  The address that draws the thumbnail of one picture.
+
+  **It reads nothing.** The name of an entry is the hash of the address, so this builds
+  the address from the address alone. A list of 100 rows therefore costs no query and no
+  job to draw, where `name/1` costs one read of the cache for each row and
+  `MyHiFi.Artwork.Worker.enqueue/1` costs a write for each row that the cache misses.
+  `MyHiFiWeb.ItemList` draws a list again for each event of the player, so that cost
+  arrives once a second while a track plays.
+
+  The address of a picture that the cache does not hold answers 404, and a browser then
+  shows nothing for that picture. A caller therefore draws its own mark behind the
+  picture, and a row of a container shows a folder until the picture arrives.
+
+      iex> MyHiFi.Artwork.thumbnail_path(nil)
+      nil
+
+  """
+  @spec thumbnail_path(String.t() | nil) :: String.t() | nil
+  def thumbnail_path(url) when is_binary(url) and url != "",
+    do: "/artwork/#{hash(url)}/thumbnail"
+
+  def thumbnail_path(_url), do: nil
+
+  @doc """
   Everything that the web interface needs to send one picture.
 
   It gives the path, the type and the entity tag in one read, and it notes that
