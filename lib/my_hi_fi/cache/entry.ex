@@ -21,6 +21,8 @@ defmodule MyHiFi.Cache.Entry do
     holds the place of a person is one of those, and artwork never is. Without it one
     download of 60 MB would remove 50 covers, and a list of shows would remove the
     episode that a person is in the middle of.
+  - `weight` says what an entry costs to read again, and the eviction reads it before
+    the time. See the `:coldest` read for the loop that a cache of one measure makes.
   """
 
   use Ash.Resource,
@@ -64,7 +66,17 @@ defmodule MyHiFi.Cache.Entry do
 
     read :coldest do
       description """
-      The entries that an eviction may take, the least recently used first.
+      The entries that an eviction may take, the ones to remove first at the front.
+
+      **The weight comes before the time.** A cache that ranks by the time alone ranks
+      two things wrongly, because the time says how recently a person read a thing and
+      not what it costs to read it again. `MyHiFi.Artwork` touches a picture each time
+      that it draws a list, so every picture stays warm, and the audio of an album that
+      a person marked and did not play goes cold at once. The eviction then took the
+      album, the next run of `MyHiFi.Jellyfin.Sync.Favourites` read the 92 MB of it
+      again, and a person who moved through a list of covers wrote the card for ever.
+      A picture is 1.2 MB and a read of it says nothing to a person. A track is 8 MB,
+      and it is on the card so that it plays when the server is off.
 
       An entry that a caller marked with `keep?` is absent.
 
@@ -82,7 +94,7 @@ defmodule MyHiFi.Cache.Entry do
                  (is_nil(^arg(:colder_than)) or last_accessed_at < ^arg(:colder_than))
              )
 
-      prepare build(sort: [last_accessed_at: :asc])
+      prepare build(sort: [weight: :asc, last_accessed_at: :asc])
     end
 
     create :put do
@@ -108,6 +120,7 @@ defmodule MyHiFi.Cache.Entry do
         :content_type,
         :filename,
         :keep?,
+        :weight,
         :metadata,
         :variant_of_blob_id,
         :variant_name,
@@ -138,7 +151,7 @@ defmodule MyHiFi.Cache.Entry do
       upsert? true
       upsert_identity :namespace_entry_key
 
-      accept [:namespace, :entry_key, :content_type, :filename, :keep?]
+      accept [:namespace, :entry_key, :content_type, :filename, :keep?, :weight]
 
       argument :path, :string do
         description "The file to move. It holds the whole thing, and it is not in the cache."
@@ -164,7 +177,7 @@ defmodule MyHiFi.Cache.Entry do
       upsert? true
       upsert_identity :namespace_entry_key
 
-      accept [:namespace, :entry_key, :content_type, :filename, :keep?]
+      accept [:namespace, :entry_key, :content_type, :filename, :keep?, :weight]
 
       argument :url, :string do
         description "The address to read."
@@ -312,6 +325,22 @@ defmodule MyHiFi.Cache.Entry do
       allow_nil? false
       default false
       public? true
+    end
+
+    attribute :weight, :integer do
+      description """
+      What this entry costs to read again. The eviction takes the lightest first.
+
+      A caller names it as it writes, in the way that it names `keep?`. 0 is a thing
+      that the device reads again by itself and that no person waits for, and a
+      picture is of that kind. 1 is the audio of a track: it is many times the size,
+      and it is on the card so that it plays when no network answers.
+      """
+
+      allow_nil? false
+      default 0
+      public? true
+      constraints min: 0
     end
 
     timestamps()

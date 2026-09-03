@@ -411,8 +411,12 @@ defmodule MyHiFi.Player.Download do
 
   defp from_length([]), do: nil
 
+  # The audio weighs more than a picture, because the eviction must take a picture
+  # first. A picture is 1.2 MB and the device reads it again by itself. A track is
+  # many times that, and a track on the card is what plays when no network answers.
+  # See the `:coldest` read of `MyHiFi.Cache.Entry`.
   defp store(%State{} = state) do
-    attributes = %{path: state.path, content_type: "audio/mpeg", keep?: true}
+    attributes = %{path: state.path, content_type: "audio/mpeg", keep?: true, weight: 1}
 
     case Cache.put_file(@namespace, state.id, attributes) do
       {:ok, _entry} ->

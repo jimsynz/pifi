@@ -41,6 +41,7 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Output
   alias MyHiFi.Playback
+  alias MyHiFi.Player.Download
   alias MyHiFi.Player.Pipeline
   alias MyHiFi.Settings
   alias MyHiFi.Source
@@ -721,6 +722,7 @@ defmodule MyHiFi.Player do
 
   defp play_now(source, item, %State{} = state) do
     store_position(state)
+    release_file(state)
 
     case start(source, item, state) do
       {:ok, state} ->
@@ -805,6 +807,7 @@ defmodule MyHiFi.Player do
   # `handle_continue`, so each caller of this adds that step itself.
   defp cleared(%State{} = state) do
     store_position(state)
+    release_file(state)
     silence(state)
     Event.publish(:player, %Events.Stopped{reason: :requested})
 
@@ -965,6 +968,19 @@ defmodule MyHiFi.Player do
   #
   # A track that never began has no place to keep, and writing 0 would lose the
   # place that a person already had.
+  # A track that keeps no place holds nothing for a person to go back to, so a stop is
+  # the end of it and its file must stop holding the card against every eviction.
+  # `c:MyHiFi.Source.finished/1` does this for a track that reaches its end by itself,
+  # and a person who stops half way through a song reaches that path never. Such a file
+  # therefore held `keep?` for ever, and each one made the card smaller.
+  #
+  # A track that keeps its place is the opposite. A person goes on from where they
+  # stopped, on a later day, and the file must still be there. See `keeps_place?` of
+  # `MyHiFi.Playback.Item`.
+  defp release_file(%State{item: %{keeps_place?: false, id: id}}), do: Download.release(id)
+
+  defp release_file(%State{}), do: :ok
+
   defp store_position(%State{started_at: nil}), do: :ok
   defp store_position(%State{item: nil}), do: :ok
 

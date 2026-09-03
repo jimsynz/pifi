@@ -332,6 +332,43 @@ defmodule MyHiFi.CacheTest do
       assert keys() == ["hot", "warm"]
     end
 
+    # The loop that one measure makes: `MyHiFi.Artwork` touches a picture each time
+    # that it draws a list, so a picture is always warm and the audio of an album that
+    # a person marked and did not play is always cold. The eviction took the album, the
+    # next sync read it again, and moving through a list of covers wrote the card.
+    test "it takes the lightest first, though the heavier entry is colder" do
+      audio = put("download", "audio", String.duplicate("x", 400), %{weight: 1})
+      put("artwork", "picture", String.duplicate("x", 400))
+
+      # The audio is the colder of the two, and the picture is warm because a list
+      # was drawn a moment ago.
+      Cache.touch!(audio)
+      Process.sleep(5)
+      Cache.touch!(Cache.fetch!("artwork", "picture"))
+
+      Application.put_env(:my_hi_fi, :cache_limit, 500)
+
+      assert {:ok, report} = Cache.prune()
+
+      assert report.removed == 1
+      assert keys() == ["audio"]
+    end
+
+    test "two entries of one weight go by the time, as before" do
+      cold = put("download", "cold", String.duplicate("x", 400), %{weight: 1})
+      put("download", "warm", String.duplicate("x", 400), %{weight: 1})
+
+      Cache.touch!(cold)
+      Process.sleep(5)
+      Cache.touch!(Cache.fetch!("download", "warm"))
+
+      Application.put_env(:my_hi_fi, :cache_limit, 500)
+
+      assert {:ok, _report} = Cache.prune()
+
+      assert keys() == ["warm"]
+    end
+
     test "an entry to keep survives, whatever its age" do
       kept = put("download", "kept", String.duplicate("x", 800))
       Cache.keep!(kept)
