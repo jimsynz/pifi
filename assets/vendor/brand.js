@@ -39,6 +39,14 @@ module.exports = plugin(function({matchComponents, theme}) {
         "-webkit-mask": `var(--brand-${name})`,
         "mask": `var(--brand-${name})`,
         "mask-repeat": "no-repeat",
+        // **A mask holds the size of its own picture until something says otherwise.**
+        // The icons of `heroicons.js` are 24 by 24, which is the size of the span, so
+        // they fit and that plugin needs no rule here. A mark comes from the project
+        // that made it and it holds any size: the Jellyfin mark is 72 by 72, so a span
+        // of 20 showed the top left corner of it, which is nearly empty. A person saw
+        // a sliver beside the name.
+        "mask-size": "contain",
+        "mask-position": "center",
         "background-color": "currentColor",
         "vertical-align": "middle",
         "display": "inline-block",
