@@ -31,15 +31,20 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   The same is true of a device that this source is out of use on, and of one that holds
   no link: `run/3` answers before any of this.
 
-  **An answer of nothing removes nothing.** Every fault that names itself stops the
-  read already: no network gives an error, and a token that stopped working gives 401.
-  An answer of 200 that holds no item is the one that looks like success and is not, so
-  a read that saw no item of any kind removes nothing at all. See `remove_unseen/2`.
+  **An answer of nothing empties the catalogue, and that is the choice.** A fault that
+  names itself removes nothing: no network gives an error, a token that stopped working
+  gives 401, and a library that went gives 404, so the `with` never reaches the
+  removal. An answer of 200 that holds no item is not a fault, and a person who cannot
+  reach their library can play nothing of it, so the device follows the server. A
+  Jellyfin that a person rebuilt answers that way while it reads its own files, and the
+  next read writes the library again.
 
-  **A mark does not hold a row back.** A person who marked an album that their server
-  no longer holds loses that mark, because the catalogue follows the server. A track
-  that goes gives up its audio as it goes, through the destroy of
-  `MyHiFi.Playback.Item`.
+  **A mark does not hold a row back, and neither does a file on the card.** A person
+  who marked an album that their server no longer holds loses that mark, because the
+  catalogue follows the server. A track that goes gives up its audio as it goes,
+  through the destroy of `MyHiFi.Playback.Item`, and the key of a download is the
+  identifier of the row, so a later read writes a new row and reaches none of the old
+  files. A read that empties the catalogue therefore costs every download of it.
   """
 
   use Ash.Resource.Actions.Implementation
@@ -74,7 +79,7 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
     with {:ok, artists} <- read(:artists),
          {:ok, albums} <- read(:albums),
          {:ok, tracks} <- read(:tracks) do
-      gone = remove_unseen(started_at, artists + albums + tracks)
+      gone = remove_unseen(started_at)
       announce()
 
       Logger.info(
@@ -97,20 +102,7 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   # `:stream` is not optional: the destroy of that resource reads and writes the cache
   # and gives up the audio of a track, and a strategy that wrote the rows in one
   # statement would run none of that.
-  # **A server that answered with nothing has told this device nothing.** Every fault
-  # that names itself already stops the read: no network gives an error, a token that
-  # stopped working gives 401, and a missing library gives 404. An answer of 200 that
-  # holds no item is the one that looks like success and is not. A Jellyfin that a
-  # person rebuilt is still reading its own files, and an account that lost the right
-  # to a library gets an empty list and no error at all. A read then removed the whole
-  # catalogue, and the marks of a person with it.
-  #
-  # This is not a share of the source, and it is not a number that a person sets. It is
-  # the one answer that cannot be believed. A library that truly holds nothing keeps
-  # its old rows until it holds something again, and that costs a person nothing.
-  defp remove_unseen(_started_at, 0), do: 0
-
-  defp remove_unseen(started_at, _seen) do
+  defp remove_unseen(started_at) do
     query =
       Ash.Query.filter(
         Item,

@@ -293,35 +293,29 @@ defmodule MyHiFi.Jellyfin.SyncTest do
       [one | _rest] = items(expr(kind == :track))
       {:ok, _marked} = MyHiFi.Playback.set_favourite(one)
 
-      # A server that holds something else, and not one that holds nothing: an answer
-      # of nothing removes nothing. See below.
-      stub_library(%{
-        "MusicArtist" => [artist(2)],
-        "MusicAlbum" => [album(2, 2)],
-        "Audio" => [track(3, 2)]
-      })
+      stub_library(%{"MusicArtist" => [], "MusicAlbum" => [], "Audio" => []})
 
       assert {:ok, _report} = Jellyfin.sync_library()
-
-      assert Enum.map(all_items(), & &1.source_ref) |> Enum.sort() ==
-               ["album-2", "artist-2", "track-3"]
+      assert all_items() == []
     end
 
-    # A Jellyfin that a person rebuilt is still reading its own files, and an account
-    # that lost the right to a library gets an empty list and no error at all. Both
-    # answer 200 with no item, which looks like success and is not.
-    test "a server that answers with nothing removes nothing" do
+    # **A server that answers with nothing empties the catalogue, and that is the
+    # choice.** A person who cannot reach their library can play nothing of it, so the
+    # device follows the server. The cost is real: a row that goes takes its mark and
+    # the reach of its audio with it, because the key of a download is the identifier
+    # of the row and a later read writes a new one.
+    test "a server that answers with nothing removes everything" do
       sync_one_album()
-      before = Enum.map(all_items(), & &1.id) |> Enum.sort()
 
       stub_library(%{"MusicArtist" => [], "MusicAlbum" => [], "Audio" => []})
 
       assert {:ok, report} = Jellyfin.sync_library()
 
-      assert report.removed == 0
-      assert Enum.map(all_items(), & &1.id) |> Enum.sort() == before
+      assert report.removed == 4
+      assert all_items() == []
     end
 
+    # A fault that names itself is a different thing, and it removes nothing.
     test "a token that stopped working removes nothing" do
       sync_one_album()
       before = Enum.map(all_items(), & &1.id) |> Enum.sort()
