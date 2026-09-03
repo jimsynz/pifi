@@ -25,6 +25,47 @@
 ## runtime from starting stops the device from booting.
 -env ERL_FULLSWEEP_AFTER 10
 
+## Hold the memory of the runtime down, on a board where Linux sees 363.9 MB.
+##
+## **`R` is the driver allocator, and `D` is `std_alloc`.** Every guide that names
+## `+MD` for the driver gets this wrong, and such a flag tunes the wrong allocator and
+## reports nothing. A measurement of `:erlang.system_info({:allocator, :driver_alloc})`
+## is the way to know that a flag arrived.
+##
+## `aobf` is address order best fit. It fills the carrier with the lowest address
+## first, so the carriers at the top empty and the runtime gives them back. The
+## default, `aoffcbf`, spreads the blocks and holds more carriers than it needs.
+##
+## `smbcs` and `lmbcs` are the size of a carrier, in KB. The default asks the operating
+## system for 256 KB and 5 MB at a time, which is a lot of rounding on a board of this
+## size. 64 KB and 128 KB waste less.
++MRas aobf
++MRsmbcs 64
++MRlmbcs 128
++MBas aobf
++MBsmbcs 64
++MBlmbcs 128
++MHas aobf
++MHsmbcs 64
++MHlmbcs 128
+
+## The first carrier of the runtime, in KB.
++MMscs 20
+
+## **`acul` is absent on purpose.** A guide will tell you that `+MBacul 0` stops the
+## runtime from holding an empty carrier. It does the opposite: 0 turns the abandonment
+## of a carrier off, and 0 is the default already. A measurement on OTP 29 showed that
+## no value of it arrives at all, so the flag is a comment with no effect.
+##
+## `+t` is absent as well. The atom table costs about 2 MB, and a build that passes the
+## limit of it stops. That is a poor trade.
+
+## How many processes and ports the runtime holds room for. The tables are made at the
+## start, whatever runs later. This device held 795 processes and 24 ports, and the
+## defaults are 262,144 and 65,536: the process table alone measured 12 MB.
++P 50000
++Q 8192
+
 ## Use Ctrl-C to interrupt the current shell rather than invoking the emulator's
 ## break handler and possibly exiting the VM.
 +Bc
