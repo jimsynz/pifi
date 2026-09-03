@@ -31,6 +31,11 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   The same is true of a device that this source is out of use on, and of one that holds
   no link: `run/3` answers before any of this.
 
+  **An answer of nothing removes nothing.** Every fault that names itself stops the
+  read already: no network gives an error, and a token that stopped working gives 401.
+  An answer of 200 that holds no item is the one that looks like success and is not, so
+  a read that saw no item of any kind removes nothing at all. See `remove_unseen/2`.
+
   **A mark does not hold a row back.** A person who marked an album that their server
   no longer holds loses that mark, because the catalogue follows the server. A track
   that goes gives up its audio as it goes, through the destroy of
@@ -69,7 +74,7 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
     with {:ok, artists} <- read(:artists),
          {:ok, albums} <- read(:albums),
          {:ok, tracks} <- read(:tracks) do
-      gone = remove_unseen(started_at)
+      gone = remove_unseen(started_at, artists + albums + tracks)
       announce()
 
       Logger.info(
@@ -92,7 +97,20 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   # `:stream` is not optional: the destroy of that resource reads and writes the cache
   # and gives up the audio of a track, and a strategy that wrote the rows in one
   # statement would run none of that.
-  defp remove_unseen(started_at) do
+  # **A server that answered with nothing has told this device nothing.** Every fault
+  # that names itself already stops the read: no network gives an error, a token that
+  # stopped working gives 401, and a missing library gives 404. An answer of 200 that
+  # holds no item is the one that looks like success and is not. A Jellyfin that a
+  # person rebuilt is still reading its own files, and an account that lost the right
+  # to a library gets an empty list and no error at all. A read then removed the whole
+  # catalogue, and the marks of a person with it.
+  #
+  # This is not a share of the source, and it is not a number that a person sets. It is
+  # the one answer that cannot be believed. A library that truly holds nothing keeps
+  # its old rows until it holds something again, and that costs a person nothing.
+  defp remove_unseen(_started_at, 0), do: 0
+
+  defp remove_unseen(started_at, _seen) do
     query =
       Ash.Query.filter(
         Item,

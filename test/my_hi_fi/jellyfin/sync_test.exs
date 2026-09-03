@@ -293,10 +293,43 @@ defmodule MyHiFi.Jellyfin.SyncTest do
       [one | _rest] = items(expr(kind == :track))
       {:ok, _marked} = MyHiFi.Playback.set_favourite(one)
 
-      stub_library(%{"MusicArtist" => [], "MusicAlbum" => [], "Audio" => []})
+      # A server that holds something else, and not one that holds nothing: an answer
+      # of nothing removes nothing. See below.
+      stub_library(%{
+        "MusicArtist" => [artist(2)],
+        "MusicAlbum" => [album(2, 2)],
+        "Audio" => [track(3, 2)]
+      })
 
       assert {:ok, _report} = Jellyfin.sync_library()
-      assert all_items() == []
+
+      assert Enum.map(all_items(), & &1.source_ref) |> Enum.sort() ==
+               ["album-2", "artist-2", "track-3"]
+    end
+
+    # A Jellyfin that a person rebuilt is still reading its own files, and an account
+    # that lost the right to a library gets an empty list and no error at all. Both
+    # answer 200 with no item, which looks like success and is not.
+    test "a server that answers with nothing removes nothing" do
+      sync_one_album()
+      before = Enum.map(all_items(), & &1.id) |> Enum.sort()
+
+      stub_library(%{"MusicArtist" => [], "MusicAlbum" => [], "Audio" => []})
+
+      assert {:ok, report} = Jellyfin.sync_library()
+
+      assert report.removed == 0
+      assert Enum.map(all_items(), & &1.id) |> Enum.sort() == before
+    end
+
+    test "a token that stopped working removes nothing" do
+      sync_one_album()
+      before = Enum.map(all_items(), & &1.id) |> Enum.sort()
+
+      Req.Test.stub(Server, fn conn -> Plug.Conn.send_resp(conn, 401, "") end)
+
+      assert {:error, _reason} = Jellyfin.sync_library()
+      assert Enum.map(all_items(), & &1.id) |> Enum.sort() == before
     end
 
     test "a person who took this source out of use asks the server nothing" do
