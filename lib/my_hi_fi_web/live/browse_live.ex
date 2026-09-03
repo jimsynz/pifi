@@ -209,7 +209,7 @@ defmodule MyHiFiWeb.BrowseLive do
           query={@here.query}
           layout={:list}
           url_state={@url_state}
-          page_size={100}
+          page_size={25}
           empty_message="Nothing here."
           loading_message="Reading…"
           filters_label="Filter"

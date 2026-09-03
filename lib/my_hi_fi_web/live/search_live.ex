@@ -143,7 +143,7 @@ defmodule MyHiFiWeb.SearchLive do
         query={@query}
         layout={:list}
         url_state={@url_state}
-        page_size={100}
+        page_size={25}
         empty_message="Nothing matches that."
         loading_message="Reading…"
         filters_label="Find"
