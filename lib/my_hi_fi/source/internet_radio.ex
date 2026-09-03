@@ -199,9 +199,15 @@ defmodule MyHiFi.Source.InternetRadio do
 
   @impl MyHiFi.Source
   def run_settings_action("sync") do
-    AshOban.schedule(MyHiFi.Radio.Sync, :sync_from_remote)
+    case MyHiFi.Source.ask_for_job(MyHiFi.Radio.Sync, :sync_from_remote) do
+      :queued ->
+        {:ok, "The device asks for the station list of each country now."}
 
-    {:ok, "The device asks for the station list of each country now."}
+      :running ->
+        {:ok,
+         "The device asks for the station list already. A read that stopped without " <>
+           "finishing starts again within two hours."}
+    end
   end
 
   def run_settings_action(_name), do: {:error, "Internet radio holds no such control."}

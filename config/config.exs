@@ -15,7 +15,19 @@ config :my_hi_fi, Oban,
   # A job that finished stays in the table until something removes it, and this device
   # runs for years on an SD card. A week is long enough to read what happened and short
   # enough that the table never grows.
-  plugins: [{Oban.Plugins.Cron, []}, {Oban.Plugins.Pruner, max_age: 604_800}]
+  plugins: [{Oban.Plugins.Cron, []}, {Oban.Plugins.Pruner, max_age: 604_800}],
+  # **A device that stops in the middle of a job leaves that job `executing` for ever.**
+  # This device stops often: it goes into standby, a person takes the power away, and a
+  # new firmware restarts it. Nothing moves such a job back, and a scheduled action is
+  # unique, so one job that no process runs stops every later one. A read of a Jellyfin
+  # library stopped that way on 2026-09-03, and `Read the library now` then did nothing
+  # at all, for the schedule as well as for the person who pressed it.
+  #
+  # **Two hours, because a real read takes a long time.** The two reads of a library of
+  # 53,105 items that finished took 515 s and 2096 s, and a library grows. This plugin
+  # reads the clock and nothing else, so a shorter time would move a job that still
+  # runs, and the device would read the whole library twice and write the card twice.
+  lifeline: [rescue_after: {2, :hours}]
 
 config :my_hi_fi,
   ecto_repos: [MyHiFi.Repo],

@@ -221,9 +221,15 @@ defmodule MyHiFi.Source.Jellyfin do
   end
 
   def run_settings_action("read_library") do
-    AshOban.schedule(Sync, :sync_library)
+    case MyHiFi.Source.ask_for_job(Sync, :sync_library) do
+      :queued ->
+        {:ok, "The device reads your library now. It takes a few minutes for a large one."}
 
-    {:ok, "The device reads your library now. It takes a few minutes for a large one."}
+      :running ->
+        {:ok,
+         "A read is already running, and it takes a while for a large library. " <>
+           "A read that stopped without finishing starts again within two hours."}
+    end
   end
 
   def run_settings_action("remove_link") do

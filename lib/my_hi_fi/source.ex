@@ -626,6 +626,25 @@ defmodule MyHiFi.Source do
   end
 
   @doc """
+  Ask for one scheduled action of a source, and say whether it went into the queue.
+
+  It gives `:queued` for a job that this call put in, and `:running` for one that was
+  there already. **A caller must read the answer and tell the person which it was.**
+  `AshOban.schedule/2` gives the job that it finds when a job is already there, and it
+  raises nothing, so a control that ignores the answer says that it read a library
+  whether it did or not.
+
+  A scheduled action is unique, and `executing` counts. A device that stopped in the
+  middle of a read therefore holds a job that no process runs, and every later ask
+  finds that one. `Oban.Lifeline` moves such a job back, and until it does this is what
+  keeps a settings page truthful. See `config/config.exs`.
+  """
+  @spec ask_for_job(Ash.Resource.t(), atom()) :: :queued | :running
+  def ask_for_job(resource, action) do
+    if AshOban.schedule(resource, action).conflict?, do: :running, else: :queued
+  end
+
+  @doc """
   The name of a source in an address.
 
   The web interface holds one address for each source, and a person can keep that

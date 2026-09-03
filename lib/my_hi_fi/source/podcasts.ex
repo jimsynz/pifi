@@ -232,9 +232,15 @@ defmodule MyHiFi.Source.Podcasts do
   # and a page that shows Trending reads the list again.
   @impl MyHiFi.Source
   def run_settings_action("read_index") do
-    AshOban.schedule(Show, :read_trending)
+    case MyHiFi.Source.ask_for_job(Show, :read_trending) do
+      :queued ->
+        {:ok, "The device reads the index now. Trending changes when the read finishes."}
 
-    {:ok, "The device reads the index now. Trending changes when the read finishes."}
+      :running ->
+        {:ok,
+         "The device reads the index already. A read that stopped without finishing " <>
+           "starts again within two hours."}
+    end
   end
 
   def run_settings_action("remove_key") do
