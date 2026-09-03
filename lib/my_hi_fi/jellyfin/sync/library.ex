@@ -18,6 +18,18 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   A read that fails leaves the catalogue as it stands. A person still browses what
   the device holds, and the next run reads the rest.
 
+  ## A read that stops continues where it stopped
+
+  A read of 67,508 items takes about 88 minutes, and this device stops often: it goes
+  into standby, a person takes the power away, and a new firmware restarts it.
+  `Oban.Lifeline` gives such a job back to the queue, and a read that began again from
+  nothing would ask the server for the whole library a second time.
+
+  `MyHiFi.Jellyfin.Sync.Checkpoint` therefore holds the kind and the offset that the
+  read has reached, and a read that finds one continues from it. See `start_point/0`
+  for the two things that make this safe: the time of the first read carries over, and
+  a point that is too old is left alone.
+
   ## What the read did not see, it removes
 
   A server that no longer holds an album must not leave that album in the list for
@@ -55,10 +67,17 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   alias MyHiFi.Event
   alias MyHiFi.Jellyfin.Fill
   alias MyHiFi.Jellyfin.Server
+  alias MyHiFi.Jellyfin.Sync.Checkpoint
   alias MyHiFi.Playback.Item
   alias MyHiFi.Source
 
   @kinds [:artists, :albums, :tracks]
+
+  # How old a point may be and still serve. A read takes about 88 minutes, and
+  # `MyHiFi.AutoSync` runs the work again within the hour, so a point of any use is
+  # hours old at the most. Six hours leaves room for a device that a person switched
+  # off for an evening, and it refuses a point from another day.
+  @forget_after 6 * 60 * 60
 
   # A person who takes this source out of use expects the device to ask the server
   # for nothing. See `MyHiFi.Source.enabled?/1`.
@@ -72,23 +91,74 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   end
 
   defp sync do
-    # Before the first read, so that a row which a page writes while a later page is
-    # still arriving counts as one that this read saw.
-    started_at = DateTime.utc_now()
+    %{started_at: started_at, kind: kind, offset: offset} = start_point()
 
-    with {:ok, artists} <- read(:artists),
-         {:ok, albums} <- read(:albums),
-         {:ok, tracks} <- read(:tracks) do
+    with {:ok, counts} <- read_from(kind, offset, started_at) do
       gone = remove_unseen(started_at)
+      forget_point()
       announce()
 
       Logger.info(
-        "The Jellyfin library gave #{artists} artists, #{albums} albums and " <>
-          "#{tracks} tracks, and #{gone} items are no longer on the server."
+        "The Jellyfin library gave #{counts.artists} artists, #{counts.albums} albums " <>
+          "and #{counts.tracks} tracks, and #{gone} items are no longer on the server."
       )
 
-      {:ok, %{artists: artists, albums: albums, tracks: tracks, removed: gone, skipped?: false}}
+      {:ok, Map.merge(counts, %{removed: gone, skipped?: false})}
     end
+  end
+
+  # **The time of the read carries over, and it must.** `remove_unseen/1` removes each
+  # row that this read did not see, and it reads `last_seen_at` against this time. A
+  # read that continued with a new time would call every row that the read before the
+  # interruption wrote a row that the server no longer holds, and it would remove the
+  # lot, with the marks of a person and the audio on the card.
+  #
+  # A point that is older than `@forget_after` gives a fresh read instead. The offset of
+  # such a point names a place in a list that the server may have changed since, so
+  # continuing from it would step over items that this device never read.
+  defp start_point do
+    case Checkpoint.read() do
+      {:ok, %{started_at: started_at} = point} ->
+        if DateTime.diff(DateTime.utc_now(), started_at, :second) < @forget_after do
+          Logger.info(
+            "Continuing the read of the Jellyfin library from #{point.kind} #{point.offset}."
+          )
+
+          point
+        else
+          fresh_point()
+        end
+
+      :error ->
+        fresh_point()
+    end
+  end
+
+  # Before the first read, so that a row which a page writes while a later page is
+  # still arriving counts as one that this read saw.
+  defp fresh_point, do: %{started_at: DateTime.utc_now(), kind: :artists, offset: 0}
+
+  defp forget_point, do: Checkpoint.forget()
+
+  # The kinds go in order, because an album names its artist and a track names its
+  # album. A read that continues therefore starts at the kind of the point and takes
+  # every kind after it from the beginning.
+  #
+  # **The counts are of this read alone.** A read that continues wrote none of what the
+  # read before it wrote, so the number that it reports is smaller than the library.
+  # Nothing reads those numbers but a person, and the log says which read they belong to.
+  defp read_from(kind, offset, started_at) do
+    kinds = Enum.drop_while(@kinds, &(&1 != kind))
+    counts = Map.new(@kinds, &{&1, 0})
+
+    Enum.reduce_while(kinds, {:ok, counts}, fn one, {:ok, acc} ->
+      start = if one == kind, do: offset, else: 0
+
+      case read(one, start, 0, started_at) do
+        {:ok, written} -> {:cont, {:ok, Map.put(acc, one, written)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   # **`Ash.BulkResult` holds no count of the rows that went**, and `return_records?`
@@ -119,9 +189,9 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
     count
   end
 
-  defp read(kind) when kind in @kinds, do: read(kind, 0, 0)
+  defp read(kind, start, written, started_at) do
+    Checkpoint.write(started_at, kind, start)
 
-  defp read(kind, start, written) do
     case Server.page(kind, start) do
       {:ok, %{count: 0}} ->
         {:ok, written}
@@ -131,7 +201,7 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
 
         case fill(kind, entries) + written do
           all when next >= total -> {:ok, all}
-          all -> read(kind, next, all)
+          all -> read(kind, next, all, started_at)
         end
 
       {:error, reason} ->

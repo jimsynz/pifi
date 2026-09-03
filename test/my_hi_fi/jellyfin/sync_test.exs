@@ -10,6 +10,7 @@ defmodule MyHiFi.Jellyfin.SyncTest do
   alias MyHiFi.Jellyfin
   alias MyHiFi.Jellyfin.Fill
   alias MyHiFi.Jellyfin.Server
+  alias MyHiFi.Jellyfin.Sync.Checkpoint
   alias MyHiFi.Playback.Item
   alias MyHiFi.Settings
   alias MyHiFi.Source
@@ -353,6 +354,119 @@ defmodule MyHiFi.Jellyfin.SyncTest do
       # its album far more often than not.
       track_item = Enum.find(all_items(), &(&1.kind == :track))
       refute track_item.artwork_url in asked
+    end
+
+    test "it notes where it reached, and it takes the note away when it finishes" do
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1)]
+      })
+
+      Jellyfin.sync_library!()
+
+      # A read that finished leaves none: a note that stayed would send the next read
+      # into the middle of the library.
+      assert Checkpoint.read() == :error
+    end
+
+    # `Oban.Lifeline` gives an interrupted job back to the queue, and a read that began
+    # again from nothing would ask the server for the whole library a second time.
+    test "a read that stopped continues from the note" do
+      tracks = Enum.map(1..(Server.page_size() * 11), &track(&1, 1))
+
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => tracks
+      })
+
+      Jellyfin.sync_library!()
+      assert Checkpoint.read() == :error
+
+      # What an interruption leaves behind: a note in the middle of the tracks.
+      started_at = DateTime.utc_now()
+      :ok = Checkpoint.write(started_at, :tracks, Server.page_size() * 10)
+
+      Req.Test.stub(Server, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        send(self(), {:asked, conn.params["IncludeItemTypes"], conn.params["StartIndex"]})
+
+        items = if conn.params["IncludeItemTypes"] == "Audio", do: tracks, else: []
+        start = String.to_integer(conn.params["StartIndex"])
+        limit = String.to_integer(conn.params["Limit"])
+
+        Req.Test.json(conn, %{
+          "Items" => items |> Enum.drop(start) |> Enum.take(limit),
+          "TotalRecordCount" => length(items)
+        })
+      end)
+
+      assert {:ok, report} = Jellyfin.sync_library()
+
+      # It asked for no artist and no album, and it began the tracks at the note.
+      assert report.artists == 0
+      assert report.albums == 0
+      assert report.tracks == Server.page_size()
+    end
+
+    # **The one thing that makes this safe.** A read that continued with a new time
+    # would call every row of the part already read a row that the server no longer
+    # holds, and `remove_unseen/1` would take the lot.
+    test "a read that continues keeps the time of the read that began it" do
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1), track(2, 1)]
+      })
+
+      Jellyfin.sync_library!()
+      before = Enum.map(all_items(), & &1.id) |> Enum.sort()
+
+      # A note from a read that began before every row of the catalogue was written.
+      :ok = Checkpoint.write(DateTime.add(DateTime.utc_now(), -60, :second), :tracks, 0)
+
+      assert {:ok, report} = Jellyfin.sync_library()
+
+      assert report.removed == 0
+      assert Enum.map(all_items(), & &1.id) |> Enum.sort() == before
+    end
+
+    # The offset of an old note names a place in a list that the server may have changed
+    # since, so continuing from it would step over items that this device never read.
+    test "a note that is too old gives a whole read" do
+      tracks = Enum.map(1..3, &track(&1, 1))
+
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => tracks
+      })
+
+      old = DateTime.add(DateTime.utc_now(), -7 * 60 * 60, :second)
+      :ok = Checkpoint.write(old, :tracks, Server.page_size() * 10)
+
+      assert {:ok, report} = Jellyfin.sync_library()
+
+      # It read the artists again, so it did not continue from the note.
+      assert report.artists == 1
+      assert report.tracks == 3
+    end
+
+    test "it notes every tenth page and no more" do
+      started_at = DateTime.utc_now()
+      page = Server.page_size()
+
+      :ok = Checkpoint.write(started_at, :tracks, 0)
+      assert {:ok, %{offset: 0}} = Checkpoint.read()
+
+      # A page that is not a tenth leaves the note where it was.
+      :ok = Checkpoint.write(started_at, :tracks, page)
+      assert {:ok, %{offset: 0}} = Checkpoint.read()
+
+      :ok = Checkpoint.write(started_at, :tracks, page * 10)
+      assert {:ok, %{offset: offset}} = Checkpoint.read()
+      assert offset == page * 10
     end
 
     test "a person who took this source out of use asks the server nothing" do
