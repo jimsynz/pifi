@@ -9,7 +9,7 @@ defmodule MyHiFi.Repo.Migrations.AddCacheEntryWeight do
 
   def up do
     alter table(:cache_entries) do
-      add :weight, :bigint, null: false
+      add :weight, :bigint, null: false, default: 0
     end
   end
 

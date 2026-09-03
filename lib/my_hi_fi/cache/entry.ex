@@ -35,6 +35,12 @@ defmodule MyHiFi.Cache.Entry do
   sqlite do
     table "cache_entries"
     repo MyHiFi.Repo
+
+    # SQLite refuses `ALTER TABLE ... ADD COLUMN ... NOT NULL` with no default, and the
+    # `default` of an attribute is a value that Ash writes and not one that the table
+    # holds. A column that arrives after the table therefore needs this, or the
+    # migration stops the boot of every device that already holds a database.
+    migration_defaults weight: "0"
   end
 
   blob do
