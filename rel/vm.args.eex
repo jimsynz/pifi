@@ -9,8 +9,21 @@
 ## Increase number of concurrent ports/sockets
 ##+Q 65536
 
-## Tweak GC to run more often
-##-env ERL_FULLSWEEP_AFTER 10
+## Give memory back to the operating system.
+##
+## This board holds 363.9 MB. A browse of a library of 53,105 items measured 276 MB
+## of live data, which a collection later brought back to 141 MB, and a resident size
+## that stayed at 293 MB. A second browse then finds little free.
+##
+## The default of `fullsweep_after` is 65535, which means that a process almost never
+## collects its old heap. A process that held one page of a list therefore keeps it
+## for the life of the device. 10 makes each process give that memory up.
+##
+## Carrier options such as `+MBacul` are not here on purpose. A measurement on this
+## version of the runtime showed `acul` at 0 for each allocator whatever the option
+## said, so those options do nothing that this file can prove. A flag that stops the
+## runtime from starting stops the device from booting.
+-env ERL_FULLSWEEP_AFTER 10
 
 ## Use Ctrl-C to interrupt the current shell rather than invoking the emulator's
 ## break handler and possibly exiting the VM.
