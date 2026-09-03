@@ -67,17 +67,30 @@ defmodule MyHiFi.Jellyfin.Server do
   # **A page is the largest thing that a read of a library holds at one time.** The
   # answer, the entries that `parse/3` builds from it, and the attribute maps that
   # `MyHiFi.Jellyfin.Fill` builds from those all exist together, so this number decides
-  # the memory of the whole read. A board of 363.9 MB ran out of it, and a page of 100
-  # rows of this table measured 20 MB on the way in.
+  # the memory of the whole read, on a board that holds 363.9 MB.
   #
-  # 50 and not 200. The write is chunked at 100 by Ash whatever this holds, so a page
-  # above that saves no statement, and one below it decides both.
+  # **This costs time, and a measurement says how much.** The server decides the cost
+  # of a page, and not the size of it. One page of 50 tracks on 2026-09-03:
   #
-  # **The count of the answers is not free.** A library of 53,105 items is 1063 answers
-  # at this size, where 200 gave 266. A read of that library took 2096 s, and the cost
-  # of one answer falls with its size, so the whole read should take about as long.
-  # Watch that against `rescue_after` of `Oban.Lifeline`: a read that passes two hours
-  # is a read that the rescue starts again beside the one that still runs.
+  #     offset 20,000   read 2928 ms   write 101 ms
+  #     offset 35,000   read  833 ms   write 104 ms
+  #     offset 50,000   read 1232 ms   write 819 ms
+  #
+  # The device writes 50 tracks in about 100 ms, and the server takes 0.8 s to 2.9 s to
+  # give them. A deep offset costs no more than a shallow one. The cost is therefore
+  # one for each answer and not one for each item, so a smaller page asks for more
+  # answers and the whole read takes longer:
+  #
+  #     page 200   67,508 items in 2217 s   about 30 items each second
+  #     page  50   67,508 items in ~88 min  about 15 items each second
+  #
+  # **50 is the choice, and the time is what it costs.** The memory that one page holds
+  # is what this board has least of. Anybody who reads this and wants the read to
+  # finish sooner should raise this number, and watch what one page holds while they do.
+  #
+  # Watch the time against `rescue_after` of `Oban.Lifeline`, which is two hours. A read
+  # of 88 minutes leaves 32 minutes, and a read that passes two hours is a read that the
+  # rescue starts again beside the one that still runs.
   @page 50
 
   # The height of the artwork that the cache holds. The device screen is 320 by 240,
