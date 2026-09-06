@@ -201,7 +201,33 @@ config :mdns_lite,
 
 # The application data partition mounts at /root on a Nerves target, and it is
 # the only writable storage. See the erlinit.config of the Nerves system.
-config :my_hi_fi, MyHiFi.Repo, database: "/root/my_hi_fi.db"
+#
+# **`cache_size` and `pool_size` decide how much memory SQLite may hold, and the
+# product of the two is what matters.** Each connection holds a page cache of its own,
+# and it fills that cache the first time it reads a table. A measurement on 2026-09-07
+# showed each query of a browse page adding 38 MB, whatever the number of rows that it
+# gave back: a count of one favourite cost the same as a count of 4334 albums, because
+# the cost is the pages that the read touches.
+#
+# `ecto_sqlite3` gives `cache_size` the value -64000, which is 62.5 MB for each
+# connection, and it says that this is to speed up access of data. That is 32 times the
+# 2 MB that SQLite itself uses, and with ten connections it is a ceiling of 625 MB on a
+# board where Linux sees 363.9 MB. The whole database is 57 MB, so one connection could
+# hold all of it twice.
+#
+# -4000 is 4 MB for each connection, and four connections make a ceiling of 16 MB. The
+# cost is that a read of a large table asks the card for more pages, and the card is
+# slower than memory.
+config :my_hi_fi, MyHiFi.Repo,
+  database: "/root/my_hi_fi.db",
+  cache_size: -4_000,
+  pool_size: 4
+
+# **Two jobs at a time, because a job holds a connection while it runs.** The pool above
+# holds four, and a queue of ten would take every one of them and leave none for the web
+# interface and none for the player. Two also suits a board of four cores that must keep
+# enough of them for the sound.
+config :my_hi_fi, Oban, queues: [default: 2]
 
 config :my_hi_fi, MyHiFiWeb.Endpoint,
   http: [ip: {0, 0, 0, 0}, port: 80],
