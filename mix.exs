@@ -251,10 +251,10 @@ defmodule MyHiFi.MixProject do
       # firmware build uses `MIX_ENV=prod`, so `runtime:` keeps both out of the
       # release.
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
-      {:ex_check_ng, "~> 1.0.0-rc.2", only: [:dev, :test], target: :host},
-      {:ex_doc, "~> 0.40", only: [:dev, :test], target: :host},
-      {:phx_install, "~> 0.1", only: [:dev], target: :host},
-      {:sobelow, "~> 0.15", only: [:dev, :test], target: :host},
+      {:ex_check_ng, "~> 1.0.0-rc.2", only: [:dev, :test], targets: :host},
+      {:ex_doc, "~> 0.40", only: [:dev, :test], targets: :host},
+      {:phx_install, "~> 0.1", only: [:dev], targets: :host},
+      {:sobelow, "~> 0.15", only: [:dev, :test], targets: :host},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev}
     ]
   end

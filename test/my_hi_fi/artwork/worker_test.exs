@@ -29,12 +29,12 @@ defmodule MyHiFi.Artwork.WorkerTest do
     end)
   end
 
-  defp perform(url \\ @url) do
-    Worker.perform(%Oban.Job{args: %{"url" => url}})
+  defp perform(url \\ @url, announce? \\ true) do
+    Worker.perform(%Oban.Job{args: %{"url" => url, "announce" => announce?}})
   end
 
   describe "a logo that arrives" do
-    test "stores it and tells the player topic" do
+    test "stores it and tells the player topic when the caller asked for that" do
       Event.subscribe(:player)
       stub("image/png", @png)
 
@@ -45,6 +45,30 @@ defmodule MyHiFi.Artwork.WorkerTest do
 
       assert_receive %MyHiFi.Event.Player.MetadataChanged{artwork_path: path}
       assert path == "/artwork/#{name}"
+    end
+
+    # `MyHiFi.Jellyfin.Fill` asks for the picture of each container of a library, and a
+    # library holds thousands. Each one that told the player topic showed its own
+    # picture as though it were the track that plays, so a person reading the library
+    # watched the panel move through album covers while it said `Nothing selected`.
+    test "it tells the player topic nothing when the caller did not ask" do
+      Event.subscribe(:player)
+      stub("image/png", @png)
+
+      assert perform(@url, false) == :ok
+
+      assert is_binary(Artwork.name(@url))
+      refute_receive %MyHiFi.Event.Player.MetadataChanged{}, 200
+    end
+
+    # A job of an older firmware holds no such key, and it must not announce either.
+    test "a job that names no answer tells the player topic nothing" do
+      Event.subscribe(:player)
+      stub("image/png", @png)
+
+      assert Worker.perform(%Oban.Job{args: %{"url" => @url}}) == :ok
+
+      refute_receive %MyHiFi.Event.Player.MetadataChanged{}, 200
     end
   end
 
@@ -91,10 +115,15 @@ defmodule MyHiFi.Artwork.WorkerTest do
     end
   end
 
-  describe "enqueue/1" do
-    test "asks for a logo that the cache does not hold" do
+  describe "enqueue/2" do
+    test "asks for a logo that the cache does not hold, and announces nothing" do
       assert Worker.enqueue(@url) == :ok
-      assert_enqueued(worker: Worker, args: %{"url" => @url})
+      assert_enqueued(worker: Worker, args: %{"url" => @url, "announce" => false})
+    end
+
+    test "the player asks for an answer, and it gets one" do
+      assert Worker.enqueue(@url, true) == :ok
+      assert_enqueued(worker: Worker, args: %{"url" => @url, "announce" => true})
     end
 
     test "asks for nothing when the cache holds the logo" do
@@ -107,7 +136,7 @@ defmodule MyHiFi.Artwork.WorkerTest do
 
     test "asks for nothing without an address" do
       assert Worker.enqueue(nil) == :ok
-      assert Worker.enqueue("") == :ok
+      assert Worker.enqueue("", true) == :ok
       refute_enqueued(worker: Worker)
     end
   end

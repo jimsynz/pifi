@@ -677,7 +677,9 @@ defmodule MyHiFi.Player do
   defp artwork_path(%{artwork: url}) do
     case Artwork.name(url) do
       nil ->
-        Artwork.Worker.enqueue(url)
+        # The player asks for the logo of the track that it starts, so this job tells
+        # the `:player` topic when the picture arrives. See `MyHiFi.Artwork.Worker`.
+        Artwork.Worker.enqueue(url, true)
         nil
 
       name ->

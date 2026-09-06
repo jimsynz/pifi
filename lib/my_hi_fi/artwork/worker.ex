@@ -1,13 +1,31 @@
 defmodule MyHiFi.Artwork.Worker do
   @moduledoc """
-  Reads one station logo and stores it.
-
-  The player asks for this job when it starts a track whose logo the cache does
-  not hold. The job then tells the `:player` topic, so a page that is open shows
-  the logo without a reload.
+  Reads one picture and stores it.
 
   A station that gives no image, or an image that is too large, gives no retry. A
   network fault gives one, and Oban holds the count.
+
+  ## Who hears that a picture arrived
+
+  **A job tells the `:player` topic only when the caller asks it to.** The player asks
+  for the logo of the track that it is starting, and a page that is open then shows
+  that logo with no reload. `MyHiFiWeb.PlayerLive` draws whatever such an event holds,
+  and it takes the accent colour of the interface from it.
+
+  `MyHiFi.Jellyfin.Fill` asks for the picture of each container that it writes, and a
+  library holds 5,205 of them. Those jobs must tell that topic nothing: each one that
+  finished announced its own picture as though it were the track that plays, so a
+  person reading the library watched the panel move through album covers while it said
+  `Nothing selected`, and the colour of the whole interface moved with them.
+
+  **The announcement is off unless a caller asks for it**, so a caller that forgets
+  leaves the panel alone. That is the safe way for this to fail.
+
+  A job of one address collapses with another of the same address, whatever either one
+  asks for, because `keys` names the address alone. Two jobs of one picture would read
+  it twice. The cost is that a job of the sync may take the place of one that the
+  player asked for, and the panel then waits for the next event of the player to show
+  that logo.
   """
 
   # **A job that waits collapses with the ask that follows it.** `MyHiFi.Jellyfin.Fill`
@@ -24,6 +42,7 @@ defmodule MyHiFi.Artwork.Worker do
     max_attempts: 3,
     unique: [
       period: :infinity,
+      keys: [:url],
       states: [:available, :scheduled, :executing, :retryable]
     ]
 
@@ -34,11 +53,11 @@ defmodule MyHiFi.Artwork.Worker do
   alias MyHiFi.Event.Player, as: Events
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"url" => url}}) do
+  def perform(%Oban.Job{args: %{"url" => url} = args}) do
     case Artwork.fetch(url) do
       {:ok, name} ->
         generate_thumbnail(name)
-        Event.publish(:player, %Events.MetadataChanged{artwork_path: "/artwork/#{name}"})
+        announce(name, args["announce"])
         :ok
 
       # A station that holds no image cannot start to hold one, so this job stops.
@@ -74,15 +93,29 @@ defmodule MyHiFi.Artwork.Worker do
     end
   end
 
-  @doc "Ask for one logo, unless the cache holds it."
-  @spec enqueue(String.t() | nil) :: :ok
-  def enqueue(url) when is_binary(url) and url != "" do
+  @doc """
+  Ask for one picture, unless the cache holds it.
+
+  `announce?` says whether the job tells the `:player` topic that the picture arrived.
+  The player asks for the logo of the track that it starts, and it gives `true`. Every
+  other caller leaves it alone. See the moduledoc.
+  """
+  @spec enqueue(String.t() | nil, boolean()) :: :ok
+  def enqueue(url, announce? \\ false)
+
+  def enqueue(url, announce?) when is_binary(url) and url != "" do
     if Artwork.readable?(url) and is_nil(Artwork.name(url)) do
-      %{"url" => url} |> new() |> Oban.insert()
+      %{"url" => url, "announce" => announce?} |> new() |> Oban.insert()
     end
 
     :ok
   end
 
-  def enqueue(_url), do: :ok
+  def enqueue(_url, _announce?), do: :ok
+
+  defp announce(name, true) do
+    Event.publish(:player, %Events.MetadataChanged{artwork_path: "/artwork/#{name}"})
+  end
+
+  defp announce(_name, _announce?), do: :ok
 end

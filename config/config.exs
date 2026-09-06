@@ -6,6 +6,7 @@
 import Config
 
 config :ash_oban, pro?: false
+config :ash, default_string_length_count: :codepoints
 
 config :my_hi_fi, Oban,
   engine: Oban.Engines.Lite,
