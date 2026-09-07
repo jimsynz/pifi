@@ -13,9 +13,15 @@ defmodule MyHiFiWeb.ItemList do
       on_mount MyHiFiWeb.ItemList
       import MyHiFiWeb.ItemList, only: [row: 1, count: 1]
 
-  `on_mount/1` subscribes to the player and to the sources, assigns `:playing`, and
-  answers the `play` and the `favourite` events and every event of the player. A page
-  therefore holds none of that.
+  `on_mount/1` subscribes to the sources, assigns `:playing`, and answers the `play` and
+  the `favourite` events and every event of the player. A page therefore holds none of
+  that.
+
+  **`MyHiFiWeb.Shell` holds the subscription to the `:player` topic**, and this hook
+  takes it again for nothing: two subscriptions of one process give two copies of each
+  event, and a page then reads a `MyHiFi.Event.Player.Progress` twice each second. A
+  hook reads every message of the process that it runs in, whichever part asked for the
+  topic, so the clauses below need no subscription of their own.
 
   ## A list that changed while nobody looked
 
@@ -68,10 +74,7 @@ defmodule MyHiFiWeb.ItemList do
   @queue_limit 500
 
   def on_mount(:default, _params, _session, socket) do
-    if connected?(socket) do
-      Event.subscribe(:player)
-      Event.subscribe(:source)
-    end
+    if connected?(socket), do: Event.subscribe(:source)
 
     socket =
       socket
