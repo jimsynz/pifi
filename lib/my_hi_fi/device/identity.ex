@@ -36,9 +36,13 @@ defmodule MyHiFi.Device.Identity do
 
   ## The picture
 
-  `MyHiFi.Artwork` holds it, in the way that it holds the logo of a station: the same
-  store, the same thumbnail, the same address, and the same rule about which types
-  this firmware serves. A screen therefore reads the splash through the path that it
+  **A screen that plays nothing draws the mark of the product**, and a person who gives
+  a picture of their own draws that instead. `shipped_splash/1` gives the first and
+  `splash_path/0` gives the second, and a screen asks for the person's one first.
+
+  `MyHiFi.Artwork` holds the picture of a person, in the way that it holds the logo of a
+  station: the same store, the same thumbnail, the same address, and the same rule about
+  which types this firmware serves. A screen therefore reads the splash through the path that it
   reads a cover with, and `MyHiFi.Peripheral.PiTft.asset_options/0` needs no change.
 
   The name of the entry is the hash of the bytes, so it holds 64 characters like every
@@ -56,8 +60,8 @@ defmodule MyHiFi.Device.Identity do
   # already takes.
   @name_key "myhifi_device_name"
 
-  @default_name "MyHiFi"
-  @default_slug "myhifi"
+  @default_name "PiFi"
+  @default_slug "pifi"
 
   # An SSID takes 32 bytes, and `VintageNetWizard.APMode` cuts a longer one at that
   # point. A name that a person reads on a phone is therefore whole.
@@ -65,10 +69,14 @@ defmodule MyHiFi.Device.Identity do
 
   @splash_key "device.splash"
 
+  # Where the pictures that this firmware ships live, under the application directory.
+  # One file for each screen that this firmware drives, named for its size.
+  @shipped "priv/splash"
+
   @doc """
   The name that this device answers to.
 
-  It gives `MyHiFi` for a device that no person named.
+  It gives `PiFi` for a device that no person named.
   """
   @spec name() :: String.t()
   def name do
@@ -85,7 +93,7 @@ defmodule MyHiFi.Device.Identity do
   not in the layout of each screen.
 
       iex> MyHiFi.Device.Identity.default_name()
-      "MyHiFi"
+      "PiFi"
   """
   @spec default_name() :: String.t()
   def default_name, do: @default_name
@@ -122,7 +130,7 @@ defmodule MyHiFi.Device.Identity do
       "kitchen-hifi"
 
       iex> MyHiFi.Device.Identity.slug("音楽")
-      "myhifi"
+      "pifi"
   """
   @spec slug(String.t()) :: String.t()
   def slug(name) do
@@ -164,6 +172,43 @@ defmodule MyHiFi.Device.Identity do
       nil -> nil
       name -> "/artwork/#{name}"
     end
+  end
+
+  @doc """
+  The picture that this firmware ships, for a screen of one size.
+
+  **A device that a person has given no picture is not a device with no picture.** The
+  firmware holds one for each screen that it drives, drawn at the size of that screen,
+  so a screen that plays nothing shows the mark of the product and not a dark field.
+
+  It gives `nil` for a size that this firmware holds no picture for, and a screen then
+  draws its own field. A new screen therefore needs a file and no code.
+
+  The file is a PNG of exactly the size of the screen. **A picture of another size
+  would cost a scale for each draw**, and one that a screen has to crop would lose the
+  ends of the waveform of this one; `MyHiFi.Peripheral.PiTft.asset_options/0` names this
+  directory so that Emerge may read it.
+
+      iex> MyHiFi.Device.Identity.shipped_splash({7, 7})
+      nil
+
+  """
+  @spec shipped_splash({pos_integer(), pos_integer()}) :: Path.t() | nil
+  def shipped_splash({width, height}) do
+    path = Path.join(splash_directory(), "#{width}x#{height}.png")
+
+    if File.exists?(path), do: path
+  end
+
+  @doc """
+  Where the pictures that this firmware ships live.
+
+  A test names another directory with `:splash_directory`. Nothing sets it in
+  production, in the way that nothing sets `:cache_limit`.
+  """
+  @spec splash_directory() :: Path.t()
+  def splash_directory do
+    Application.get_env(:my_hi_fi, :splash_directory, Application.app_dir(:my_hi_fi, @shipped))
   end
 
   @doc "The name of the entry that holds the picture, or `nil` for a device with none."

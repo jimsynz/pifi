@@ -4,6 +4,7 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Device.Identity
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PirateAudio
@@ -61,6 +62,14 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
     {:ok, state} = PirateAudio.init([])
 
     assert state.view.device_name == "Kitchen"
+  end
+
+  test "the first frame holds the picture that this firmware ships" do
+    RecordingScreen.use_it(@board)
+
+    {:ok, state} = PirateAudio.init([])
+
+    assert Path.basename(state.view.splash_path) == "240x240.png"
   end
 
   test "it reads the player topic and the device topic" do
@@ -314,13 +323,20 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
 
   # Emerge refuses a runtime path by its extension, and a name of the cache carries no
   # type, so the thumbnails are the one kind that it may read.
-  test "it lets Emerge read a thumbnail of the cache and nothing else" do
+  # Emerge refuses a runtime path by its extension and reads no byte to decide, so the
+  # two names here are the thumbnail of the cache and the picture that this firmware
+  # ships. Nothing else of the partition is readable.
+  test "it lets Emerge read a thumbnail of the cache and a shipped picture" do
     options = PirateAudio.asset_options()
     paths = Keyword.fetch!(options, :runtime_paths)
 
     assert Keyword.fetch!(paths, :enabled)
-    assert Keyword.fetch!(paths, :extensions) == [".thumbnail"]
-    assert Keyword.fetch!(paths, :allowlist) == [MyHiFi.Cache.directory()]
+    assert Keyword.fetch!(paths, :extensions) == [".thumbnail", ".png"]
+
+    assert Keyword.fetch!(paths, :allowlist) == [
+             MyHiFi.Cache.directory(),
+             Identity.splash_directory()
+           ]
   end
 
   # A tap is a press and the release that follows it. This board reads a long press, so

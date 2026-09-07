@@ -100,8 +100,8 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     test "it draws the name and the address of the device", %{conn: conn} do
       {:ok, view, html} = live(conn, ~p"/settings/device")
 
-      assert html =~ "MyHiFi"
-      assert html =~ "myhifi.local"
+      assert html =~ "PiFi"
+      assert html =~ "pifi.local"
       assert has_element?(view, "#device-form")
       assert has_element?(view, "#splash-form")
       assert has_element?(view, "#no-splash")
@@ -130,7 +130,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
         |> render_submit()
 
       assert html =~ "A device needs a name."
-      assert Identity.name() == "MyHiFi"
+      assert Identity.name() == "PiFi"
     end
 
     test "a person gives the picture of the idle screen, and takes it away again",
@@ -154,7 +154,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       html = view |> element("#remove-splash") |> render_click()
 
-      assert html =~ "The screen shows the name of the device now."
+      assert html =~ "Each screen shows the picture of the firmware again."
       assert has_element?(view, "#no-splash")
       assert Identity.splash_path() == nil
     end

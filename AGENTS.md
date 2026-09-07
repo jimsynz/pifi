@@ -178,8 +178,15 @@ Licence: Apache-2.0.
     types, and a name of the cache carries no type, so a thumbnail is
     `<hash>.thumbnail`. Emerge drew the mark that it draws for a picture that it
     cannot read, and the screen showed that in the place of the artwork.
-    `MyHiFi.Peripheral.PiTft.asset_options/0` names the one extension that this
-    firmware gives it.
+    `MyHiFi.Peripheral.PiTft.asset_options/0` names the two that this firmware gives
+    it: `.thumbnail` for the cache, and `.png` for the picture that the firmware ships
+    for an idle screen.
+  - **The idle screen of a device that a person gave no picture draws the mark of the
+    product.** `priv/splash` holds one PNG for each screen, named for its size, and
+    `MyHiFi.Device.Identity.shipped_splash/1` reads it. **The file is the size of the
+    screen**: another size costs a scale on each draw, and a screen that had to crop
+    would lose the ends of the waveform of that artwork. A new screen therefore needs a
+    file and no code.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `MyHiFi.Application` calls

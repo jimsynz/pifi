@@ -29,7 +29,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
     end
 
     test "tells a person which state the player is in" do
-      assert Screen.status_text(Screen.new()) == "MyHiFi"
+      assert Screen.status_text(Screen.new()) == "PiFi"
       assert Screen.status_text(%{Screen.new() | state: :playing}) == "Playing"
       assert Screen.status_text(%{Screen.new() | state: :paused}) == "Paused"
       assert Screen.status_text(%{Screen.new() | state: :failed}) == "Failed"

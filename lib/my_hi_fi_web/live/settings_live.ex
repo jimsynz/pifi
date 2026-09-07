@@ -156,7 +156,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
     {:noreply,
      socket
-     |> put_flash(:info, "The screen shows the name of the device now.")
+     |> put_flash(:info, "Each screen shows the picture of the firmware again.")
      |> refresh()}
   end
 

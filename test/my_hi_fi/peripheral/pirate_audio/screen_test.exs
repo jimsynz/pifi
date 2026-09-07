@@ -17,7 +17,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
     end
 
     test "a device that plays nothing names itself, so a person knows it is awake" do
-      assert Screen.headline(Screen.new()) == "MyHiFi"
+      assert Screen.headline(Screen.new()) == "PiFi"
       assert Screen.headline(%{Screen.new() | device_name: "Kitchen"}) == "Kitchen"
     end
 

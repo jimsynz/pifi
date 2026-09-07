@@ -79,7 +79,7 @@ defmodule MyHiFi.Jellyfin.ServerTest do
 
       assert_receive {:request, "GET", "/Items", _params, headers}
 
-      assert headers["authorization"] =~ ~s(MediaBrowser Client="MyHiFi")
+      assert headers["authorization"] =~ ~s(MediaBrowser Client="PiFi")
       assert headers["authorization"] =~ ~s(Token="THETOKEN")
       assert headers["authorization"] =~ ~s(DeviceId="#{Server.device_id()}")
     end

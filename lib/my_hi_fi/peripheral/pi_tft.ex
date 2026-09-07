@@ -112,11 +112,14 @@ defmodule MyHiFi.Peripheral.PiTft do
   # waited for an event would show the name that no person chose. See
   # `MyHiFi.Device.Identity`.
   defp with_identity(view) do
-    %{
-      view
-      | device_name: Identity.name(),
-        splash_path: artwork_disk_path(Identity.splash_path())
-    }
+    %{view | device_name: Identity.name(), splash_path: splash(Identity.splash_path())}
+  end
+
+  # **A device that a person gave no picture draws the one that the firmware ships.**
+  # `MyHiFi.Device.Identity.shipped_splash/1` holds a file for each size of screen, so
+  # this screen names its own size and needs no knowledge of what the file is.
+  defp splash(address) do
+    artwork_disk_path(address) || Identity.shipped_splash(Screen.size())
   end
 
   # A person can turn the screen on while the device is in standby, and a device that
@@ -205,8 +208,8 @@ defmodule MyHiFi.Peripheral.PiTft do
     [
       runtime_paths: [
         enabled: true,
-        allowlist: [MyHiFi.Cache.directory()],
-        extensions: [".thumbnail"]
+        allowlist: [MyHiFi.Cache.directory(), Identity.splash_directory()],
+        extensions: [".thumbnail", ".png"]
       ]
     ]
   end
@@ -244,7 +247,7 @@ defmodule MyHiFi.Peripheral.PiTft do
     do: %{view | battery_percent: event.percent, low_battery?: event.low?}
 
   defp view(%DeviceEvents.IdentityChanged{} = event, view),
-    do: %{view | device_name: event.name, splash_path: artwork_disk_path(event.splash_path)}
+    do: %{view | device_name: event.name, splash_path: splash(event.splash_path)}
 
   defp view(%Player.Buffering{} = event, view),
     do: %{view | state: :buffering, percent: event.percent}

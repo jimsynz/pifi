@@ -42,7 +42,7 @@ defmodule MyHiFi.Device.IdentityTest do
 
   describe "name/0" do
     test "a device that no person named holds the name of the product" do
-      assert Identity.name() == "MyHiFi"
+      assert Identity.name() == "PiFi"
     end
 
     test "it gives the name that a person wrote" do
@@ -59,7 +59,7 @@ defmodule MyHiFi.Device.IdentityTest do
 
     test "a device needs a name" do
       assert {:error, "A device needs a name."} = Identity.put_name("   ")
-      assert Identity.name() == "MyHiFi"
+      assert Identity.name() == "PiFi"
     end
 
     # An SSID holds 32 bytes, and the wizard cuts a longer one. A person reads the whole
@@ -109,7 +109,7 @@ defmodule MyHiFi.Device.IdentityTest do
       Event.subscribe(:device)
 
       assert :ok = Identity.put_splash(@png)
-      assert_receive %IdentityChanged{name: "MyHiFi", splash_path: "/artwork/" <> _name}
+      assert_receive %IdentityChanged{name: "PiFi", splash_path: "/artwork/" <> _name}
     end
 
     # libvips in this firmware writes neither GIF nor WebP, so such a picture can hold
@@ -175,16 +175,46 @@ defmodule MyHiFi.Device.IdentityTest do
     end
   end
 
+  describe "the picture that this firmware ships" do
+    # **A device that a person gave no picture is not a device with no picture.** A
+    # screen that plays nothing draws the mark of the product.
+    test "it holds one for each screen that this firmware drives" do
+      assert path = Identity.shipped_splash({320, 240})
+      assert Path.basename(path) == "320x240.png"
+      assert File.exists?(path)
+
+      assert path = Identity.shipped_splash({240, 240})
+      assert Path.basename(path) == "240x240.png"
+      assert File.exists?(path)
+    end
+
+    # A new screen needs a file and no code.
+    test "a size that this firmware holds no picture for gives nothing" do
+      assert Identity.shipped_splash({128, 64}) == nil
+    end
+
+    # A picture of another size would cost a scale for each draw, and one that a screen
+    # has to crop would lose the ends of the waveform.
+    test "each picture is the size of the screen that it belongs to" do
+      for {width, height} <- [{320, 240}, {240, 240}] do
+        path = Identity.shipped_splash({width, height})
+        {output, 0} = System.cmd("file", [path])
+
+        assert output =~ "#{width} x #{height}", "#{path} is not #{width} by #{height}"
+      end
+    end
+  end
+
   describe "slug/1" do
     test "it gives one label of a host name" do
       assert Identity.slug("Kitchen HiFi") == "kitchen-hifi"
       assert Identity.slug("James' Stereo!") == "james-stereo"
-      assert Identity.slug("MyHiFi") == "myhifi"
+      assert Identity.slug("PiFi") == "pifi"
     end
 
     test "a name that gives no label at all gives the name of the product" do
-      assert Identity.slug("音楽") == "myhifi"
-      assert Identity.slug("---") == "myhifi"
+      assert Identity.slug("音楽") == "pifi"
+      assert Identity.slug("---") == "pifi"
     end
   end
 end

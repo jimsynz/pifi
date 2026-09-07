@@ -11,7 +11,7 @@ defmodule MyHiFi.Jellyfin.Server do
 
   Jellyfin reads the client, the device and the token from one header.
 
-      Authorization: MediaBrowser Client="MyHiFi", Device="<name>",
+      Authorization: MediaBrowser Client="PiFi", Device="<name>",
                      DeviceId="<id>", Version="<version>", Token="<token>"
 
   **`DeviceId` must stay the same for the life of the device.** The server lists one
@@ -62,7 +62,7 @@ defmodule MyHiFi.Jellyfin.Server do
   @token_setting "jellyfin_token"
   @user_setting "jellyfin_user_id"
 
-  @client "MyHiFi"
+  @client "PiFi"
   @version Mix.Project.config()[:version]
 
   # **A page is the largest thing that a read of a library holds at one time.** The
@@ -215,7 +215,7 @@ defmodule MyHiFi.Jellyfin.Server do
   Connect.
 
       iex> header = authorization("SECRETTOKEN")
-      iex> String.starts_with?(header, ~s(MediaBrowser Client="MyHiFi", Device="))
+      iex> String.starts_with?(header, ~s(MediaBrowser Client="PiFi", Device="))
       true
       iex> String.ends_with?(header, ~s(, Token="SECRETTOKEN"))
       true

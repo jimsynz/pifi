@@ -72,6 +72,17 @@ defmodule MyHiFi.Peripheral.PiTftTest do
     assert state.view.device_name == "Kitchen"
   end
 
+  # **A device that a person gave no picture draws the mark of the product**, and the
+  # file is the size of this screen, so a draw scales nothing.
+  test "the first frame holds the picture that this firmware ships" do
+    RecordingScreen.use_it()
+
+    {:ok, state} = PiTft.init([])
+
+    assert state.view.splash_path == Identity.shipped_splash(PiTft.Screen.size())
+    assert Path.basename(state.view.splash_path) == "320x240.png"
+  end
+
   test "it reads the player topic and the device topic" do
     assert PiTft.subscriptions() == [:player, :device]
   end
