@@ -69,7 +69,7 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
 
     {:ok, state} = PirateAudio.init([])
 
-    assert Path.basename(state.view.splash_path) == "240x240.png"
+    assert Path.basename(state.view.splash_path) == "pifi-240x240.png"
   end
 
   test "it reads the player topic and the device topic" do

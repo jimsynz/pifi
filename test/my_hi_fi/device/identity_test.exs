@@ -33,7 +33,11 @@ defmodule MyHiFi.Device.IdentityTest do
 
   setup do
     on_exit(fn ->
-      KV.put("myhifi_device_name", "")
+      # The store is one for the whole node, and a host build keeps it in memory.
+      for key <- ~w(myhifi_device_name myhifi_product_name myhifi_splash_name) do
+        KV.put(key, "")
+      end
+
       File.rm_rf(Artwork.directory())
     end)
 
@@ -180,12 +184,46 @@ defmodule MyHiFi.Device.IdentityTest do
     # screen that plays nothing draws the mark of the product.
     test "it holds one for each screen that this firmware drives" do
       assert path = Identity.shipped_splash({320, 240})
-      assert Path.basename(path) == "320x240.png"
+      assert Path.basename(path) == "pifi-320x240.png"
       assert File.exists?(path)
 
       assert path = Identity.shipped_splash({240, 240})
-      assert Path.basename(path) == "240x240.png"
+      assert Path.basename(path) == "pifi-240x240.png"
       assert File.exists?(path)
+    end
+
+    # **One firmware serves several products.** A person who makes an SD card for
+    # another brand writes the two keys, and neither the name nor the artwork needs a
+    # build of its own.
+    test "a provisioner names the set of pictures" do
+      KV.put("myhifi_splash_name", "acme")
+      directory = Path.join(System.tmp_dir!(), "splash_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(directory)
+      File.write!(Path.join(directory, "acme-320x240.png"), "the artwork of another product")
+      Application.put_env(:my_hi_fi, :splash_directory, directory)
+
+      on_exit(fn ->
+        Application.delete_env(:my_hi_fi, :splash_directory)
+        File.rm_rf(directory)
+      end)
+
+      assert Path.basename(Identity.shipped_splash({320, 240})) == "acme-320x240.png"
+    end
+
+    test "a provisioner names the product, and every unnamed device answers to it" do
+      KV.put("myhifi_product_name", "Acme Audio")
+
+      assert Identity.default_name() == "Acme Audio"
+      assert Identity.name() == "Acme Audio"
+    end
+
+    # A person who named their device keeps that name whatever the product is called.
+    test "the name of a person wins over the name of the product" do
+      KV.put("myhifi_product_name", "Acme Audio")
+      assert :ok = Identity.put_name("Kitchen")
+
+      assert Identity.name() == "Kitchen"
+      assert Identity.default_name() == "Acme Audio"
     end
 
     # A new screen needs a file and no code.

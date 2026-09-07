@@ -182,11 +182,11 @@ Licence: Apache-2.0.
     it: `.thumbnail` for the cache, and `.png` for the picture that the firmware ships
     for an idle screen.
   - **The idle screen of a device that a person gave no picture draws the mark of the
-    product.** `priv/splash` holds one PNG for each screen, named for its size, and
-    `MyHiFi.Device.Identity.shipped_splash/1` reads it. **The file is the size of the
-    screen**: another size costs a scale on each draw, and a screen that had to crop
-    would lose the ends of the waveform of that artwork. A new screen therefore needs a
-    file and no code.
+    product.** `priv/splash` holds one PNG for each screen, named
+    `<product>-<width>x<height>.png`, and `MyHiFi.Device.Identity.shipped_splash/1`
+    reads it. **The file is the size of the screen**: another size costs a scale on each
+    draw, and a screen that had to crop would lose the ends of the waveform of that
+    artwork. A new screen therefore needs a file and no code.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `MyHiFi.Application` calls
@@ -204,6 +204,14 @@ Licence: Apache-2.0.
   `MyHiFiWeb.Endpoint` uses the same port. `MyHiFi.Application` therefore starts
   the wizard or the web interface, and never both. See `MyHiFi.Setup` and section
   14 of the spec.
+- **Three keys of `Nerves.Runtime.KV` hold what this device is called and what it
+  looks like, and `fwup` provisions all three.** `myhifi_device_name` is what a person
+  called this device. `myhifi_product_name` is what the product is called, which every
+  unnamed device answers to, and `myhifi_splash_name` names the artwork in
+  `priv/splash`. **One firmware therefore serves several products**: a person who makes
+  an SD card for another brand writes two keys, and neither the name nor the picture
+  needs a build of its own. `provisioning.conf` of the Nerves system is where such a
+  line goes, beside the serial number.
 - **The name of the device lives in `Nerves.Runtime.KV`, and not in the settings
   table.** The wizard above starts before the Repo does, and the access point carries
   that name, so a name in the database is unreadable in the one mode that needs it.

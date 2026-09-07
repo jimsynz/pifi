@@ -28,6 +28,12 @@ defmodule MyHiFi.Device.Identity do
   build the in-memory backend. A name that a person sets in development therefore
   lasts as long as the node.
 
+  **Two more keys of that block belong to the build, and not to the device.**
+  `myhifi_product_name` is what the product is called, and `myhifi_splash_name` names
+  the picture that it ships. A person provisions those with `fwup`, so one firmware
+  serves several products and neither one needs a build of its own. See `default_name/0`
+  and `shipped_splash/1`.
+
   **The name of the board does not move.** erlinit sets the hostname at the boot, and
   no dependency of this firmware holds a call to change it after that. The device
   therefore answers for `<name>.local` **and** for `nerves-<serial>.local`, and
@@ -55,12 +61,20 @@ defmodule MyHiFi.Device.Identity do
   alias MyHiFi.Settings
   alias Nerves.Runtime.KV
 
-  # A key of this firmware, beside the `nerves_` keys of the Nerves project. The block
-  # holds 8 KB, and a name of 32 bytes is nothing beside what the firmware metadata
-  # already takes.
+  # The keys of this firmware, beside the `nerves_` keys of the Nerves project. The
+  # block holds 8 KB, and these three hold a few dozen bytes of it.
+  #
+  # **One of them belongs to the device and two belong to the build.**
+  # `myhifi_device_name` is what a person called this device.
+  # `myhifi_product_name` and `myhifi_splash_name` are what the product is called and
+  # which picture it ships, so `fwup` provisions a brand and one firmware serves
+  # several. See `default_name/0` and `shipped_splash/1`.
   @name_key "myhifi_device_name"
+  @product_key "myhifi_product_name"
+  @splash_name_key "myhifi_splash_name"
 
   @default_name "PiFi"
+  @default_splash_name "pifi"
   @default_slug "pifi"
 
   # An SSID takes 32 bytes, and `VintageNetWizard.APMode` cuts a longer one at that
@@ -76,27 +90,34 @@ defmodule MyHiFi.Device.Identity do
   @doc """
   The name that this device answers to.
 
-  It gives `PiFi` for a device that no person named.
+  It gives the name of the product for a device that no person named, which is `PiFi`
+  until a provisioner says otherwise. See `default_name/0`.
   """
   @spec name() :: String.t()
   def name do
     case KV.get(@name_key) do
       name when is_binary(name) and name != "" -> name
-      _other -> @default_name
+      _other -> default_name()
     end
   end
 
   @doc """
-  The name of a device that no person named.
+  The name of the product, which is the name of a device that no person named.
 
   Each screen draws this in a view that carries no name, so the default lives here and
   not in the layout of each screen.
+
+  **A provisioner names it, so one firmware serves several products.**
+  `myhifi_product_name` of the firmware key store holds it, `fwup` writes that block
+  when a person makes an SD card, and a build that provisions nothing answers `PiFi`.
+  The `provisioning.conf` of the Nerves system is where such a line goes, beside the
+  serial number.
 
       iex> MyHiFi.Device.Identity.default_name()
       "PiFi"
   """
   @spec default_name() :: String.t()
-  def default_name, do: @default_name
+  def default_name, do: provisioned(@product_key, @default_name)
 
   @doc """
   Name this device.
@@ -189,13 +210,18 @@ defmodule MyHiFi.Device.Identity do
   ends of the waveform of this one; `MyHiFi.Peripheral.PiTft.asset_options/0` names this
   directory so that Emerge may read it.
 
+  **A provisioner names the set, so one firmware carries the artwork of several
+  products.** `myhifi_splash_name` of the firmware key store holds the name in front of
+  the size, `fwup` writes that block when a person makes an SD card, and a build that
+  provisions nothing reads `pifi-320x240.png`.
+
       iex> MyHiFi.Device.Identity.shipped_splash({7, 7})
       nil
 
   """
   @spec shipped_splash({pos_integer(), pos_integer()}) :: Path.t() | nil
   def shipped_splash({width, height}) do
-    path = Path.join(splash_directory(), "#{width}x#{height}.png")
+    path = Path.join(splash_directory(), "#{shipped_name()}-#{width}x#{height}.png")
 
     if File.exists?(path), do: path
   end
@@ -280,6 +306,20 @@ defmodule MyHiFi.Device.Identity do
   # every character of that class as well.
   defp readable?(name) do
     String.printable?(name) and not String.match?(name, ~r/\p{C}/u)
+  end
+
+  # The name in front of the size, which a provisioner writes and a build that
+  # provisions nothing reads as `pifi`. `splash_name/0` above is another thing: the
+  # entry of the cache that holds the picture of a person.
+  defp shipped_name, do: provisioned(@splash_name_key, @default_splash_name)
+
+  # **A value of the build, and not of the device.** `fwup` writes the block, so a
+  # value here changes when a person makes a card and at no other time.
+  defp provisioned(key, default) do
+    case KV.get(key) do
+      value when is_binary(value) and value != "" -> value
+      _other -> default
+    end
   end
 
   defp publish do
