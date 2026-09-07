@@ -21,6 +21,7 @@ defmodule MyHiFi.Podcast.Refresh do
 
   alias MyHiFi.Event
   alias MyHiFi.Playback
+  alias MyHiFi.Playback.FavouriteAudio
   alias MyHiFi.Playback.Item
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Feed
@@ -90,7 +91,19 @@ defmodule MyHiFi.Podcast.Refresh do
 
     Fill.episodes(item, show.feed_url, newest(episodes))
     prune(item)
+    hold_audio(item)
   end
+
+  # **A new episode of a show that a person follows reads on to the card here.** A mark
+  # asks once, and a feed writes an episode a day, so the ask must happen again when the
+  # feed changes and this is that moment: `MyHiFi.AutoSync` runs the refresh of the
+  # followed shows on a period, and a person who opens a show refreshes it as well.
+  #
+  # `MyHiFi.Playback.FavouriteAudio` decides how many episodes and which ones, and it
+  # reads nothing that the card already holds.
+  defp hold_audio(%{favourite?: true} = item), do: FavouriteAudio.ask(item)
+
+  defp hold_audio(_item), do: :ok
 
   # An item of a feed can hold no date, and `DateTime.compare/2` refuses a nil. Such an
   # episode is the oldest one, so a person sees the dated ones first.

@@ -56,6 +56,16 @@ defmodule MyHiFi.Source.Podcasts do
   @search_limit 50
   @source "podcasts"
 
+  # **How many of the newest episodes of a followed show the card holds.** A person
+  # sets it. Three is what a person listens to in a week of commuting, and an episode of
+  # 50 MB puts twenty shows at 150 episodes and about 7 GB, which a 30 GB card holds.
+  @hold_setting "podcasts.hold_episodes"
+  @hold_default 3
+
+  # An episode of 50 MB and a ceiling of 20 is a gigabyte for one show, which is the
+  # most that a person can ask for by mistake.
+  @hold_ceiling 20
+
   @impl MyHiFi.Source
   def title, do: "Podcasts"
 
@@ -204,6 +214,18 @@ defmodule MyHiFi.Source.Podcasts do
         type: :password,
         value: nil,
         write_only?: true
+      },
+      %{
+        key: "episodes",
+        title: "Episodes to hold offline",
+        description:
+          "A show that you follow keeps this many of its newest episodes on the card, " <>
+            "so they play with no network. An episode that you finish gives its room back. " <>
+            "0 holds none.",
+        link: nil,
+        type: :number,
+        value: to_string(hold_limit()),
+        write_only?: false
       }
     ]
   end
@@ -211,19 +233,101 @@ defmodule MyHiFi.Source.Podcasts do
   # A person who changes the key writes both values again, because the page holds
   # neither one. A key with no secret signs nothing, so a half write is no use.
   @impl MyHiFi.Source
-  def put_settings(%{"key" => key, "secret" => secret}) do
-    with {:ok, key} <- present(key),
-         {:ok, secret} <- present(secret) do
-      Settings.put!(Index.key_setting(), key)
-      Settings.put!(Index.secret_setting(), secret)
-
-      confirmation()
-    else
-      :error -> {:error, "Give both the key and the secret."}
+  # **Each value stands by itself.** The key and the secret are write only, so the form
+  # draws them empty every time, and a person who changed the episode count alone would
+  # have had to type both of them again.
+  def put_settings(values) do
+    with {:ok, index?} <- put_index(values),
+         :ok <- put_episodes(values) do
+      answer(index?)
     end
   end
 
-  def put_settings(_values), do: {:error, "Give both the key and the secret."}
+  # **The answer names what changed.** `confirmation/0` asks the index whether the key
+  # works, which is a request over the network, and a person who changed the number of
+  # episodes asked nothing about their key.
+  defp answer(true), do: confirmation()
+
+  defp answer(false), do: {:ok, held_confirmation(hold_limit())}
+
+  defp held_confirmation(0), do: "A show that you follow holds no episode on the card."
+
+  defp held_confirmation(1), do: "A show that you follow holds its newest episode."
+
+  defp held_confirmation(count),
+    do: "A show that you follow holds its #{count} newest episodes."
+
+  defp put_index(%{"key" => key, "secret" => secret}) do
+    case {present(key), present(secret)} do
+      {{:ok, key}, {:ok, secret}} ->
+        Settings.put!(Index.key_setting(), key)
+        Settings.put!(Index.secret_setting(), secret)
+
+        {:ok, true}
+
+      {:error, :error} ->
+        {:ok, false}
+
+      _one_of_them ->
+        {:error, "Give both the key and the secret."}
+    end
+  end
+
+  defp put_index(_values), do: {:ok, false}
+
+  defp put_episodes(%{"episodes" => episodes}) do
+    case whole(episodes) do
+      {:ok, count} ->
+        Settings.put!(@hold_setting, to_string(count))
+
+        :ok
+
+      :none ->
+        :ok
+
+      :error ->
+        {:error, "The number of episodes to hold is a whole number from 0 to #{@hold_ceiling}."}
+    end
+  end
+
+  defp put_episodes(_values), do: :ok
+
+  # An episode of 50 MB and a ceiling of 20 is a gigabyte for one show, which is the
+  # most that a person can ask for by mistake.
+  defp whole(text) do
+    case present(text) do
+      :error ->
+        :none
+
+      {:ok, text} ->
+        case Integer.parse(String.trim(text)) do
+          {count, ""} when count >= 0 and count <= @hold_ceiling -> {:ok, count}
+          _other -> :error
+        end
+    end
+  end
+
+  @doc """
+  How many of the newest episodes of a followed show the card holds.
+
+  A person sets it, and it is #{@hold_default} until they do. See
+  `c:MyHiFi.Source.hold_limit/0`, and `MyHiFi.Playback.FavouriteAudio` for what reads
+  it.
+  """
+  @impl MyHiFi.Source
+  def hold_limit do
+    case Settings.fetch(@hold_setting) do
+      {:ok, %{value: value}} -> whole_or_default(value)
+      {:error, _reason} -> @hold_default
+    end
+  end
+
+  defp whole_or_default(value) do
+    case Integer.parse(value) do
+      {count, ""} when count >= 0 and count <= @hold_ceiling -> count
+      _other -> @hold_default
+    end
+  end
 
   # The index signs every request, so a device with no key reaches nothing at all.
   # `MyHiFi.AutoSync` reads this before it asks for the trending list or for a feed.

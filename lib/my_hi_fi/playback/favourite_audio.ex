@@ -8,22 +8,26 @@ defmodule MyHiFi.Playback.FavouriteAudio do
 
   ## What reads, and what does not
 
-  **A track whose `transport` is `:download` and that keeps no place.** Those two
-  facts of `MyHiFi.Playback.Item` are the whole rule, and nothing here names a
-  source.
+  **A track whose `transport` is `:download`.** That fact of `MyHiFi.Playback.Item` is
+  the rule, and nothing here names a source.
 
   - A radio station is a live stream. Its transport is `:http`, and a stream with no
     end holds nothing to read.
-  - **An episode of a podcast keeps its place, so a subscription reads nothing.** A
-    person subscribes to a show, a show holds hundreds of episodes, and writing all
-    the time shortens the life of the card. `keeps_place?` is the fact that separates
-    the two: an episode and a chapter of an audiobook keep their place, and a song
-    does not.
-  - A song of a library keeps no place and it reads from a file, so it reads.
+  - A song of a library reads from a file, so it reads, and a mark on the album that
+    holds it reads every song of that album.
+  - **An episode of a show reads, and a count holds it down.** A show holds hundreds of
+    episodes and a feed grows every day, so a mark on one reads **the newest few that a
+    person has not played**, and `c:MyHiFi.Source.hold_limit/0` is how many.
+    `keeps_place?` said that an episode reads nothing at all before this, and a person
+    who subscribed to a show then could not hear it away from the network.
+  - A track that keeps its place and that a person marked by itself reads nothing. A
+    person marks the show, and `MyHiFiWeb.ItemList.favourite/1` draws no control on an
+    episode for that reason.
 
   **A mark reaches two levels.** An album holds tracks, so a mark on an album reads
   every one of them. An artist holds albums and no track of its own, so a mark on an
-  artist reads the tracks of each album, one album after the other. A discography is
+  artist reads the tracks of each album, one album after the other. A show holds
+  episodes, so a mark on one reads the newest few of them. A discography is
   gigabytes, and **a person who marks one has said what they want the card for**: the
   three steps below stop the run at the first track that the card holds no room for,
   and the marks that a person put on most recently are the ones that the device holds.
@@ -191,9 +195,9 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   end
 
   def tracks(%{kind: :container} = item) do
-    case held_by(item) do
-      [] -> item |> containers() |> Enum.flat_map(&held_by/1)
-      tracks -> tracks
+    case songs_of(item) do
+      [] -> episodes_or_below(item)
+      songs -> songs
     end
   end
 
@@ -207,6 +211,57 @@ defmodule MyHiFi.Playback.FavouriteAudio do
     end
   end
 
+  # A container that holds no song holds episodes or containers, and each of those
+  # reads its own way.
+  defp episodes_or_below(item) do
+    case episodes_of(item) do
+      [] -> item |> containers_of() |> Enum.flat_map(&tracks/1)
+      episodes -> episodes
+    end
+  end
+
+  # **Every song of the container, in the order of the record.** A person who marks an
+  # album wants the record, so no count holds this down.
+  defp songs_of(item) do
+    Item
+    |> Ash.Query.filter(
+      parent_id == ^item.id and kind == :track and transport == :download and
+        keeps_place? == false
+    )
+    |> Ash.Query.sort(place: :asc, title: :asc)
+    |> Ash.read!()
+  end
+
+  # **The newest episodes that a person has not played, and no more than the source
+  # holds.** A feed grows every day and a person wants the episode of this week, so a
+  # count is what stops a subscription from filling the card. An episode that a person
+  # played is one that they are done with, and `MyHiFi.Source.Podcasts.finished/1`
+  # released its file already.
+  defp episodes_of(item) do
+    query =
+      Item
+      |> Ash.Query.filter(
+        parent_id == ^item.id and kind == :track and transport == :download and
+          keeps_place? == true and played? == false
+      )
+      |> Ash.Query.sort(published_at: :desc, title: :asc)
+
+    case hold_limit(item) do
+      :all -> Ash.read!(query)
+      limit -> query |> Ash.Query.limit(limit) |> Ash.read!()
+    end
+  end
+
+  # **The item names its source, and the source names the count.** This module reads no
+  # list of the sources: it asks whichever one holds the item, in the way that
+  # `MyHiFiWeb.BrowseLive` asks for the order of a listing.
+  defp hold_limit(item) do
+    case Source.from_slug(item.source) do
+      {:ok, module} -> Source.hold_limit(module)
+      {:error, _reason} -> :all
+    end
+  end
+
   # **A container that holds no track of its own holds containers, and this reads
   # theirs.** An artist gives its albums, one after the other, and each album gives its
   # tracks in the order of the record. A run that stops half way through a discography
@@ -214,20 +269,10 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   #
   # It reads one query for each album of a marked artist. That is five queries for the
   # artists of the measured library, and it happens when a person presses a control.
-  defp containers(item) do
+  defp containers_of(item) do
     Item
     |> Ash.Query.filter(parent_id == ^item.id and kind == :container)
     |> Ash.Query.sort(published_at: :asc, title: :asc)
-    |> Ash.read!()
-  end
-
-  defp held_by(item) do
-    Item
-    |> Ash.Query.filter(
-      parent_id == ^item.id and kind == :track and transport == :download and
-        keeps_place? == false
-    )
-    |> Ash.Query.sort(place: :asc, title: :asc)
     |> Ash.read!()
   end
 

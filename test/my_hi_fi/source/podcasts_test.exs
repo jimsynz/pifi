@@ -432,6 +432,67 @@ defmodule MyHiFi.Source.PodcastsTest do
 
   # The mark is on the item, and this source holds no control of its own for it. A page
   # calls `MyHiFi.Playback.set_favourite/1`, and the read of the shows joins to it.
+  describe "how many episodes the card holds" do
+    test "it holds three of the newest until a person says otherwise" do
+      assert Podcasts.hold_limit() == 3
+    end
+
+    test "a person changes the number" do
+      assert {:ok, message} = Podcasts.put_settings(%{"episodes" => "5"})
+
+      assert message =~ "5 newest episodes"
+      assert Podcasts.hold_limit() == 5
+    end
+
+    test "none is a number too" do
+      assert {:ok, message} = Podcasts.put_settings(%{"episodes" => "0"})
+
+      assert message =~ "no episode"
+      assert Podcasts.hold_limit() == 0
+    end
+
+    test "a number that is not one, and one past the ceiling, are refused" do
+      assert {:error, message} = Podcasts.put_settings(%{"episodes" => "lots"})
+      assert message =~ "whole number from 0 to 20"
+
+      assert {:error, _message} = Podcasts.put_settings(%{"episodes" => "21"})
+      assert {:error, _message} = Podcasts.put_settings(%{"episodes" => "-1"})
+
+      assert Podcasts.hold_limit() == 3
+    end
+
+    # **The key and the secret are write only, so the form draws them empty every
+    # time.** A person who changed this number alone would otherwise have to type both
+    # of them again.
+    test "the number changes without the key and the secret" do
+      Settings.put!(Index.key_setting(), "a-key")
+      Settings.put!(Index.secret_setting(), "a-secret")
+
+      assert {:ok, _message} =
+               Podcasts.put_settings(%{"key" => "", "secret" => "", "episodes" => "2"})
+
+      assert Podcasts.hold_limit() == 2
+      assert {:ok, %{value: "a-key"}} = Settings.fetch(Index.key_setting())
+    end
+
+    # A person who gave one of the two meant to give both, and the answer says so.
+    test "one of the key and the secret is still an error" do
+      assert {:error, message} =
+               Podcasts.put_settings(%{"key" => "a-key", "secret" => "", "episodes" => "2"})
+
+      assert message =~ "both the key and the secret"
+    end
+
+    # The field says what the device holds now, so a person reads it before they change
+    # it. It is not write only: no key and no secret is in it.
+    test "the settings page reads the number back" do
+      Settings.put!("podcasts.hold_episodes", "7")
+
+      assert %{value: "7", type: :number, write_only?: false} =
+               Podcasts.settings() |> Enum.find(&(&1.key == "episodes"))
+    end
+  end
+
   describe "the subscription" do
     test "the mark on the item of a show subscribes to it, and it removes that" do
       created = show()

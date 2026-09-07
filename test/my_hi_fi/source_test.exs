@@ -114,7 +114,9 @@ defmodule MyHiFi.SourceTest do
       for module <- Source.all(), field <- Source.settings(module) do
         assert is_binary(field.key)
         assert is_binary(field.title)
-        assert field.type in [:text, :password]
+        # Each one is a type that `MyHiFiWeb.CoreComponents.input/1` draws, and the
+        # settings page passes it through without a rule of its own.
+        assert field.type in [:number, :password, :text]
         assert is_boolean(field.write_only?)
       end
     end

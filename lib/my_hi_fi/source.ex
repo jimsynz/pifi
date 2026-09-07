@@ -44,8 +44,10 @@ defmodule MyHiFi.Source do
   One value of a source that a person can change.
 
   `key` names the field to `put_settings/1`, and it is also the name of the control
-  on a page. `type` decides the control: `:text` shows what it holds, and
-  `:password` hides it.
+  on a page. `type` decides the control: `:text` shows what it holds, `:password`
+  hides it, and `:number` takes a whole number. Each one is a type that
+  `MyHiFiWeb.CoreComponents.input/1` draws, and the settings page passes it through
+  with no rule of its own.
 
   `value` is what the source holds now, and it is nil for a field with
   `write_only?` set. A page then shows an empty control, and it never sends the
@@ -62,7 +64,7 @@ defmodule MyHiFi.Source do
           title: String.t(),
           description: String.t() | nil,
           link: %{href: String.t(), title: String.t()} | nil,
-          type: :text | :password,
+          type: :number | :password | :text,
           value: String.t() | nil,
           write_only?: boolean()
         }
@@ -330,6 +332,20 @@ defmodule MyHiFi.Source do
   @callback listing(MyHiFi.Playback.Item.t() | nil) :: inside()
 
   @doc """
+  How many items of a marked container this device holds on the card, newest first.
+
+  **A show holds hundreds of episodes and a person wants the newest few.** A source
+  whose items keep their place therefore names a number, and `MyHiFi.Source.Podcasts`
+  reads it from a setting that a person changes.
+
+  `:all` is every item that the container holds, and an album of songs is that: a
+  person who marks one wants the record and not three tracks of it.
+
+  A source that implements none gets `:all`. See `MyHiFi.Playback.FavouriteAudio`.
+  """
+  @callback hold_limit() :: pos_integer() | :all
+
+  @doc """
   A person opened one container.
 
   A source that must reach a service when that happens implements this.
@@ -468,7 +484,8 @@ defmodule MyHiFi.Source do
 
   # A source with no search leaves `search/1` out, and it names no `:search` in
   # `c:capabilities/0`.
-  @optional_callbacks listing: 1,
+  @optional_callbacks hold_limit: 0,
+                      listing: 1,
                       finished: 1,
                       opened: 1,
                       ready?: 0,
@@ -674,6 +691,20 @@ defmodule MyHiFi.Source do
     else
       {:error, "#{module.title()} holds no such control."}
     end
+  end
+
+  @doc """
+  How many items of a marked container of this source the card holds.
+
+  See `c:hold_limit/0`. A source that names none holds every one.
+
+      iex> MyHiFi.Source.hold_limit(MyHiFi.Source.InternetRadio)
+      :all
+
+  """
+  @spec hold_limit(module()) :: pos_integer() | :all
+  def hold_limit(module) do
+    if implements?(module, :hold_limit, 0), do: module.hold_limit(), else: :all
   end
 
   @doc """

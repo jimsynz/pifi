@@ -613,21 +613,29 @@ defmodule MyHiFi.Playback.Item do
               expr(
                 favourite? == true and
                   ((kind == :track and transport == :download and keeps_place? == false) or
-                     exists(children, transport == :download and keeps_place? == false) or
-                     exists(children.children, transport == :download and keeps_place? == false))
+                     exists(children, transport == :download) or
+                     exists(children.children, transport == :download))
               ) do
       description """
       A person marked this item, and this device holds the audio of what it covers.
 
       **It names no source, and it must not.** `transport` says that the audio is a
-      file that this device reads, and `keeps_place?` says that the item is a song
-      and not an episode of a podcast. A subscription to a show therefore reads
-      nothing, and a mark on an album reads every track of it.
+      file that this device reads, so a station reads nothing at all: a live stream
+      holds no file to hold.
 
-      **A mark reaches two levels, so an artist reads a whole discography.** A person
-      who marks one has said what they want the card for, and the run stops at the
-      first track that the card holds no room for. A show holds episodes, and an
-      episode keeps its place, so a subscription still reads nothing at either level.
+      **A mark reaches two levels.** A mark on an album reads every track of it, and a
+      mark on an artist reads a whole discography, because a person who marks one has
+      said what they want the card for and the run stops at the first track that the
+      card holds no room for.
+
+      **A container of episodes reads too, and a count is what holds it down.** An
+      episode keeps its place, and this said false for a show for that reason, so a
+      person who subscribed to a show could not hear it away from the network. A show
+      holds hundreds of episodes and no podcast reader holds a feed, so
+      `c:MyHiFi.Source.hold_limit/0` says how many of the newest a source holds. A
+      track that keeps its place and that a person marked by itself still reads
+      nothing, because a person marks the show and not the episode.
+
       See `MyHiFi.Playback.FavouriteAudio`.
       """
     end

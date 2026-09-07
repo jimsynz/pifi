@@ -1,5 +1,7 @@
 defmodule MyHiFi.Playback.FavouriteAudioTest do
   use MyHiFi.DataCase, async: false
+
+  require Ash.Query
   use Oban.Testing, repo: MyHiFi.Repo
 
   alias MyHiFi.Cache
@@ -46,6 +48,15 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
     body = String.duplicate("x", bytes)
 
     Req.Test.stub(Download, fn conn -> Plug.Conn.send_resp(conn, 200, body) end)
+  end
+
+  defp hold_episodes(count), do: Settings.put!("podcasts.hold_episodes", to_string(count))
+
+  defp episodes_of(item) do
+    MyHiFi.Playback.Item
+    |> Ash.Query.filter(parent_id == ^item.id and kind == :track)
+    |> Ash.Query.sort(published_at: :desc)
+    |> Ash.read!()
   end
 
   defp artist(ref \\ "artist-1") do
@@ -244,20 +255,50 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
       assert FavouriteAudio.read(show()) == 0
     end
 
-    # **A subscription asks for no job at all.** An episode keeps its place, so
-    # `caches_audio?` is false for a show, and a job for it read the `where` of the
-    # trigger again when it ran and cancelled itself. The work was correct and it read
-    # as a fault: an error in the log and a cancelled job in the table for every
-    # subscription a person made.
-    test "marking a show puts no job in the queue" do
-      Req.Test.stub(Download, fn _conn -> raise "the network must not be read" end)
+    # **A person who follows a show hears it away from the network.** The count of the
+    # source says how many of the newest episodes the card holds, and 0 holds none.
+    test "marking a show reads the newest episodes that a person has not played" do
+      serve(100)
       item = show()
 
-      {:ok, marked} = Playback.set_favourite(item)
+      {:ok, _marked} = Playback.set_favourite(item)
 
-      assert marked.favourite? == true
-      refute_enqueued(worker: @worker)
-      assert %{cancelled: 0, success: 0} = Oban.drain_queue(queue: :default)
+      assert %{success: 1} = Oban.drain_queue(queue: :default)
+
+      episodes = episodes_of(item)
+
+      refute episodes == [], "the show holds no episode to read"
+      assert Enum.all?(episodes, &held(&1.id)), "an episode of the show is not on the card"
+    end
+
+    test "a count of none reads nothing, and it queues nothing that fails" do
+      Req.Test.stub(Download, fn _conn -> raise "the network must not be read" end)
+      hold_episodes(0)
+      item = show()
+
+      {:ok, _marked} = Playback.set_favourite(item)
+
+      assert %{success: 1, cancelled: 0} = Oban.drain_queue(queue: :default)
+      assert Enum.all?(episodes_of(item), &is_nil(held(&1.id)))
+    end
+
+    test "it reads no more than the count of the source" do
+      serve(100)
+      hold_episodes(1)
+      item = show()
+
+      assert length(FavouriteAudio.tracks(item)) == 1
+    end
+
+    # An episode that a person finished is one that they are done with, and its file was
+    # released when it ended.
+    test "it reads no episode that a person played" do
+      serve(100)
+      item = show()
+      [newest | _rest] = episodes_of(item)
+      {:ok, _played} = Playback.mark_played(newest)
+
+      refute Enum.any?(FavouriteAudio.tracks(item), &(&1.id == newest.id))
     end
 
     test "marking one episode by itself puts no job in the queue either" do
@@ -551,13 +592,15 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
       assert Playback.items_marked_for_audio!("podcasts") == []
     end
 
-    # A subscribed show holds no track that reads, so it is absent whatever its mark.
-    test "it names no subscribed show" do
-      Req.Test.stub(Download, fn _conn -> raise "the network must not be read" end)
+    # A show that a person follows holds episodes that read, so the run names it and the
+    # count of the source holds it down.
+    test "it names a show that a person follows" do
+      serve(100)
 
-      {:ok, _item} = Playback.set_favourite(show())
+      {:ok, marked} = Playback.set_favourite(show())
 
-      assert Playback.items_marked_for_audio!("podcasts") == []
+      assert [named] = Playback.items_marked_for_audio!("podcasts")
+      assert named.id == marked.id
     end
   end
 end
