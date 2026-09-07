@@ -67,15 +67,23 @@ defmodule MyHiFiWeb.SettingsLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: Event.subscribe(:device)
 
-    # **The browser holds the bytes until a person presses the control.** One picture,
-    # and 4 MB, which is the limit that `MyHiFi.Artwork` holds for a picture of any
-    # kind. A GIF and a WebP are absent because libvips in this firmware writes
-    # neither, so a screen could never draw one. See `MyHiFi.Artwork.put/1`.
+    # One picture, and 4 MB, which is the limit that `MyHiFi.Artwork` holds for a
+    # picture of any kind. A GIF and a WebP are absent because libvips in this firmware
+    # writes neither, so a screen could never draw one. See `MyHiFi.Artwork.put/1`.
+    #
+    # **The upload starts when a person chooses the file, and `progress` holds it when
+    # the last byte lands.** A control that a person presses cannot do this work: the
+    # board reads 4 MB over Wi-Fi in more time than a person waits, and
+    # `Phoenix.LiveView.consume_uploaded_entries/3` raises `cannot consume uploaded
+    # files when entries are still in progress` for an upload that is still going. A
+    # device on this network logged that from a real press.
     socket =
       allow_upload(socket, :splash,
         accept: ~w(.jpg .jpeg .png),
         max_entries: 1,
-        max_file_size: 4 * 1024 * 1024
+        max_file_size: 4 * 1024 * 1024,
+        auto_upload: true,
+        progress: &splash_progress/3
       )
 
     {:ok, refresh(socket)}
@@ -141,20 +149,6 @@ defmodule MyHiFiWeb.SettingsLive do
   # LiveView already holds. Nothing here reads the parameters.
   @impl Phoenix.LiveView
   def handle_event("validate_splash", _params, socket), do: {:noreply, socket}
-
-  # **The browser sends the file to a temporary path, and this reads it there.**
-  # `MyHiFi.Artwork` writes the bytes to the cache, so the picture reaches the disk one
-  # time and the temporary file goes when this function answers.
-  @sobelow_skip ["Traversal.FileModule"]
-  @impl Phoenix.LiveView
-  def handle_event("save_splash", _params, socket) do
-    read = fn %{path: path}, _entry -> {:ok, File.read!(path)} end
-
-    case consume_uploaded_entries(socket, :splash, read) do
-      [bytes] -> {:noreply, splash_answer(socket, Identity.put_splash(bytes))}
-      [] -> {:noreply, put_flash(socket, :error, "Choose a picture first.")}
-    end
-  end
 
   @impl Phoenix.LiveView
   def handle_event("remove_splash", _params, socket) do
@@ -347,8 +341,8 @@ defmodule MyHiFiWeb.SettingsLive do
 
       <div class="mt-4 border-t border-edge pt-4">
         <p class="mb-3 text-sm text-ink-dim">
-          The screen of the device shows this picture when it plays nothing. Give a JPEG
-          or a PNG of 4096 KB or less.
+          The screen of the device shows this picture when it plays nothing. Choose a
+          JPEG or a PNG of 4096 KB or less, and the device holds it when it arrives.
         </p>
 
         <img
@@ -363,12 +357,7 @@ defmodule MyHiFiWeb.SettingsLive do
           This device holds no picture, so each screen shows its name.
         </p>
 
-        <.form
-          for={@splash_form}
-          id="splash-form"
-          phx-submit="save_splash"
-          phx-change="validate_splash"
-        >
+        <.form for={@splash_form} id="splash-form" phx-change="validate_splash">
           <.live_file_input upload={@uploads.splash} class="text-sm text-ink-dim" />
 
           <p
@@ -389,21 +378,15 @@ defmodule MyHiFiWeb.SettingsLive do
             </p>
           </div>
 
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button type="submit" id="save-splash" class="control rounded-lg px-4 py-2 text-sm">
-              Use this picture
-            </button>
-
-            <button
-              :if={@splash_path}
-              type="button"
-              id="remove-splash"
-              phx-click="remove_splash"
-              class="control rounded-lg px-4 py-2 text-sm"
-            >
-              Remove the picture
-            </button>
-          </div>
+          <button
+            :if={@splash_path}
+            type="button"
+            id="remove-splash"
+            phx-click="remove_splash"
+            class="control mt-3 rounded-lg px-4 py-2 text-sm"
+          >
+            Remove the picture
+          </button>
         </.form>
       </div>
     </.section>
@@ -908,6 +891,18 @@ defmodule MyHiFiWeb.SettingsLive do
     </button>
     """
   end
+
+  # **The browser sends the file to a temporary path, and this reads it there.**
+  # `MyHiFi.Artwork` writes the bytes to the cache, so the picture reaches the disk one
+  # time and the temporary file goes when this function answers.
+  @sobelow_skip ["Traversal.FileModule"]
+  defp splash_progress(:splash, %{done?: true} = entry, socket) do
+    bytes = consume_uploaded_entry(socket, entry, fn %{path: path} -> {:ok, File.read!(path)} end)
+
+    {:noreply, splash_answer(socket, Identity.put_splash(bytes))}
+  end
+
+  defp splash_progress(:splash, _entry, socket), do: {:noreply, socket}
 
   defp splash_answer(socket, :ok) do
     socket |> put_flash(:info, "Each screen shows that picture now.") |> refresh()

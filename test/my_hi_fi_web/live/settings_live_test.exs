@@ -142,9 +142,11 @@ defmodule MyHiFiWeb.SettingsLiveTest do
           %{name: "splash.png", content: @png, type: "image/png"}
         ])
 
-      assert render_upload(picture, "splash.png") =~ "splash.png"
-
-      html = view |> form("#splash-form") |> render_submit()
+      # The upload holds itself when the last byte lands, so no person presses
+      # anything. A control for that raised `cannot consume uploaded files when entries
+      # are still in progress` on a device, because a board reads 4 MB over Wi-Fi in
+      # more time than a person waits.
+      html = render_upload(picture, "splash.png")
 
       assert html =~ "Each screen shows that picture now."
       assert has_element?(view, "#splash")
@@ -155,6 +157,26 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       assert html =~ "The screen shows the name of the device now."
       assert has_element?(view, "#no-splash")
       assert Identity.splash_path() == nil
+    end
+
+    # This is the failure that a control gave: a press while the bytes were still
+    # arriving raised `cannot consume uploaded files when entries are still in
+    # progress`, and the LiveView went with it.
+    test "a picture that is still arriving is held by nothing yet", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/device")
+
+      picture =
+        file_input(view, "#splash-form", :splash, [
+          %{name: "splash.png", content: @png, type: "image/png"}
+        ])
+
+      html = render_upload(picture, "splash.png", 50)
+
+      refute html =~ "Each screen shows that picture now."
+      assert Identity.splash_path() == nil
+
+      assert render_upload(picture, "splash.png", 50) =~ "Each screen shows that picture now."
+      assert Identity.splash_path() != nil
     end
 
     # The browser refuses a type that the upload does not name, so this reads the answer
