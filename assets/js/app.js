@@ -25,8 +25,19 @@ import {accent} from "./accent"
 import {cover} from "./cover"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+// **The cost of missing this window is not a slow connect, it is a permanent one.**
+// Phoenix writes `phx:fallback:LongPoll` to `sessionStorage` when the socket never
+// passed a health check, and every connection of that tab then skips the websocket
+// without trying. A device that was busy for a moment therefore kept using long poll
+// after it was idle again.
+//
+// This device is the reason that the window is wide. It answers a browse page of a
+// library of thousands of albums while it plays a track, and a handshake against an
+// idle board on slow Wi-Fi was measured at 3.0 s and at 10.4 s on 2026-09-07. The cost
+// is that a browser which truly cannot open a websocket waits this long, once, before
+// the page answers a control.
 const liveSocket = new LiveSocket("/live", Socket, {
-  longPollFallbackMs: 2500,
+  longPollFallbackMs: 5000,
   params: {_csrf_token: csrfToken}
 })
 
