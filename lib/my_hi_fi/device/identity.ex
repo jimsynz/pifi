@@ -213,7 +213,9 @@ defmodule MyHiFi.Device.Identity do
   **A provisioner names the set, so one firmware carries the artwork of several
   products.** `myhifi_splash_name` of the firmware key store holds the name in front of
   the size, `fwup` writes that block when a person makes an SD card, and a build that
-  provisions nothing reads `pifi-320x240.png`.
+  provisions nothing reads `pifi-320x240.png`. `priv/splash` is the list of the sets
+  that this firmware holds, and a product that a person adds needs a file for each
+  screen and no code at all.
 
       iex> MyHiFi.Device.Identity.shipped_splash({7, 7})
       nil

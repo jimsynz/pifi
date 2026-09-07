@@ -231,15 +231,34 @@ defmodule MyHiFi.Device.IdentityTest do
       assert Identity.shipped_splash({128, 64}) == nil
     end
 
-    # A picture of another size would cost a scale for each draw, and one that a screen
-    # has to crop would lose the ends of the waveform.
-    test "each picture is the size of the screen that it belongs to" do
-      for {width, height} <- [{320, 240}, {240, 240}] do
-        path = Identity.shipped_splash({width, height})
+    # **A picture of another size would cost a scale for each draw**, and one that a
+    # screen has to crop would lose the ends of the artwork. This reads the directory
+    # rather than a list of the sizes, so the artwork of a product that ships later is
+    # measured as well.
+    test "each picture that ships is the size that its name claims" do
+      files = Path.wildcard(Path.join(Identity.splash_directory(), "*.png"))
+
+      refute files == [], "this firmware ships no picture at all"
+
+      for path <- files do
+        assert [_all, width, height] =
+                 Regex.run(~r/-(\d+)x(\d+)\.png$/, Path.basename(path)),
+               "#{path} does not name a size"
+
         {output, 0} = System.cmd("file", [path])
 
         assert output =~ "#{width} x #{height}", "#{path} is not #{width} by #{height}"
       end
+    end
+
+    # `podbox` is a portable podcast player, and the firmware of a generic audio player
+    # carries its artwork so that one image serves both. See `c:MyHiFi.Source.listing/1`
+    # for the other place that a product names what it holds.
+    test "a second product ships its artwork beside the first" do
+      KV.put("myhifi_splash_name", "podbox")
+
+      assert Path.basename(Identity.shipped_splash({240, 240})) == "podbox-240x240.png"
+      assert Path.basename(Identity.shipped_splash({320, 240})) == "podbox-320x240.png"
     end
   end
 
