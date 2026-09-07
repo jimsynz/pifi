@@ -10,6 +10,11 @@ defmodule MyHiFiWeb.BrowseLiveTest do
   alias MyHiFi.Test.PlayingPipeline
   alias MyHiFi.Test.Stations
 
+  # `render_async/1` waits `:assert_receive_timeout`, which is 100 ms, and `mix check`
+  # runs the suite beside credo and ex_doc. A read of a list on a machine under that
+  # load takes longer than that.
+  @async_wait :timer.seconds(5)
+
   @radio "/browse/internet-radio"
   @podcasts "/browse/podcasts"
 
@@ -23,12 +28,17 @@ defmodule MyHiFiWeb.BrowseLiveTest do
   defp open(view, name), do: view |> element("#entries button", name) |> render_click()
 
   # A render after the event, because a message of one process arrives in order: the
-  # page has read the event by the time that it answers. The sleep is for the task that
-  # Cinder reads a query in, which answers after the render that started it.
+  # page has read the event by the time that it answers.
   defp changed(view) do
     Event.publish(:source, %Event.Source.Changed{source: MyHiFi.Source.Podcasts, ref: :show})
     render(view)
-    Process.sleep(100)
+  end
+
+  # **Cinder reads its query in a task, so this waits for the count and it does not
+  # sleep for a period.** `mix check` runs the suite beside every other tool, and a
+  # fixed sleep on a machine under that load measures the load and not the firmware.
+  defp read_happened?(counter, attempts \\ 100) do
+    eventually(fn -> :counters.get(counter, 1) > 0 end, attempts)
   end
 
   defp standby(view, entered?) do
@@ -36,8 +46,9 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     render(view)
   end
 
-  # It counts the reads of the table that holds the rows of a list. Oban reads a table
-  # of its own while this runs, and no read of that one belongs to a list.
+  # It counts the reads of the table that holds the rows of a list, and it gives the
+  # counter to the caller so that a wait can watch it. Oban reads a table of its own
+  # while this runs, and no read of that one belongs to a list.
   defp reads(fun) do
     counter = :counters.new(1, [])
     handler = "reads-#{:erlang.unique_integer([:positive])}"
@@ -52,13 +63,24 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     )
 
     try do
-      fun.()
+      fun.(counter)
     after
       :telemetry.detach(handler)
     end
 
     :counters.get(counter, 1)
   end
+
+  defp eventually(check, attempts) when attempts > 0 do
+    if check.() do
+      true
+    else
+      Process.sleep(20)
+      eventually(check, attempts - 1)
+    end
+  end
+
+  defp eventually(_check, _attempts), do: false
 
   defp show(overrides \\ %{}) do
     PodcastFill.show(
@@ -369,7 +391,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     # Cinder reads the query in a task, so the render that follows the event is not the
     # one that holds the answer.
-    assert render_async(view) =~ "It arrived"
+    assert render_async(view, @async_wait) =~ "It arrived"
   end
 
   describe "a device in standby" do
@@ -387,17 +409,28 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       episode(created, %{title: "It arrived"})
 
-      assert reads(fn -> changed(view) end) > 0
-      assert render_async(view) =~ "It arrived"
+      # The control of the measurement: a page of a device that is awake reads the list
+      # again, so the count moves and the count means something.
+      assert reads(fn counter ->
+               changed(view)
+               read_happened?(counter)
+             end) > 0
+
+      assert render_async(view, @async_wait) =~ "It arrived"
 
       standby(view, true)
       episode(created, %{title: "And another"})
 
-      assert reads(fn -> changed(view) end) == 0
+      # Half a second is longer than the read of the control above, and the count stays
+      # at nothing.
+      assert reads(fn counter ->
+               changed(view)
+               read_happened?(counter, 25)
+             end) == 0
 
       standby(view, false)
 
-      assert render_async(view) =~ "And another"
+      assert render_async(view, @async_wait) =~ "And another"
     end
 
     # `MyHiFiWeb.BrowseLive` draws no collection while it says that this firmware holds
