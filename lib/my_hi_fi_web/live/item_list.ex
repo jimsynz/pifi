@@ -53,6 +53,10 @@ defmodule MyHiFiWeb.ItemList do
   `:source` names the source that the rows belong to, and `:collection_id` names the
   collection that a mark refreshes. A page that draws no collection holds `nil` there,
   and this hook then reads nothing.
+
+  `:opened` is the container that a person is inside, and a page that is inside none
+  holds `nil`. A mark on that container reads it again, so the head of it draws the
+  star that the person just pressed.
   """
 
   use MyHiFiWeb, :html
@@ -460,11 +464,21 @@ defmodule MyHiFiWeb.ItemList do
     """
   end
 
-  attr :row, :any, required: true
-
   # A station is a track that a person marks, and a show is a container that they
   # subscribe to. One control serves both, and an episode carries no mark of its own.
-  defp favourite(assigns) do
+  @doc """
+  The control that marks one item, or takes the mark away.
+
+  **A row draws it and so does the head of a collection.** A person who opened an album
+  and liked what they read marks it there, and they do not walk back up the tree to
+  reach the row that names it. See `MyHiFiWeb.BrowseLive`.
+
+  An episode draws none. An episode belongs to a show and a person marks the show, so
+  `markable?/1` answers for the kind of the item and not for the page that draws it.
+  """
+  attr :row, :any, required: true
+
+  def favourite(assigns) do
     ~H"""
     <button
       :if={markable?(@row)}
@@ -523,8 +537,8 @@ defmodule MyHiFiWeb.ItemList do
 
   defp event("favourite", %{"id" => id}, socket) do
     with {:ok, item} <- Playback.get_item(id),
-         {:ok, _item} <- mark(item) do
-      {:halt, Cinder.Refresh.refresh_table(socket, socket.assigns.collection_id)}
+         {:ok, marked} <- mark(item) do
+      {:halt, socket |> opened(marked) |> read_again()}
     else
       {:error, reason} ->
         {:halt, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
@@ -614,6 +628,16 @@ defmodule MyHiFiWeb.ItemList do
   end
 
   defp info(_message, socket), do: {:cont, socket}
+
+  # **A mark on the container that a person is inside redraws the head of it.** The
+  # control of that head marks the same item as a row does, and the page holds the item
+  # of it in an assign, so a mark that changed nothing there would draw a star that is
+  # empty on a container that a person just marked.
+  defp opened(%{assigns: %{opened: %{id: id}}} = socket, %{id: id} = marked) do
+    Phoenix.Component.assign(socket, :opened, Ash.load!(marked, :artwork))
+  end
+
+  defp opened(socket, _marked), do: socket
 
   # A page that draws no collection holds no identifier, and `MyHiFiWeb.BrowseLive`
   # draws none while it says that this firmware holds no source.

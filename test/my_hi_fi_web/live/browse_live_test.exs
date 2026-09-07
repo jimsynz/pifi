@@ -363,6 +363,58 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     end
   end
 
+  describe "the mark on the head of a collection" do
+    # **A person who opened an album and liked what they read marks it there**, and they
+    # do not walk back up the tree to reach the row that names it.
+    test "a show takes a mark while a person is inside it", %{conn: conn} do
+      created = show()
+      {:ok, created} = Playback.set_favourite(created)
+      other = show(%{feed_url: "https://example.test/other", title: "Night Shift"})
+
+      {:ok, view, _html} = live(conn, @podcasts)
+      open(view, "Subscriptions")
+      view |> element("button", "Road Work") |> render_click()
+
+      refute Playback.get_item!(other.id).favourite?
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/#{other.id}")
+
+      assert has_element?(view, "#favourite-#{other.id}[aria-pressed='false']")
+
+      view |> element("#favourite-#{other.id}") |> render_click()
+
+      # The head of the collection draws the star that the person pressed, and the read
+      # of the item says that the mark reached the card.
+      assert has_element?(view, "#favourite-#{other.id}[aria-pressed='true']")
+      assert Playback.get_item!(other.id).favourite?
+    end
+
+    test "the mark comes off the same way", %{conn: conn} do
+      created = show()
+      {:ok, created} = Playback.set_favourite(created)
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/#{created.id}")
+
+      assert has_element?(view, "#favourite-#{created.id}[aria-pressed='true']")
+
+      view |> element("#favourite-#{created.id}") |> render_click()
+
+      assert has_element?(view, "#favourite-#{created.id}[aria-pressed='false']")
+      refute Playback.get_item!(created.id).favourite?
+    end
+
+    # An episode belongs to a show, and a person marks the show.
+    test "an episode of a show draws no mark of its own", %{conn: conn} do
+      created = show()
+      {:ok, created} = Playback.set_favourite(created)
+      one = episode(created, %{title: "The first one"})
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/#{created.id}")
+
+      refute has_element?(view, "#favourite-#{one.id}")
+    end
+  end
+
   describe "the mark of a person" do
     test "a station takes a mark, and gives it back", %{conn: conn} do
       station = Stations.create(%{country_code: "NZ"})

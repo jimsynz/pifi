@@ -50,7 +50,7 @@ defmodule MyHiFiWeb.BrowseLive do
   alias MyHiFi.Playback.Item
   alias MyHiFi.Source
 
-  import MyHiFiWeb.ItemList, only: [row: 1, count: 1, cover: 1]
+  import MyHiFiWeb.ItemList, only: [row: 1, count: 1, cover: 1, favourite: 1]
 
   on_mount(MyHiFiWeb.ItemList)
 
@@ -379,16 +379,20 @@ defmodule MyHiFiWeb.BrowseLive do
         </p>
       </div>
 
-      <button
-        :if={@playable?}
-        type="button"
-        id="play-collection"
-        phx-click="play_collection"
-        aria-label={"Play #{@item.title}"}
-        class="control flex size-9 shrink-0 items-center justify-center rounded-full hover:text-accent"
-      >
-        <.icon name="hero-play-mini" class="size-4" />
-      </button>
+      <div class="flex shrink-0 items-center gap-1">
+        <.favourite row={@item} />
+
+        <button
+          :if={@playable?}
+          type="button"
+          id="play-collection"
+          phx-click="play_collection"
+          aria-label={"Play #{@item.title}"}
+          class="control flex size-9 shrink-0 items-center justify-center rounded-full hover:text-accent"
+        >
+          <.icon name="hero-play-mini" class="size-4" />
+        </button>
+      </div>
     </div>
     """
   end
