@@ -11,9 +11,20 @@ defmodule MyHiFiWeb.Router do
     plug(:protect_from_forgery)
     # The artwork cache serves each station logo from this device, so no page asks
     # another server for anything. See `MyHiFi.Artwork`.
+    #
+    # **`connect-src` names the two schemes of a socket, and `'self'` cannot do that
+    # work.** CSP Level 3 says that `'self'` matches `ws:` and `wss:` of the same host,
+    # and WebKit does not hold that rule, so Safari and every browser of iOS refused
+    # the LiveView socket while they drew the page. LiveView then used long poll after
+    # 2.5 seconds, so the interface worked and the socket never opened.
+    #
+    # A scheme and not a host: this device answers on its IP address and on more than
+    # one mDNS name, so no list of hosts can name them all. That is the reason that
+    # `check_origin` is `false` as well. See `config/target.exs`.
     plug(:put_secure_browser_headers, %{
       "content-security-policy" =>
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+        "default-src 'self'; connect-src 'self' ws: wss:; " <>
+          "img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     })
   end
 
