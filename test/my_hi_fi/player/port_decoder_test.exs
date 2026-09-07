@@ -40,6 +40,56 @@ defmodule MyHiFi.Player.PortDecoderTest do
         do: payload
   end
 
+  describe "the end of the input" do
+    # **This is the bug that left a track playing silence past its end.** The element
+    # closed its port and sent nothing, so the sink kept the card open and
+    # `MyHiFi.Player.Pipeline` never told the player to play the next track. A device
+    # held a FLAC track of 3:44 at 5:32 and counted on.
+    test "reaches the output, so the pipeline can end" do
+      {_actions, state} = feed([@flac_header <> "the samples"])
+
+      assert {[], state} = PortDecoder.handle_end_of_stream(:input, nil, %{state | port: :fake})
+      assert state.ending?
+
+      assert {[end_of_stream: :output], state} = PortDecoder.handle_info(:flush, nil, state)
+      assert state.port == nil
+    end
+
+    # The program answers while the element waits, so the wait starts again and the
+    # samples of that answer reach the output.
+    test "an answer of the program puts the wait off" do
+      {_actions, state} = feed([@flac_header <> "the samples"])
+
+      assert {[], state} = PortDecoder.handle_end_of_stream(:input, nil, %{state | port: :fake})
+
+      first = state.flush_timer
+
+      assert {actions, state} =
+               PortDecoder.handle_info({:fake, {:data, "more samples"}}, nil, state)
+
+      assert audio(actions) == "more samples"
+      assert state.flush_timer != first
+    end
+
+    # A track that plays holds no timer at all.
+    test "a program that answers while the track plays starts no wait" do
+      {_actions, state} = feed([@flac_header <> "the samples"])
+
+      assert {_actions, state} = PortDecoder.handle_info({nil, {:data, "more"}}, nil, state)
+
+      assert state.flush_timer == nil
+      refute state.ending?
+    end
+
+    # An element that holds no port has nothing to wait for.
+    test "a port that is already closed ends the stream at once" do
+      {_actions, state} = feed([@flac_header <> "the samples"])
+
+      assert {[end_of_stream: :output], _state} =
+               PortDecoder.handle_end_of_stream(:input, nil, state)
+    end
+  end
+
   describe "the header that each program writes" do
     test "reads the one from oggdec" do
       {actions, _state} = feed([@oggdec_header <> "the samples"])

@@ -34,6 +34,33 @@ defmodule MyHiFi.Player.PortDecoder do
   The program gives samples only as fast as it gets bytes, and the bytes come
   through the input pad of this element. The chain is therefore limited by the
   network, and no queue here can grow without a limit.
+
+  ## The end of a track, and the half close that Erlang does not hold
+
+  **The end of the input must reach the output, or the track never ends.** This
+  element closed the port and sent nothing when its input ended, so the sink kept its
+  card open, `aplay` played the queue and then silence, and
+  `MyHiFi.Player.Pipeline.handle_element_end_of_stream/4` never told the player to
+  play the next track. A device on 2026-09-07 held a FLAC track of 3:44 at 5:32 and
+  counted on. Every Jellyfin track of FLAC or of Ogg reached that state, and MP3 and
+  AAC never did, because Membrane holds a decoder for those two and it forwards the
+  end of a stream itself.
+
+  **The program cannot be told that its input ended.** A measurement on the device on
+  2026-09-07 fed a whole FLAC file to `flac --decode --stdout --silent -` and held the
+  pipe open for 20 seconds after the last byte: the program waited all 20 seconds and
+  then exited. So it ends when its standard input ends, and not at the end of the
+  stream that it reads. Erlang holds no half close for a port, and
+  `Port.close/1` ends the program and takes the output that it has not written yet.
+  The `exit_status` clause below therefore never answers a track that reached its end.
+
+  **This waits for the output to go quiet instead.** The end of the input starts a
+  timer of a quarter of a second, each answer of the program starts it again, and the
+  timer then closes the port and sends the end of the stream. A program that holds
+  nothing more gives nothing more, so this loses no sample that a person could hear.
+  The wait costs no time that a person waits either: the sink is playing the audio
+  that this element already gave it, and the end of the stream travels behind that
+  audio in the same queue.
   """
 
   use Membrane.Filter
@@ -53,6 +80,13 @@ defmodule MyHiFi.Player.PortDecoder do
     ]
   )
 
+  # **How long the program may be quiet before this element says that the track ended.**
+  # The programs of this firmware decode far faster than the sound plays: a FLAC file of
+  # 24 MB decoded in under a second on the board, so the output is quiet by the time
+  # that the input ends. A quarter of a second is therefore generous, and it is behind
+  # the audio of the sink in any case.
+  @flush_ms 250
+
   def_input_pad(:input, accepted_format: _any, flow_control: :auto)
 
   def_output_pad(:output, accepted_format: %RawAudio{}, flow_control: :auto)
@@ -65,10 +99,20 @@ defmodule MyHiFi.Player.PortDecoder do
             arguments: [String.t()],
             port: port() | nil,
             held: binary(),
-            format: RawAudio.t() | nil
+            format: RawAudio.t() | nil,
+            flush_timer: reference() | nil,
+            ending?: boolean()
           }
 
-    defstruct [:command, :arguments, :port, :format, held: <<>>]
+    defstruct [
+      :command,
+      :arguments,
+      :port,
+      :format,
+      :flush_timer,
+      held: <<>>,
+      ending?: false
+    ]
   end
 
   @impl true
@@ -101,7 +145,9 @@ defmodule MyHiFi.Player.PortDecoder do
   # after it.
   @impl true
   def handle_info({port, {:data, bytes}}, _ctx, %State{port: port} = state) do
-    read(state.held <> bytes, state)
+    {actions, state} = read(state.held <> bytes, state)
+
+    {actions, waiting(state)}
   end
 
   @impl true
@@ -110,15 +156,29 @@ defmodule MyHiFi.Player.PortDecoder do
     {[end_of_stream: :output], %State{state | port: nil}}
   end
 
+  # The program gave nothing for `@flush_ms`, so it holds nothing more and the track
+  # reached its end. See the module documentation for why this cannot wait for the
+  # program to exit.
+  @impl true
+  def handle_info(:flush, _ctx, %State{} = state) do
+    {[end_of_stream: :output], close(state)}
+  end
+
   @impl true
   def handle_info(message, _ctx, state) do
     Membrane.Logger.debug("Ignoring #{inspect(message)}")
     {[], state}
   end
 
+  # A port that is already closed holds nothing to wait for.
+  @impl true
+  def handle_end_of_stream(:input, _ctx, %State{port: nil} = state) do
+    {[end_of_stream: :output], state}
+  end
+
   @impl true
   def handle_end_of_stream(:input, _ctx, %State{} = state) do
-    {[], close(state)}
+    {[], waiting(%State{state | ending?: true})}
   end
 
   @impl true
@@ -206,11 +266,21 @@ defmodule MyHiFi.Player.PortDecoder do
     Port.open({:spawn_executable, program}, [:binary, :exit_status, args: state.arguments])
   end
 
+  # The timer runs while the input has ended and not before it, so a track that plays
+  # sets none of these.
+  defp waiting(%State{ending?: false} = state), do: state
+
+  defp waiting(%State{} = state) do
+    if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
+
+    %State{state | flush_timer: Process.send_after(self(), :flush, @flush_ms)}
+  end
+
   defp close(%State{port: nil} = state), do: state
 
   defp close(%State{port: port} = state) do
     if Port.info(port), do: Port.close(port)
 
-    %State{state | port: nil}
+    %State{state | port: nil, flush_timer: nil}
   end
 end
