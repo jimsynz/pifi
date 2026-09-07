@@ -2,6 +2,8 @@ defmodule MyHiFi.Source.JellyfinTest do
   use MyHiFi.DataCase, async: false
   use Oban.Testing, repo: MyHiFi.Repo
 
+  require Ash.Query
+
   alias MyHiFi.Jellyfin.Fill
   alias MyHiFi.Jellyfin.Server
   alias MyHiFi.Playback
@@ -61,6 +63,73 @@ defmodule MyHiFi.Source.JellyfinTest do
     Fill.tracks([attributes])
 
     one_of(attributes.ref)
+  end
+
+  describe "the order of the tracks of an album" do
+    # **A sort of two columns cannot hold this**, because `Cinder.QueryBuilder` unsets
+    # the sort of a query when a person presses a sort control and applies the one
+    # column that they pressed. A set of two discs read 1-01, 2-01, 1-02, 2-02 on a
+    # device. See the `place` calculation of `MyHiFi.Playback.Item`.
+    test "a set of two discs reads one disc after the other" do
+      album()
+
+      for {ref, disc, number} <- [
+            {"a-2-01", 2, 1},
+            {"a-1-02", 1, 2},
+            {"a-2-02", 2, 2},
+            {"a-1-01", 1, 1}
+          ] do
+        track(%{ref: ref, title: ref, number: number, disc: disc})
+      end
+
+      assert ~w(a-1-01 a-1-02 a-2-01 a-2-02) == titles_in_order()
+
+      # **This is the assertion that the device needed.** The sort above holds two
+      # columns, and Cinder throws away every column but the one that a person pressed,
+      # so the order must be right with that one alone.
+      assert ~w(a-1-01 a-1-02 a-2-01 a-2-02) == titles_by_control()
+    end
+
+    # An album of one disc names none, so the number alone decides.
+    test "an album of one disc reads by its track number" do
+      album()
+      track(%{ref: "one", title: "one", number: 1})
+      track(%{ref: "two", title: "two", number: 2})
+      track(%{ref: "ten", title: "ten", number: 10})
+
+      assert ~w(one two ten) == titles_in_order()
+    end
+
+    # A server that names no number leaves the place absent, and SQLite reads that as
+    # the smallest value, so such a track leads and the title decides between them.
+    test "a track with no number leads, and the title then decides" do
+      album()
+      track(%{ref: "numbered", title: "The numbered one", number: 2})
+      track(%{ref: "bare", title: "A bare one"})
+
+      assert ["A bare one", "The numbered one"] == titles_in_order()
+    end
+  end
+
+  # The read that a page makes: the items of the album, in the order that the source
+  # names for the items inside it.
+  defp titles_in_order, do: titles(Source.inside(Jellyfin, album()).sort)
+
+  # The read that a page makes after a person presses the sort control.
+  # `Cinder.QueryBuilder.apply_sorting/2` unsets the sort of the query and applies the
+  # one column that the control names, so this is the order that a device shows.
+  defp titles_by_control do
+    {_label, field} = Source.inside(Jellyfin, album()).order
+
+    titles([{String.to_existing_atom(field), :asc}])
+  end
+
+  defp titles(sort) do
+    MyHiFi.Playback.Item
+    |> Ash.Query.filter(parent_id == ^album().id)
+    |> Ash.Query.sort(sort)
+    |> Ash.read!()
+    |> Enum.map(& &1.title)
   end
 
   defp one_of(ref) do

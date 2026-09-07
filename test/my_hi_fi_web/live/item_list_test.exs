@@ -15,22 +15,22 @@ defmodule MyHiFiWeb.ItemListTest do
 
   defp item(attributes), do: struct(Item, attributes)
 
-  describe "place/1" do
+  describe "place_text/1" do
     test "a track of one disc reads as its number" do
-      assert ItemList.place(item(number: 7)) == "7"
+      assert ItemList.place_text(item(number: 7)) == "7"
     end
 
     # Track 1 of disc 2 comes after track 12 of disc 1, and the number alone cannot say
     # that.
     test "a track of a set names the disc" do
-      assert ItemList.place(item(number: 1, disc: 2)) == "2-01"
-      assert ItemList.place(item(number: 12, disc: 1)) == "1-12"
+      assert ItemList.place_text(item(number: 1, disc: 2)) == "2-01"
+      assert ItemList.place_text(item(number: 12, disc: 1)) == "1-12"
     end
 
     # A publisher that names no episode number gets none. See
     # `MyHiFi.Podcast.Feed.Parser`.
     test "an item with no place reads as nothing" do
-      assert ItemList.place(item(%{})) == nil
+      assert ItemList.place_text(item(%{})) == nil
     end
   end
 

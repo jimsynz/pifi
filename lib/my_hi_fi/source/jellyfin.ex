@@ -100,9 +100,12 @@ defmodule MyHiFi.Source.Jellyfin do
   fell through to the alphabet: a person opening *The Bones of What You Believe* read
   "By The Throat" first and "Broken Bones" third from last.
 
-  `disc` comes before `number`, or track 1 of disc 2 sorts beside track 1 of disc 1. A
-  server that names neither leaves both absent, SQLite reads an absent value as the
-  smallest one, and the title then decides.
+  **The order is one column and not two.** `place` of the item holds the disc and the
+  number as one number, because `Cinder.QueryBuilder` unsets the sort of a query when a
+  person presses a sort control and applies the one column that they pressed: a sort of
+  `[disc: :asc, number: :asc]` became `number` alone, and a set of two discs read 1-01,
+  2-01, 1-02, 2-02. A server that names neither number leaves `place` absent, SQLite
+  reads that as the smallest value, and the title then decides.
 
   An artist holds albums and not tracks, and an album row draws its own facts. The rows
   of both kinds read the same way here, because a person who opened either one wants
@@ -113,8 +116,8 @@ defmodule MyHiFi.Source.Jellyfin do
     %{
       number?: true,
       facts: [:subtitle, :duration_ms],
-      sort: [disc: :asc, number: :asc, title: :asc],
-      order: {"Track", "number"}
+      sort: [place: :asc, title: :asc],
+      order: {"Track", "place"}
     }
   end
 

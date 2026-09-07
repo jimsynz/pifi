@@ -233,8 +233,8 @@ defmodule MyHiFiWeb.ItemList do
           <.icon :if={is_nil(@status)} name="hero-play-mini" class="size-4" />
         </span>
 
-        <span :if={@number? and place(@row)} class="numerals w-9 shrink-0 text-right text-xs text-ink-faint">
-          {place(@row)}
+        <span :if={@number? and place_text(@row)} class="numerals w-9 shrink-0 text-right text-xs text-ink-faint">
+          {place_text(@row)}
         </span>
 
         <span class="min-w-0 grow">
@@ -347,28 +347,31 @@ defmodule MyHiFiWeb.ItemList do
   end
 
   @doc """
-  The place of one item inside its container, or `nil` for an item that holds none.
+  The place of one item inside its container, for a person to read.
+
+  It gives `nil` for an item that holds no place. `place` of `MyHiFi.Playback.Item` is
+  the same fact as one number, which is what a list sorts on.
 
   A set of more than one disc names the disc, because track 1 of disc 2 comes after
   track 12 of disc 1 and the number alone cannot say that.
 
-      iex> MyHiFi.Playback.Item |> struct(number: 1, disc: 1) |> MyHiFiWeb.ItemList.place()
+      iex> MyHiFi.Playback.Item |> struct(number: 1, disc: 1) |> MyHiFiWeb.ItemList.place_text()
       "1-01"
 
-      iex> MyHiFi.Playback.Item |> struct(number: 639) |> MyHiFiWeb.ItemList.place()
+      iex> MyHiFi.Playback.Item |> struct(number: 639) |> MyHiFiWeb.ItemList.place_text()
       "639"
 
-      iex> MyHiFi.Playback.Item |> struct(%{}) |> MyHiFiWeb.ItemList.place()
+      iex> MyHiFi.Playback.Item |> struct(%{}) |> MyHiFiWeb.ItemList.place_text()
       nil
   """
-  @spec place(map()) :: String.t() | nil
-  def place(%{disc: disc, number: number}) when is_integer(disc) and is_integer(number) do
+  @spec place_text(map()) :: String.t() | nil
+  def place_text(%{disc: disc, number: number}) when is_integer(disc) and is_integer(number) do
     "#{disc}-#{String.pad_leading(to_string(number), 2, "0")}"
   end
 
-  def place(%{number: number}) when is_integer(number), do: to_string(number)
+  def place_text(%{number: number}) when is_integer(number), do: to_string(number)
 
-  def place(_row), do: nil
+  def place_text(_row), do: nil
 
   @doc """
   One fact of a row, as a person reads it.

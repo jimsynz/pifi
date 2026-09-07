@@ -629,6 +629,27 @@ defmodule MyHiFi.Playback.Item do
       """
     end
 
+    calculate :place, :integer, expr((disc || 0) * 1000 + number) do
+      description """
+      The disc and the number of a track as one number, so one column sorts a set.
+
+      **A sort of two columns cannot do this work.** `Cinder.QueryBuilder` unsets the
+      sort of a query as soon as a person presses a sort control, and it applies the one
+      column that they pressed, so `[disc: :asc, number: :asc]` became `number` alone
+      and a set of two discs read 1-01, 2-01, 1-02, 2-02.
+
+      1000 is larger than the track count of any record. An album of one disc holds no
+      `disc`, so the number decides, and an item that holds no number gives nothing at
+      all: SQLite reads an absent value as the smallest, and such an item leads a list
+      whose other rows hold numbers.
+
+      `MyHiFiWeb.ItemList.place_text/1` draws the same fact for a person to read, as
+      `1-01`.
+      """
+
+      public? true
+    end
+
     calculate :audio_held?, :boolean, expr(not is_nil(audio_file.id)) do
       description """
       This device holds the audio of this item on the card.
