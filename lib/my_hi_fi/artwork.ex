@@ -118,7 +118,7 @@ defmodule MyHiFi.Artwork do
          true <- entry.content_type in @served_types,
          path = path(entry),
          true <- File.exists?(path) do
-      Cache.touch(entry)
+      Cache.used(entry)
       {:ok, path, entry.content_type, entry.checksum}
     else
       _other -> :error
@@ -348,7 +348,13 @@ defmodule MyHiFi.Artwork do
          variant when not is_nil(variant) <- existing_thumbnail(entry),
          variant_path = path(variant),
          true <- File.exists?(variant_path) do
-      Cache.touch(variant)
+      # **The picture is used as well, and not the thumbnail alone.** A destroy of an
+      # entry takes its variants with it, so an eviction that read the picture as cold
+      # would take the thumbnail that a screen is drawing at that moment. The lists and
+      # the screens of this firmware read thumbnails and almost never a picture, so
+      # every source would have looked cold for as long as the device ran.
+      Cache.used(entry)
+      Cache.used(variant)
       {:ok, variant_path, variant.content_type, variant.checksum}
     else
       _other -> :error

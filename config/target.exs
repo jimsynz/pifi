@@ -223,8 +223,20 @@ config :mdns_lite,
 # -4000 is 4 MB for each connection, and four connections make a ceiling of 16 MB. The
 # cost is that a read of a large table asks the card for more pages, and the card is
 # slower than memory.
+# **`busy_timeout` is what a writer waits for the lock of another writer.** exqlite
+# gives it 2000 ms, and a device that plays a track, writes 28 MB of it to the card,
+# prunes the job table and serves a list of pictures crosses that. Two of those failures
+# were measured on a device on 2026-09-07: `Oban.Pruner` stopped, and
+# `MyHiFi.Cache.Entry.put_file` threw away a podcast episode that had already arrived.
+#
+# 10 seconds, and not more, because an Ecto call gives up at 15 seconds by default. A
+# handler that waited longer than the caller would turn one error into another.
+#
+# **This does not take the place of writing less.** `MyHiFi.Cache.Touches` is what
+# removed 25 writes for each list that a person opens.
 config :my_hi_fi, MyHiFi.Repo,
   database: "/root/my_hi_fi.db",
+  busy_timeout: 10_000,
   cache_size: -4_000,
   pool_size: 4
 

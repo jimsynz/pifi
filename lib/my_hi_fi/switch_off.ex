@@ -47,7 +47,9 @@ defmodule MyHiFi.SwitchOff do
      leave a person holding a switch, so this gives up after
      #{:erlang.convert_time_unit(30_000, :millisecond, :second)} seconds and says that
      the device is not safe.
-  3. **Put the database on the card.** `PRAGMA wal_checkpoint(TRUNCATE)` folds the
+  3. **Put the database on the card.** `MyHiFi.Cache.Touches` writes the used marks
+     that it holds first, because a device that says that a hand may reach the switch
+     must hold nothing in memory. `PRAGMA wal_checkpoint(TRUNCATE)` then folds the
      write ahead log back into the file and empties it. The device holds
      `journal_mode` at `wal` and `synchronous` at `normal`, so a commit is durable at a
      checkpoint and not before one.
@@ -78,6 +80,7 @@ defmodule MyHiFi.SwitchOff do
   require Logger
 
   alias Ecto.Adapters.SQL
+  alias MyHiFi.Cache.Touches
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: Events
   alias MyHiFi.Event.Player
@@ -158,6 +161,10 @@ defmodule MyHiFi.SwitchOff do
 
     case drain(drain_ms) do
       :ok ->
+        # A buffer that holds used marks writes them before the log folds into the
+        # database, so a device that says this holds nothing in memory. See
+        # `MyHiFi.Cache.Touches`.
+        Touches.flush()
         checkpoint(:truncate)
         commit()
 

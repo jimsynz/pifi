@@ -226,7 +226,7 @@ defmodule MyHiFi.Player.Download do
   def handle_info(_message, %State{} = state), do: {:noreply, state}
 
   defp complete(entry) do
-    Cache.touch(entry)
+    Cache.used(entry)
     {:ok, %{paths: [Path.join(Cache.directory(), entry.key)], complete?: true}}
   end
 

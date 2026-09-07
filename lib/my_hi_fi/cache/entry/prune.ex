@@ -6,6 +6,9 @@ defmodule MyHiFi.Cache.Entry.Prune do
   purges them one at a time until the total is under the limit. `purge_blob` of
   `AshStorage` removes the file and the row together.
 
+  It flushes the used marks that `MyHiFi.Cache.Touches` holds before it reads, because
+  those marks are what the order below is made of.
+
   An entry that a caller marked with `keep?` stays, whatever its size and whatever
   its age. A cache that holds nothing else stays above the limit, and this reports
   that. The caller that marked those entries is the one that can release them, so
@@ -34,6 +37,11 @@ defmodule MyHiFi.Cache.Entry.Prune do
 
   @impl true
   def run(input, _options, _context) do
+    # **The used marks that a buffer holds decide this order, so they must be on the
+    # card before it reads.** A stale row could put the picture that a screen is drawing
+    # at the cold end of the list. See `MyHiFi.Cache.Touches`.
+    Cache.Touches.flush()
+
     limit = Cache.limit()
     target = Kernel.max(limit - input.arguments.want_bytes, 0)
     total = Cache.bytes()

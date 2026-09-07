@@ -20,6 +20,7 @@ defmodule MyHiFi.Cache do
   require Ash.Query
 
   alias MyHiFi.Cache.Entry
+  alias MyHiFi.Cache.Touches
 
   @directory "cache"
 
@@ -30,6 +31,11 @@ defmodule MyHiFi.Cache do
   # A test sets `:cache_limit` to a small number, so it can fill the cache and read
   # what the eviction does.
   @reserve_bytes 1024 * 1024 * 1024
+
+  # **How old a used mark must be before a read writes a new one.** The eviction cannot
+  # tell two entries of one hour apart, so a write inside that hour changes no answer
+  # and costs a card that must run for years. See `used/1`.
+  @touch_after_seconds 3600
 
   resources do
     resource MyHiFi.Cache.Entry do
@@ -51,6 +57,45 @@ defmodule MyHiFi.Cache do
       define :attachments_of, action: :for_record, args: [:record_type, :record_id]
       define :users_of, action: :for_entry, args: [:entry_id]
       define :detach, action: :destroy
+    end
+  end
+
+  @doc """
+  Note that something used one entry.
+
+  The eviction takes the entry that something used least recently, so each read of an
+  entry says that it happened. This is the door for that, and `touch/1` is the write
+  that it leads to.
+
+  **It writes nothing for a row that already says that it was used inside the hour.**
+  The eviction cannot tell two entries of one hour apart, so such a write changes no
+  answer and costs a card that must run for years. A page of the web interface reads
+  25 pictures, and a person who opens it again reads the same 25.
+
+  A mark that it does keep goes to `MyHiFi.Cache.Touches`, which holds it in memory and
+  writes it with the others. A firmware that runs no buffer writes the row at once.
+  """
+  @spec used(Entry.t()) :: :ok
+  def used(entry) do
+    if stale?(entry) and Touches.record(entry.id) == :none do
+      touch(entry)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Note that something used every entry that a query names.
+
+  `MyHiFi.Cache.Touches` writes its buffer with this, so one flush is one statement and
+  one acquisition of the write lock. Every row takes the same time, which is what a
+  least recently used order needs. See that module.
+  """
+  @spec touch_all(Ash.Query.t() | Ash.Resource.t()) :: :ok | {:error, term()}
+  def touch_all(query) do
+    case Ash.bulk_update(query, :touch, %{}, return_errors?: true, return_records?: false) do
+      %Ash.BulkResult{status: :success} -> :ok
+      %Ash.BulkResult{errors: errors} -> {:error, errors}
     end
   end
 
@@ -162,5 +207,21 @@ defmodule MyHiFi.Cache do
       nil -> Kernel.max(MyHiFi.Device.storage!().free_bytes - @reserve_bytes, 0)
       bytes -> bytes
     end
+  end
+
+  # An entry that a caller wrote a moment ago carries the time of that write, so a read
+  # of it needs no mark at all.
+  #
+  # A test sets `:cache_touch_after_seconds` to 0, so a read marks each time and the
+  # order of an eviction is what that test is about. Nothing sets it in production, in
+  # the way that nothing sets `:cache_limit`.
+  defp stale?(%{last_accessed_at: nil}), do: true
+
+  defp stale?(%{last_accessed_at: at}) do
+    DateTime.diff(DateTime.utc_now(), at, :second) >= touch_after_seconds()
+  end
+
+  defp touch_after_seconds do
+    Application.get_env(:my_hi_fi, :cache_touch_after_seconds, @touch_after_seconds)
   end
 end

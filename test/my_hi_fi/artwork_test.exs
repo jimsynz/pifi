@@ -41,6 +41,15 @@ defmodule MyHiFi.ArtworkTest do
     })
   end
 
+  # `MyHiFi.Cache.used/1` writes no row for an entry of the last hour, and a test of the
+  # order of an eviction writes each entry seconds apart. This makes every read mark the
+  # row, as a device does for a picture that a person has not seen for an hour.
+  defp mark_each_read do
+    Application.put_env(:my_hi_fi, :cache_touch_after_seconds, 0)
+
+    on_exit(fn -> Application.delete_env(:my_hi_fi, :cache_touch_after_seconds) end)
+  end
+
   defp stub(type, body) do
     Req.Test.stub(Artwork, fn conn ->
       conn
@@ -195,6 +204,7 @@ defmodule MyHiFi.ArtworkTest do
     end
 
     test "it notes that something used the entry, so the eviction can order them" do
+      mark_each_read()
       stub("image/png", @png)
       {:ok, name} = Artwork.fetch("https://station.test/logo.png")
       {:ok, before} = Cache.fetch("artwork", name)
@@ -204,6 +214,21 @@ defmodule MyHiFi.ArtworkTest do
 
       {:ok, after_serving} = Cache.fetch("artwork", name)
       assert DateTime.compare(after_serving.last_accessed_at, before.last_accessed_at) == :gt
+    end
+
+    # **A read of an entry that something used inside the hour writes no row.** The
+    # eviction cannot tell two entries of one hour apart, and one list of the web
+    # interface reads 25 pictures. See `MyHiFi.Cache.used/1`.
+    test "a picture that something used lately is read and not written" do
+      stub("image/png", @png)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.png")
+      {:ok, before} = Cache.fetch("artwork", name)
+
+      Process.sleep(5)
+      assert {:ok, _path, _type, _etag} = Artwork.serve(name)
+
+      {:ok, after_serving} = Cache.fetch("artwork", name)
+      assert after_serving.last_accessed_at == before.last_accessed_at
     end
 
     test "a name that could reach another file gives nothing" do
@@ -370,6 +395,7 @@ defmodule MyHiFi.ArtworkTest do
     end
 
     test "the picture that a person looked at lately stays" do
+      mark_each_read()
       stub("image/png", @png)
       {:ok, first} = Artwork.fetch("https://station.test/one.png")
       stub("image/gif", @gif)

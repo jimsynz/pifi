@@ -55,8 +55,7 @@ defmodule MyHiFi.Application do
   # happen.
   defp make_queue_table, do: Ash.read!(MyHiFi.Playback.Queue)
 
-  # **These listen to a topic and act on the player or on the card, and a test must start
-  # its own.**
+  # **These act on the player or on the card, and a test must start its own.**
   # Each one is named for the whole node, so a suite that ran them would give every test
   # a listener that it did not ask for: a test of the battery publishes a low cell, this
   # `MyHiFi.AutoStandby` puts the player in standby for it, and the next test then finds
@@ -64,11 +63,18 @@ defmodule MyHiFi.Application do
   #
   # A test that wants one starts it with `ExUnit.Callbacks.start_supervised/1`, which
   # gives one instance for that test and takes it away at the end of it.
+  #
+  # `MyHiFi.Cache.Touches` is here for a second reason. It writes from a process of its
+  # own, and the sandbox of Ecto gives the connection to the process of the test, so a
+  # write of another process needs permission that an async test cannot give. A test
+  # that runs no buffer writes each used mark at once, which is the behaviour that every
+  # test of the cache reads. See `MyHiFi.Cache.used/1`.
   if Mix.env() == :test do
     defp listening_children, do: []
   else
     # `MyHiFi.AutoStandby` reads the player, so it comes after it.
-    defp listening_children, do: [MyHiFi.AutoStandby, MyHiFi.DeviceUi, MyHiFi.SwitchOff]
+    defp listening_children,
+      do: [MyHiFi.AutoStandby, MyHiFi.Cache.Touches, MyHiFi.DeviceUi, MyHiFi.SwitchOff]
   end
 
   # See https://elixir.hexdocs.pm/Supervisor.html
