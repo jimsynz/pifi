@@ -28,12 +28,31 @@ defmodule MyHiFiWeb.Shell do
   already sends a new position to the browser in the same second. A peripheral of the
   device is a different matter, and `c:MyHiFi.Peripheral.subscriptions/0` keeps a knob
   asleep for this reason.
+
+  ## The automatic standby
+
+  **This hook also tells the firmware that a person is at a browser.** It publishes
+  `MyHiFi.Event.Input.PageUsed` for each event of each page, and `MyHiFi.AutoStandby`
+  starts its period again on it.
+
+  A control that reaches the player needs no help here, because the player publishes
+  what it did. A person who browses a source, opens a settings page, or types in the
+  search field reaches the player never, and a paused device therefore entered standby
+  while a person was reading its screen.
+
+  The `:handle_params` hook is what covers a page that a person loads and a link that
+  patches the address. It runs for the disconnected render as well, so the publish
+  reads `connected?/1` and a page load therefore sends one event and not two.
+  `MyHiFiWeb.PlayerLive` holds no such hook, because `MyHiFiWeb.Layouts` renders it
+  inside the page and LiveView allows `handle_params/3` at the root alone. Its
+  controls send `:handle_event` in the same way as every other page.
   """
 
   import Phoenix.Component
   import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1]
 
   alias MyHiFi.Event
+  alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
   alias MyHiFi.Source
@@ -51,7 +70,7 @@ defmodule MyHiFiWeb.Shell do
     assign(socket, :sources, sources)
   end
 
-  def on_mount(:default, _params, _session, socket) do
+  def on_mount(:default, params, _session, socket) do
     if connected?(socket), do: Event.subscribe(:player)
 
     socket =
@@ -60,6 +79,8 @@ defmodule MyHiFiWeb.Shell do
       |> assign(:current_source, nil)
       |> assign(:standby?, Playback.state!().standby?)
       |> attach_hook(:standby, :handle_info, &standby/2)
+      |> attach_hook(:page_used, :handle_event, &page_used/3)
+      |> attach_page_moved(params)
 
     {:cont, socket}
   end
@@ -72,4 +93,29 @@ defmodule MyHiFiWeb.Shell do
   end
 
   defp standby(_message, socket), do: {:cont, socket}
+
+  # **A child LiveView cannot hold a `:handle_params` hook**, and an attach on one
+  # raises. The params of a mount say which kind this is: LiveView gives
+  # `:not_mounted_at_router` to `MyHiFiWeb.PlayerLive`, which `MyHiFiWeb.Layouts`
+  # renders inside each page.
+  defp attach_page_moved(socket, :not_mounted_at_router), do: socket
+
+  defp attach_page_moved(socket, _params),
+    do: attach_hook(socket, :page_moved, :handle_params, &page_moved/3)
+
+  defp page_used(_event, _params, socket) do
+    publish_page_used(socket)
+
+    {:cont, socket}
+  end
+
+  defp page_moved(_params, _uri, socket) do
+    if connected?(socket), do: publish_page_used(socket)
+
+    {:cont, socket}
+  end
+
+  defp publish_page_used(socket) do
+    Event.publish(:input, %Input.PageUsed{page: socket.view})
+  end
 end

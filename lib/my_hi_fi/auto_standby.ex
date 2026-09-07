@@ -24,6 +24,11 @@ defmodule MyHiFi.AutoStandby do
   person who presses a button touched the device, and what the press achieved does not
   matter here.
 
+  **A person at a browser reaches the player never on most pages**, and the period ran
+  out while they read a list. `MyHiFiWeb.Shell` therefore publishes
+  `MyHiFi.Event.Input.PageUsed` for each event of each page, and that event starts the
+  period again as a press of a button does.
+
   ## Why this is a process of its own
 
   `MyHiFi.Player` holds the standby state already, so the timer looks like it belongs
@@ -152,6 +157,7 @@ defmodule MyHiFi.AutoStandby do
   def handle_info(%Events.Standby{}, state), do: {:noreply, reschedule(state)}
 
   def handle_info(%Input.ButtonPressed{}, state), do: {:noreply, reschedule(state)}
+  def handle_info(%Input.PageUsed{}, state), do: {:noreply, reschedule(state)}
 
   # **A cell that reaches the low point puts the device in standby**, because this device
   # cannot turn its own power off and a person who reads nothing loses what the card

@@ -95,6 +95,23 @@ defmodule MyHiFi.AutoStandbyTest do
       assert Process.alive?(pid)
       assert_receive %Player.Standby{entered?: true}, 5000
     end
+
+    test "a person who uses a web page starts the period again" do
+      pid = start_timer()
+
+      # A person who browses a list reaches the player never, so the page is what says
+      # that they are there. See `MyHiFiWeb.Shell`.
+      Enum.each(1..20, fn _ ->
+        Event.publish(:input, %Input.PageUsed{page: MyHiFiWeb.BrowseLive})
+
+        Process.sleep(10)
+      end)
+
+      refute_receive %Player.Standby{}, 100
+
+      assert Process.alive?(pid)
+      assert_receive %Player.Standby{entered?: true}, 5000
+    end
   end
 
   # This device cannot turn its own power off, so a cell that reaches the low point is
