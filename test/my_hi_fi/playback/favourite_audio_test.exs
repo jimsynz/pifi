@@ -244,14 +244,32 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
       assert FavouriteAudio.read(show()) == 0
     end
 
-    test "the job of a show cancels itself, because no episode of it can read" do
+    # **A subscription asks for no job at all.** An episode keeps its place, so
+    # `caches_audio?` is false for a show, and a job for it read the `where` of the
+    # trigger again when it ran and cancelled itself. The work was correct and it read
+    # as a fault: an error in the log and a cancelled job in the table for every
+    # subscription a person made.
+    test "marking a show puts no job in the queue" do
       Req.Test.stub(Download, fn _conn -> raise "the network must not be read" end)
       item = show()
 
-      {:ok, _item} = Playback.set_favourite(item)
+      {:ok, marked} = Playback.set_favourite(item)
 
-      assert_enqueued(worker: @worker)
-      assert %{cancelled: 1, success: 0} = Oban.drain_queue(queue: :default)
+      assert marked.favourite? == true
+      refute_enqueued(worker: @worker)
+      assert %{cancelled: 0, success: 0} = Oban.drain_queue(queue: :default)
+    end
+
+    test "marking one episode by itself puts no job in the queue either" do
+      Req.Test.stub(Download, fn _conn -> raise "the network must not be read" end)
+      show()
+
+      episode =
+        Enum.find(Playback.list_items!(), &(&1.source == "podcasts" and &1.kind == :track))
+
+      {:ok, _marked} = Playback.set_favourite(episode)
+
+      refute_enqueued(worker: @worker)
     end
 
     test "marking one episode by itself reads nothing either" do

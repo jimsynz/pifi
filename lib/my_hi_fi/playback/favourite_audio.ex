@@ -130,10 +130,18 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   It puts a job in the queue and answers at once, because a person pressed a
   control. A queue that refuses the job leaves the audio for the next run of
   `MyHiFi.Jellyfin.Sync.Favourites`, so this raises nothing.
+
+  **An item that holds no audio to read asks for nothing.** A person who subscribes to
+  a show marks a container of episodes, and an episode keeps its place, so
+  `caches_audio?` is false for it. A job for such an item cancelled itself with
+  `:trigger_no_longer_applies` when it ran, because AshOban reads the `where` of the
+  trigger again at that moment. The work was correct and it read as a fault: a line of
+  an error in the log and a cancelled job in the table for every subscription. The one
+  read here costs a query on a control that already writes a row.
   """
   @spec ask(Item.t()) :: :ok
   def ask(item) do
-    AshOban.run_trigger(item, :cache_audio)
+    if holds_audio?(item), do: AshOban.run_trigger(item, :cache_audio)
 
     :ok
   rescue
@@ -186,6 +194,16 @@ defmodule MyHiFi.Playback.FavouriteAudio do
     case held_by(item) do
       [] -> item |> containers() |> Enum.flat_map(&held_by/1)
       tracks -> tracks
+    end
+  end
+
+  # The calculation is the one rule, and this asks it about one item. A read that fails
+  # gives `true`, so the job runs and the trigger of it decides: a queued job that
+  # cancels itself is better than audio that a person marked and never got.
+  defp holds_audio?(item) do
+    case Ash.load(item, :caches_audio?) do
+      {:ok, %{caches_audio?: holds?}} -> holds?
+      {:error, _reason} -> true
     end
   end
 
