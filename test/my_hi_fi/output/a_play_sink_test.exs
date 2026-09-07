@@ -1,6 +1,15 @@
 defmodule MyHiFi.Output.APlaySinkTest do
-  use ExUnit.Case, async: true
+  @moduledoc """
+  The sink that writes the samples.
 
+  **`MyHiFi.Output.APlayPort` is one process for the whole node**, and the silence of a
+  stop reaches the program through it, so this file cannot run beside another that holds
+  that port.
+  """
+
+  use ExUnit.Case, async: false
+
+  alias MyHiFi.Output.APlayPort
   alias MyHiFi.Output.APlaySink
   alias MyHiFi.Output.APlaySink.State
 
@@ -73,8 +82,10 @@ defmodule MyHiFi.Output.APlaySinkTest do
   end
 
   describe "the silence that a stop asks for" do
-    test "it closes the program, so the room is quiet at once" do
-      port = Port.open({:spawn, "cat"}, [:binary])
+    test "it ends the program, so the room is quiet at once" do
+      # The holder owns the port, so the silence reaches the program through it.
+      {:ok, port} = APlayPort.hold("cat", [])
+      on_exit(fn -> APlayPort.close() end)
       state = %State{device: "null", port: port, sounded?: true}
 
       assert {[], state} = APlaySink.handle_parent_notification(:silence, nil, state)
@@ -82,6 +93,7 @@ defmodule MyHiFi.Output.APlaySinkTest do
       assert state.port == nil
       assert state.silent?
       refute Port.info(port)
+      assert APlayPort.held() == nil
     end
 
     test "a buffer after that goes nowhere, and it raises nothing" do
@@ -116,19 +128,52 @@ defmodule MyHiFi.Output.APlaySinkTest do
     end
   end
 
-  describe "handle_info" do
-    test "a program that stopped ends the pipeline" do
-      port = Port.open({:spawn, "cat"}, [:binary])
-      state = %State{device: "null", port: port}
+  describe "the end of a track" do
+    # **The program plays on.** ALSA holds about half a second, and the holder keeps the
+    # card open, so that half second sounds and the next pipeline writes to the same
+    # port. Ending the program here cut the last half second of every track.
+    test "it ends no program, so the last half second sounds" do
+      {:ok, port} = APlayPort.hold("cat", [])
+      on_exit(fn -> APlayPort.close() end)
+      state = %State{device: "null", port: port, sounded?: true}
 
-      assert {[terminate: :normal], state} =
-               APlaySink.handle_info({port, {:exit_status, 1}}, nil, state)
+      assert {[], state} = APlaySink.handle_end_of_stream(:input, nil, state)
 
       assert state.port == nil
-
-      Port.close(port)
+      assert Port.info(port)
+      assert APlayPort.held() == {"cat", []}
     end
 
+    # A person who stopped already got their silence, so a pipeline that goes ends
+    # nothing either.
+    test "a pipeline that stops ends no program" do
+      {:ok, port} = APlayPort.hold("cat", [])
+      on_exit(fn -> APlayPort.close() end)
+      state = %State{device: "null", port: port}
+
+      assert {[terminate: :normal], state} = APlaySink.handle_terminate_request(nil, state)
+
+      assert state.port == nil
+      assert Port.info(port)
+    end
+  end
+
+  describe "a program that is gone" do
+    # The holder reads the exit of the program and holds the reason. This element ends
+    # the pipeline, and `MyHiFi.Player` starts the stream again.
+    test "a write to a port that went ends the pipeline" do
+      port = Port.open({:spawn, "cat"}, [:binary])
+      Port.close(port)
+      state = %State{device: "null", port: port, sounded?: true}
+      buffer = %Membrane.Buffer{payload: "samples for a program that is gone"}
+
+      assert {[terminate: :normal], state} = APlaySink.handle_buffer(:input, buffer, nil, state)
+
+      assert state.port == nil
+    end
+  end
+
+  describe "handle_info" do
     test "another message changes nothing" do
       state = %State{device: "null"}
 

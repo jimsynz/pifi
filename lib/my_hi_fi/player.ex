@@ -20,8 +20,10 @@ defmodule MyHiFi.Player do
   of its own.
 
   A skip keeps the pipeline. It moves the byte that `MyHiFi.Player.FileSource` reads,
-  because a start of a pipeline opens the sound card again and holds a silence of about
-  one second. See `MyHiFi.Player.Skip`.
+  because a pipeline holds the decoder and the buffer of a stream, and a start of one
+  reads the network again. `MyHiFi.Output.APlayPort` holds the sound card across a
+  pipeline now, so a start no longer opens the card unless the format of the audio
+  changed. See `MyHiFi.Player.Skip`.
 
   Next and previous move the mark of `MyHiFi.Playback.Queue`, which holds the order
   that a person saw. A track that reaches its end moves the mark as well, and the row
@@ -848,12 +850,16 @@ defmodule MyHiFi.Player do
 
   defp stop_pipeline(%State{pipeline: nil} = state), do: state
 
-  # This waits for the old pipeline, and the wait is what makes a change of
-  # station work. The sink holds `aplay`, and `aplay` holds the sound card. A
-  # pipeline that starts while the old one still runs therefore finds the card
-  # busy, its `aplay` stops at once, the sink breaks with `:epipe`, and the new
-  # pipeline dies. The player then starts a third one 2 seconds later, so a person
-  # hears the station after a wait and sees the buffering state twice.
+  # **This waits for the old pipeline, and the wait is what makes a change of track
+  # work.** `MyHiFi.Output.APlayPort` holds one port, and two sinks that write to it at
+  # once interleave their samples into noise. The order here is what stops that: the old
+  # pipeline is gone before `advance/1` builds the next one.
+  #
+  # The wait began as the answer to another fault, and that one is gone. Each pipeline
+  # opened `aplay` of its own then, so a pipeline that started while the old one still
+  # ran found the card busy, its `aplay` stopped at once, the sink broke with `:epipe`,
+  # and the new pipeline died. The player started a third one 2 seconds later, so a
+  # person heard the station after a wait and saw the buffering state twice.
   #
   # The monitor goes first. Without that step this stop reaches `handle_info/2`
   # as the fault of a pipeline that no person stopped, and the player then starts

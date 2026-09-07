@@ -3,23 +3,33 @@ defmodule MyHiFi.Output.APlaySink do
   A Membrane sink that plays raw audio through `aplay`.
 
   The Nerves system holds `alsa-lib`, `aplay` and `amixer`, and no other audio
-  software. `membrane_alsa_plugin` does not exist, so this sink starts `aplay` in
-  an Erlang port and writes the samples to it.
+  software. `membrane_alsa_plugin` does not exist, so this sink writes the samples to
+  `aplay` through an Erlang port.
 
-  `busy_limits_port` is what gives the pacing. `aplay` reads at the rate of the
-  clock of the DAC, and with that option `Port.command/2` blocks this element once
-  the queue of the port holds `@busy_limits` bytes. The demand of Membrane then
-  stops reaching the decoder, and the whole pipeline runs at the speed of the
-  hardware.
-
-  **Without the option the queue of a port has no limit.** `Port.command/2` never
-  blocks, so nothing pushed back and the pipeline ran ahead of the sound. A read on
-  2026-08-24 measured the reader of the file 31 seconds in front of what a person
-  heard, which put a resume 31 seconds past the place that they stopped at. A live
-  stream hid this, because the network paced it instead.
+  `busy_limits_port` is what gives the pacing. `aplay` reads at the rate of the clock
+  of the DAC, and with that option `Port.command/2` blocks this element once the queue
+  of the port is full. The demand of Membrane then stops reaching the decoder, and the
+  whole pipeline runs at the speed of the hardware.
+  `MyHiFi.Output.APlayPort` holds the limits and the measurement that decided them.
 
   `aplay` starts again when the stream format changes, because the format is on
   the command line and not in the stream.
+
+  ## The program outlives this element
+
+  **`MyHiFi.Output.APlayPort` owns the port, and this element borrows it.** A start of
+  `aplay` opens the sound card and holds a silence of about one second, so a program of
+  its own for each pipeline gave a person a gap between one track and the next, and it
+  cut the half second that ALSA still held at the end of every track.
+
+  This element therefore asks that process for the program that its format needs,
+  writes the samples to what it gets, and **writes nothing more when its input ends**.
+  The card stays open, the queue plays out, and the next pipeline writes to the same
+  port. A person who stops, pauses or asks for standby gets `:silence`, and that ends
+  the program at once.
+
+  A process that does not own a port may write to it, and the busy limits of that
+  process still suspend whoever writes, so the pacing above is unchanged.
   """
 
   use Membrane.Sink
@@ -27,16 +37,7 @@ defmodule MyHiFi.Output.APlaySink do
   require Membrane.Logger
 
   alias Membrane.RawAudio
-
-  # How many bytes of samples may wait in the queue of the port. `Port.command/2`
-  # blocks above the high mark and it runs again below the low one, so this is the
-  # lead that the pipeline may hold over the sound. 44100 Hz of `s24le` stereo is
-  # 264,600 bytes each second, so 128 KB is under half a second and 32 KB is about a
-  # tenth of one.
-  #
-  # This is what makes `position_bytes` of an episode name the place that a person
-  # heard. See the module documentation.
-  @busy_limits {32 * 1024, 128 * 1024}
+  alias MyHiFi.Output.APlayPort
 
   def_options(
     device: [
@@ -91,7 +92,13 @@ defmodule MyHiFi.Output.APlaySink do
         "#{format.sample_format} to #{state.device}"
     )
 
-    {[], %State{state | port: start_aplay(state, format), format: format}}
+    case APlayPort.hold(program(), arguments(state, format)) do
+      {:ok, port} ->
+        {[], %State{state | port: port, format: format}}
+
+      {:error, reason} ->
+        raise "Could not start aplay: #{inspect(reason)}"
+    end
   end
 
   # The first buffer that reaches this sink is the moment that sound starts, and
@@ -101,49 +108,57 @@ defmodule MyHiFi.Output.APlaySink do
   @impl true
   def handle_buffer(:input, buffer, _ctx, %State{port: port, sounded?: false} = state)
       when is_port(port) do
-    Port.command(port, buffer.payload)
-    {[notify_parent: :playing], %State{state | sounded?: true}}
+    case write(port, buffer.payload) do
+      :ok -> {[notify_parent: :playing], %State{state | sounded?: true}}
+      :closed -> stopped(state)
+    end
   end
 
   @impl true
   def handle_buffer(:input, buffer, _ctx, %State{port: port} = state) when is_port(port) do
-    Port.command(port, buffer.payload)
-    {[], state}
+    case write(port, buffer.payload) do
+      :ok -> {[], state}
+      :closed -> stopped(state)
+    end
   end
 
-  # **This is the null sink.** No port means no sound, and the samples go nowhere.
-  # A stop closes the port at once and the pipeline stops in its own time, so a
-  # person hears silence as soon as they ask for it. See `MyHiFi.Player`.
+  # **This is the null sink.** No port means no sound, and the samples go nowhere. A
+  # stop ends the program at once and the pipeline stops in its own time, so a person
+  # hears silence as soon as they ask for it. See `MyHiFi.Player`.
   @impl true
   def handle_buffer(:input, _buffer, _ctx, %State{port: nil} = state) do
     {[], state}
   end
 
+  # **The end of a track ends no program.** ALSA holds about half a second of sound and
+  # `MyHiFi.Output.APlayPort` keeps the card open, so that half second plays and the
+  # pipeline of the next track writes to the same port. This element only stops writing.
   @impl true
   def handle_end_of_stream(:input, _ctx, %State{} = state) do
-    {[], close_port(state)}
+    {[], %State{state | port: nil}}
   end
 
   @doc """
   Stop the sound now, and let the pipeline stop later.
 
   `aplay` holds the sound card and it reads at the rate of the clock of the DAC, so
-  closing the port is what makes the room quiet. A measurement on 2026-08-21 gave 35
-  to 245 ms from a stop to silence.
+  ending the program is what makes the room quiet. `MyHiFi.Output.APlayPort.close/0`
+  does that, and a measurement on 2026-08-21 gave 35 to 245 ms from a stop to silence.
   """
   @impl true
+  def handle_parent_notification(:silence, _ctx, %State{port: nil} = state) do
+    {[], %State{state | silent?: true}}
+  end
+
+  @impl true
   def handle_parent_notification(:silence, _ctx, %State{} = state) do
-    {[], %State{close_port(state) | silent?: true}}
+    APlayPort.close()
+
+    {[], %State{state | port: nil, format: nil, silent?: true}}
   end
 
   @impl true
   def handle_parent_notification(_notification, _ctx, %State{} = state), do: {[], state}
-
-  @impl true
-  def handle_info({port, {:exit_status, status}}, _ctx, %State{port: port} = state) do
-    Membrane.Logger.error("aplay stopped with status #{status}")
-    {[terminate: :normal], %State{state | port: nil}}
-  end
 
   @impl true
   def handle_info(message, _ctx, state) do
@@ -151,15 +166,24 @@ defmodule MyHiFi.Output.APlaySink do
     {[], state}
   end
 
+  # The port belongs to `MyHiFi.Output.APlayPort` and the next pipeline wants it, so
+  # this ends nothing. A person who asked for silence already got it above.
   @impl true
   def handle_terminate_request(_ctx, %State{} = state) do
-    {[terminate: :normal], close_port(state)}
+    {[terminate: :normal], %State{state | port: nil}}
   end
 
-  defp start_aplay(%State{} = state, format) do
-    state = close_port(state)
+  @doc """
+  The command line that one format needs.
 
-    arguments = [
+  **`MyHiFi.Output.APlayPort` holds one port for one of these**, so this list is the
+  name of the sound as well as the way to make it: two tracks of one rate give the same
+  list and one program, and a track of another rate gives another list and another
+  program.
+  """
+  @spec arguments(State.t(), RawAudio.t()) :: [String.t()]
+  def arguments(%State{} = state, format) do
+    [
       "--device=#{state.device}",
       "--format=#{alsa_format(format.sample_format)}",
       "--rate=#{format.sample_rate}",
@@ -168,42 +192,28 @@ defmodule MyHiFi.Output.APlaySink do
       "--quiet",
       "-"
     ]
-
-    Port.open({:spawn_executable, aplay()}, [
-      :binary,
-      :exit_status,
-      {:busy_limits_port, @busy_limits},
-      args: arguments
-    ])
   end
 
-  defp close_port(%State{port: nil} = state), do: state
+  # A test names another program with `:aplay_command`. Nothing sets it in production,
+  # and the Nerves system gives `aplay`.
+  defp program, do: Application.get_env(:my_hi_fi, :aplay_command, "aplay")
 
-  defp close_port(%State{port: port} = state) do
-    # Closing the port alone is not enough. `aplay` then sees the end of its
-    # input, and it plays what it already holds before it stops. ALSA holds about
-    # half a second, and the pipeline sends more while it shuts down, so a person
-    # who presses stop waits several seconds for silence.
-    #
-    # Ending the program stops the sound at once. A person who wants to stop wants
-    # to stop.
-    stop_aplay(port)
+  # **A program that went takes its port with it, and a write to a port that is gone
+  # raises.** `MyHiFi.Output.APlayPort` reads the exit of the program and holds the
+  # reason, so this element ends the pipeline and `MyHiFi.Player` starts the stream
+  # again.
+  defp write(port, payload) do
+    Port.command(port, payload)
 
-    if Port.info(port), do: Port.close(port)
-
-    %State{state | port: nil, format: nil}
+    :ok
+  rescue
+    ArgumentError -> :closed
   end
 
-  defp stop_aplay(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, os_pid} -> System.cmd("kill", ["-TERM", to_string(os_pid)])
-      nil -> :ok
-    end
-  end
+  defp stopped(%State{} = state) do
+    Membrane.Logger.error("aplay is gone, so this pipeline ends.")
 
-  defp aplay do
-    System.find_executable("aplay") ||
-      raise "aplay is not on the PATH. The Nerves system gives it, and a host needs alsa-utils."
+    {[terminate: :normal], %State{state | port: nil, format: nil}}
   end
 
   @doc """

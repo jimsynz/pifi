@@ -28,6 +28,10 @@ defmodule MyHiFi.Application do
         {Phoenix.PubSub, [name: MyHiFi.PubSub]},
         {Registry, keys: :unique, name: Download.Registry},
         {DynamicSupervisor, strategy: :one_for_one, name: Download.Supervisor},
+        # It holds `aplay` across more than one pipeline, so it comes before the player
+        # and it outlives every pipeline that the player builds. See
+        # `MyHiFi.Output.APlayPort`.
+        MyHiFi.Output.APlayPort,
         MyHiFi.Player,
         MyHiFi.Peripheral.Supervisor,
         MyHiFiWeb.Endpoint
