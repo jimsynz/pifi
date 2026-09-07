@@ -3,6 +3,7 @@ defmodule MyHiFiWeb.SearchLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias MyHiFi.Event
   alias MyHiFi.Playback
   alias MyHiFi.Podcast.Fill, as: PodcastFill
   alias MyHiFi.Source
@@ -53,6 +54,22 @@ defmodule MyHiFiWeb.SearchLiveTest do
 
       refute list(view) =~ "Newstalk ZB"
       assert list(view) =~ "Nothing matches that."
+    end
+
+    # `MyHiFiWeb.ItemList` holds the subscription and the read, so this page names
+    # neither one. See that module.
+    test "the list reads again when a source says that it changed", %{conn: conn} do
+      Stations.create(%{title: "Newstalk ZB"})
+
+      {:ok, view, _html} = live(conn, ~p"/search/#{@radio}?search=newstalk")
+
+      assert list(view) =~ "Newstalk ZB"
+      refute list(view) =~ "Newstalk ZB Wellington"
+
+      Stations.create(%{title: "Newstalk ZB Wellington"})
+      Event.publish(:source, %Event.Source.Changed{source: Source.InternetRadio, ref: :station})
+
+      assert render_async(view) =~ "Newstalk ZB Wellington"
     end
 
     test "a station of another source is not in the list", %{conn: conn} do

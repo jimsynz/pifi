@@ -45,7 +45,6 @@ defmodule MyHiFiWeb.BrowseLive do
   require Ash.Query
 
   alias MyHiFi.Artwork
-  alias MyHiFi.Event
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Facet
   alias MyHiFi.Playback.Item
@@ -59,8 +58,6 @@ defmodule MyHiFiWeb.BrowseLive do
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Event.subscribe(:source)
-
     {:ok,
      socket
      |> assign(:page_title, "Browse")
@@ -69,6 +66,7 @@ defmodule MyHiFiWeb.BrowseLive do
      |> assign(:opened, nil)
      |> assign(:tracks_only?, false)
      |> assign(:list_query, nil)
+     |> assign(:collection_id, nil)
      |> assign(:url_state, nil)}
   end
 
@@ -153,15 +151,9 @@ defmodule MyHiFiWeb.BrowseLive do
   # Cinder gives the query that it read, with the sort and the filters of the person on
   # it. `MyHiFiWeb.ItemList` reads it when a person presses play, so the list that they
   # see goes in the queue.
+  @impl Phoenix.LiveView
   def handle_info({:list_query, %{query: query}}, socket) do
     {:noreply, assign(socket, :list_query, query)}
-  end
-
-  # A source reads a service behind the page, so what a container holds can change
-  # while a person looks at it. Cinder reads the query again.
-  @impl Phoenix.LiveView
-  def handle_info(%Event.Source.Changed{}, socket) do
-    {:noreply, Cinder.Refresh.refresh_table(socket, socket.assigns.collection_id)}
   end
 
   # This is the clause that `use Cinder.UrlSync` writes. This page writes it out,

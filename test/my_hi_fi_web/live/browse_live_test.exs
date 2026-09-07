@@ -22,6 +22,44 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   defp open(view, name), do: view |> element("#entries button", name) |> render_click()
 
+  # A render after the event, because a message of one process arrives in order: the
+  # page has read the event by the time that it answers. The sleep is for the task that
+  # Cinder reads a query in, which answers after the render that started it.
+  defp changed(view) do
+    Event.publish(:source, %Event.Source.Changed{source: MyHiFi.Source.Podcasts, ref: :show})
+    render(view)
+    Process.sleep(100)
+  end
+
+  defp standby(view, entered?) do
+    Event.publish(:player, %Events.Standby{entered?: entered?})
+    render(view)
+  end
+
+  # It counts the reads of the table that holds the rows of a list. Oban reads a table
+  # of its own while this runs, and no read of that one belongs to a list.
+  defp reads(fun) do
+    counter = :counters.new(1, [])
+    handler = "reads-#{:erlang.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:my_hi_fi, :repo, :query],
+      fn _event, _measurements, metadata, _config ->
+        if metadata[:source] == "playback_items", do: :counters.add(counter, 1, 1)
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
+
+    :counters.get(counter, 1)
+  end
+
   defp show(overrides \\ %{}) do
     PodcastFill.show(
       Map.merge(%{feed_url: "https://example.test/rss", title: "Road Work"}, overrides)
@@ -332,6 +370,51 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     # Cinder reads the query in a task, so the render that follows the event is not the
     # one that holds the answer.
     assert render_async(view) =~ "It arrived"
+  end
+
+  describe "a device in standby" do
+    # **The layout of a device in standby draws no list, so a read then reaches no
+    # person.** A render therefore cannot say whether the read happened, and this counts
+    # what the Repo did instead. The first count is the control: it says that the
+    # measurement measures something.
+    test "it holds the read of a list until the device wakes", %{conn: conn} do
+      created = show()
+      {:ok, created} = Playback.set_favourite(created)
+
+      {:ok, view, _html} = live(conn, @podcasts)
+      open(view, "Subscriptions")
+      assert view |> element("button", "Road Work") |> render_click() =~ "Nothing here."
+
+      episode(created, %{title: "It arrived"})
+
+      assert reads(fn -> changed(view) end) > 0
+      assert render_async(view) =~ "It arrived"
+
+      standby(view, true)
+      episode(created, %{title: "And another"})
+
+      assert reads(fn -> changed(view) end) == 0
+
+      standby(view, false)
+
+      assert render_async(view) =~ "And another"
+    end
+
+    # `MyHiFiWeb.BrowseLive` draws no collection while it says that this firmware holds
+    # no source, so it holds no identifier for one either.
+    test "a page that draws no list stays alive when a source changes", %{conn: conn} do
+      # A firmware with every source out of use is what draws that page, and
+      # `MyHiFi.Source.chosen/0` gives the first source in use for every other state.
+      for module <- MyHiFi.Source.all(), do: MyHiFi.Source.enable(module, false)
+
+      {:ok, view, html} = live(conn, "/")
+
+      assert html =~ "This firmware holds no source"
+
+      changed(view)
+
+      assert render(view) =~ "This firmware holds no source"
+    end
   end
 
   # The filters and the sort take the room of three rows, and a person wants them for a

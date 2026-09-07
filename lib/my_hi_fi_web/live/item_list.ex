@@ -13,9 +13,25 @@ defmodule MyHiFiWeb.ItemList do
       on_mount MyHiFiWeb.ItemList
       import MyHiFiWeb.ItemList, only: [row: 1, count: 1]
 
-  `on_mount/1` subscribes to the player, assigns `:playing`, and answers the `play` and
-  the `favourite` events and every event of the player. A page therefore holds none of
-  that.
+  `on_mount/1` subscribes to the player and to the sources, assigns `:playing`, and
+  answers the `play` and the `favourite` events and every event of the player. A page
+  therefore holds none of that.
+
+  ## A list that changed while nobody looked
+
+  A source reads a service behind the page, so what a container holds changes while a
+  person is elsewhere. `MyHiFi.Event.Source.Changed` says so, and this hook reads the
+  list again for it.
+
+  **A device in standby reads nothing.** `MyHiFiWeb.Layouts` draws no list at all in
+  standby, so a read then costs the card and the cores and gives no person anything.
+  One query of a browse page touched 38 MB of page cache on this board, which is why
+  `config/target.exs` holds the SQLite cache down, and standby is the moment that the
+  device is quiet in. This hook keeps `:stale?` instead, and it reads the list on the
+  way out of standby.
+
+  A read on the way back is one read, whatever the number of events that arrived, and
+  it clears the mark before it asks, so a second event of one wake asks for nothing.
 
   ## Why hooks and not a `use` macro
 
@@ -29,7 +45,8 @@ defmodule MyHiFiWeb.ItemList do
   ## What a page must hold
 
   `:source` names the source that the rows belong to, and `:collection_id` names the
-  collection that a mark refreshes.
+  collection that a mark refreshes. A page that draws no collection holds `nil` there,
+  and this hook then reads nothing.
   """
 
   use MyHiFiWeb, :html
@@ -51,11 +68,15 @@ defmodule MyHiFiWeb.ItemList do
   @queue_limit 500
 
   def on_mount(:default, _params, _session, socket) do
-    if connected?(socket), do: Event.subscribe(:player)
+    if connected?(socket) do
+      Event.subscribe(:player)
+      Event.subscribe(:source)
+    end
 
     socket =
       socket
       |> Phoenix.Component.assign(:playing, playing(Playback.state!()))
+      |> Phoenix.Component.assign(:stale?, false)
       |> attach_hook(:item_list_events, :handle_event, &event/3)
       |> attach_hook(:item_list_info, :handle_info, &info/2)
 
@@ -341,6 +362,20 @@ defmodule MyHiFiWeb.ItemList do
     end
   end
 
+  # A device in standby draws no list, so this holds the mark and reads nothing. See the
+  # module documentation.
+  defp info(%Event.Source.Changed{}, %{assigns: %{standby?: true}} = socket) do
+    {:halt, Phoenix.Component.assign(socket, :stale?, true)}
+  end
+
+  defp info(%Event.Source.Changed{}, socket), do: {:halt, read_again(socket)}
+
+  # `MyHiFiWeb.Shell` holds this event as well, and it passes it on, so the value of
+  # `standby?` above is the new one by the time that this runs.
+  defp info(%Events.Standby{entered?: false}, %{assigns: %{stale?: true}} = socket) do
+    {:cont, socket |> Phoenix.Component.assign(:stale?, false) |> read_again()}
+  end
+
   defp info(%Events.Started{track: %{id: id}}, socket) do
     {:halt, Phoenix.Component.assign(socket, :playing, %{item_id: id, status: :playing})}
   end
@@ -353,6 +388,15 @@ defmodule MyHiFiWeb.ItemList do
   end
 
   defp info(_message, socket), do: {:cont, socket}
+
+  # A page that draws no collection holds no identifier, and `MyHiFiWeb.BrowseLive`
+  # draws none while it says that this firmware holds no source.
+  defp read_again(socket) do
+    case socket.assigns[:collection_id] do
+      nil -> socket
+      collection_id -> Cinder.Refresh.refresh_table(socket, collection_id)
+    end
+  end
 
   defp mark(%{favourite?: true} = item), do: Playback.clear_favourite(item)
   defp mark(item), do: Playback.set_favourite(item)

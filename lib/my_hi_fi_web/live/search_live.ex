@@ -34,7 +34,6 @@ defmodule MyHiFiWeb.SearchLive do
 
   require Ash.Query
 
-  alias MyHiFi.Event
   alias MyHiFi.Source
 
   import MyHiFiWeb.ItemList, only: [row: 1]
@@ -45,8 +44,6 @@ defmodule MyHiFiWeb.SearchLive do
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Event.subscribe(:source)
-
     {:ok,
      socket
      |> assign(:page_title, "Search")
@@ -105,13 +102,9 @@ defmodule MyHiFiWeb.SearchLive do
   # Cinder gives the query that it read, with the sort and the filters of the person on
   # it. `MyHiFiWeb.ItemList` reads it when a person presses play, so the list that they
   # see goes in the queue.
+  @impl Phoenix.LiveView
   def handle_info({:list_query, %{query: query}}, socket) do
     {:noreply, assign(socket, :list_query, query)}
-  end
-
-  @impl Phoenix.LiveView
-  def handle_info(%Event.Source.Changed{}, socket) do
-    {:noreply, Cinder.Refresh.refresh_table(socket, @collection)}
   end
 
   # This is the clause that `use Cinder.UrlSync` writes. This page writes it out, for
