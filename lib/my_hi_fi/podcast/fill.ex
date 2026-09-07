@@ -110,6 +110,7 @@ defmodule MyHiFi.Podcast.Fill do
         :artwork_url,
         :duration_ms,
         :published_at,
+        :number,
         :url,
         :format,
         :parent_id
@@ -132,6 +133,7 @@ defmodule MyHiFi.Podcast.Fill do
       artwork_url: episode[:artwork_url],
       duration_ms: episode[:duration_ms],
       published_at: episode[:published_at],
+      number: episode[:number],
       url: episode.audio_url,
       transport: :download,
       container_format: :none,

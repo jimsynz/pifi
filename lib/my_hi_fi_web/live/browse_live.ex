@@ -207,7 +207,7 @@ defmodule MyHiFiWeb.BrowseLive do
           filters_label="Filter"
           sort_label="Sort"
           show_filters={@finding?}
-          show_sort={@finding?}
+          show_sort={@finding? or not is_nil(@here[:order])}
           query_opts={[load: loads(@here.kind)]}
           on_query_change={:list_query}
         >
@@ -221,7 +221,15 @@ defmodule MyHiFiWeb.BrowseLive do
           <:col field={field(@here.kind)} label={label(@path, @here.kind)} sort filter />
 
           <:item :let={row}>
-            <.row row={row} kind={@here.kind} playing={@playing} source={@source} />
+            <.row
+              row={row}
+              kind={@here.kind}
+              playing={@playing}
+              source={@source}
+              number?={@here[:number?] || false}
+              facts={@here[:facts] || []}
+              reading={@reading}
+            />
           </:item>
         </Cinder.collection>
       </div>
@@ -496,7 +504,12 @@ defmodule MyHiFiWeb.BrowseLive do
   # One call of Ash serves the whole page, so this costs one expression and no query for
   # each row. A facet is a value and it holds no picture.
   defp loads(:facet), do: [counts(:facet)]
-  defp loads(:item), do: [counts(:item), :artwork]
+
+  # **A fact of a row is a field or a calculation, and a read that does not name a
+  # calculation gives `%Ash.NotLoaded{}`.** `remaining_ms` is one, and so is the count
+  # of the children, so this names both for every list rather than ask each source
+  # which of them it draws. See `c:MyHiFi.Source.listing/1`.
+  defp loads(:item), do: [counts(:item), :artwork, :remaining_ms, :audio_held?]
 
   # The filter and the sort name what a person looks at. `Value` is the field of the
   # facet, and it says nothing to somebody who opened Countries.
@@ -556,13 +569,18 @@ defmodule MyHiFiWeb.BrowseLive do
     end
   end
 
+  # **The source names the order of these rows and the facts that they draw**, and this
+  # page holds no knowledge of any source. `nil` is what a list under a facet is: no
+  # container holds it. See `c:MyHiFi.Source.listing/1`.
   defp step(source, %{listing: %{kind: :facet}}, segment) do
+    inside = Source.inside(source, nil)
+
     query =
       Item
       |> Ash.Query.filter(source == ^Source.slug(source) and exists(facets, value == ^segment))
-      |> Ash.Query.sort(rank: :desc, title: :asc)
+      |> Ash.Query.sort(inside[:sort] || [])
 
-    %{title: segment, listing: %{query: query, kind: :item, order: {"Popularity", "rank"}}}
+    %{title: segment, listing: Map.merge(inside, %{query: query, kind: :item})}
   end
 
   defp step(source, %{listing: %{kind: :item}}, segment), do: container(source, segment)
@@ -570,12 +588,13 @@ defmodule MyHiFiWeb.BrowseLive do
   # A container opens into the items whose `parent_id` names it. The source must match,
   # so an identifier of one source cannot open under another one.
   #
-  # The oldest item comes first. A person who presses one episode of a show queues the
-  # rest of the list behind it, so the order of the list is the order that they hear,
-  # and a series makes sense from the start.
+  # **The source names the order and the facts.** An album holds its tracks by number
+  # and a show holds its episodes by date, and this page cannot hold either rule: it
+  # sorted every container by date, so every album of a Jellyfin library listed
+  # alphabetically. See `c:MyHiFi.Source.listing/1`.
   #
-  # An item with no date comes before all of them, because SQLite reads no date as the
-  # smallest one. `:asc_nils_last` says otherwise, and Cinder reads no direction but
+  # An item with no value comes before all of them, because SQLite reads an absent one
+  # as the smallest. `:asc_nils_last` says otherwise, and Cinder reads no direction but
   # `:asc` and `:desc`, so it would drop the sort and leave the alphabet.
   defp container(source, id) do
     slug = Source.slug(source)
@@ -586,16 +605,17 @@ defmodule MyHiFiWeb.BrowseLive do
     case Playback.get_item(id, load: [:artwork]) do
       {:ok, %{kind: :container, source: ^slug} = item} ->
         opened(source, item)
+        inside = Source.inside(source, item)
 
         query =
           Item
           |> Ash.Query.filter(parent_id == ^item.id)
-          |> Ash.Query.sort(published_at: :asc, title: :asc)
+          |> Ash.Query.sort(inside[:sort] || [])
 
         %{
           title: item.title,
           item: item,
-          listing: %{query: query, kind: :item, order: {"Date", "published_at"}}
+          listing: Map.merge(inside, %{query: query, kind: :item})
         }
 
       _other ->

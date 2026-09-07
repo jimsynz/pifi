@@ -185,6 +185,8 @@ defmodule MyHiFi.Playback.Item do
         :keeps_place?,
         :rank,
         :published_at,
+        :number,
+        :disc,
         :url,
         :transport,
         :container_format,
@@ -363,6 +365,36 @@ defmodule MyHiFi.Playback.Item do
       public? true
     end
 
+    attribute :number, :integer do
+      description """
+      The place of this item inside the container that holds it.
+
+      A track holds its track number, and an episode holds the number that the
+      publisher gave it. **It is absent for an item that holds no such place**, and a
+      feed that names none gets none: `MyHiFi.Podcast.Feed.Parser` keeps 200 episodes
+      of a feed that may hold 2955, so the place in the list would print a confident
+      and wrong episode number.
+
+      A list sorts on this before it sorts on anything else, and SQLite reads an absent
+      value as the smallest one, so a container whose items hold none falls through to
+      the order that its source names. See `c:MyHiFi.Source.listing/1`.
+      """
+
+      public? true
+    end
+
+    attribute :disc, :integer do
+      description """
+      Which disc of a set holds this track.
+
+      An album of one disc holds nothing here, and a set of two names 1 and 2. A row of
+      such a set reads `2-12`, because track 1 of disc 2 comes after track 12 of disc 1
+      and the number alone cannot say that.
+      """
+
+      public? true
+    end
+
     attribute :rank, :integer do
       description """
       What the service says about how popular this item is. A bigger number comes
@@ -529,6 +561,25 @@ defmodule MyHiFi.Playback.Item do
       public? true
     end
 
+    # **The audio of a track is a cache entry whose key is the identifier of the item**,
+    # and `MyHiFi.Player.Download` writes it in the `download` namespace. The cache
+    # holds no column that names this resource, so the key and the namespace are what
+    # make the join.
+    has_one :audio_file, MyHiFi.Cache.Entry do
+      source_attribute :id
+      destination_attribute :entry_key
+      filter expr(namespace == "download")
+
+      # **The key of a cache entry is text, and the identifier of an item is a UUID.**
+      # A caller invents a key, so that column takes any string: the artwork of a
+      # station is keyed by the hash of an address. Ash reports the two types as
+      # possibly incompatible and the join is correct, because the audio of an item is
+      # keyed by the identifier of that item and by nothing else.
+      validate_destination_attribute? false
+
+      public? true
+    end
+
     # The cache holds no column that names this resource, so the filter is what makes
     # the join belong to an item. See `MyHiFi.Cache.Attachment`.
     has_many :cache_attachments, MyHiFi.Cache.Attachment do
@@ -576,6 +627,38 @@ defmodule MyHiFi.Playback.Item do
       artist holds albums, so a mark on one reads nothing. See
       `MyHiFi.Playback.FavouriteAudio`.
       """
+    end
+
+    calculate :audio_held?, :boolean, expr(not is_nil(audio_file.id)) do
+      description """
+      This device holds the audio of this item on the card.
+
+      A person reads it to know what plays with no network, and a list draws it beside
+      the title. **It is one query for a page and not one for each row**, because it
+      rides along with the read that draws the list, in the way that `child_count`
+      does.
+
+      A container gives `false`. The audio of an album is the audio of its tracks, and
+      a person opens the album to read which of them are held.
+      """
+
+      public? true
+    end
+
+    calculate :remaining_ms, :integer, expr(duration_ms - position_ms) do
+      description """
+      How much of this item a person has not heard.
+
+      An episode of a podcast keeps its place, so a person reads how much is left of
+      it. `position_ms` allows no nil and it begins at 0, so this is the whole duration
+      of an item that no person began.
+
+      **A live stream and an item of an unknown length give nothing.** `duration_ms` is
+      absent for both, and SQLite gives nothing for a sum that holds nothing, so a row
+      of one draws no time left. See `c:MyHiFi.Source.listing/1`.
+      """
+
+      public? true
     end
 
     calculate :artwork, :string, expr(artwork_url || parent.artwork_url) do

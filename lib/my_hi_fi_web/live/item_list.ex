@@ -79,6 +79,7 @@ defmodule MyHiFiWeb.ItemList do
     socket =
       socket
       |> Phoenix.Component.assign(:playing, playing(Playback.state!()))
+      |> Phoenix.Component.assign(:reading, %{})
       |> Phoenix.Component.assign(:stale?, false)
       |> attach_hook(:item_list_events, :handle_event, &event/3)
       |> attach_hook(:item_list_info, :handle_info, &info/2)
@@ -131,12 +132,27 @@ defmodule MyHiFiWeb.ItemList do
   attr :kind, :atom, default: :item
   attr :playing, :any, default: nil
   attr :source, :any, required: true
+  attr :number?, :boolean, default: false
+  attr :facts, :list, default: []
+  attr :reading, :map, default: %{}
 
   @doc """
   One row of a list.
 
   A facet opens and never plays. An item opens when it is a container, and it plays when
   it is a track.
+
+  **The source says what a row draws beside its title**, and this holds the drawing of
+  each fact. See `c:MyHiFi.Source.listing/1`. A row of an album reads
+
+      1-01 · Original Bedroom Rockers · Kruder & Dorfmeister · 6:07
+
+  and a row of a show reads
+
+      639 · 24 August · Uncle Silicon · 44m left
+
+  A fact that this module does not know draws nothing, so a source that names a new one
+  reaches a screen when that screen learns it, and never as an error.
   """
   def row(%{kind: :facet} = assigns) do
     ~H"""
@@ -173,7 +189,10 @@ defmodule MyHiFiWeb.ItemList do
         class="group flex min-w-0 grow items-center gap-3 py-1 text-left"
       >
         <.cover path={@artwork} class="size-8" />
-        <span class="min-w-0 grow truncate text-ink group-hover:text-accent">{@row.title}</span>
+        <span class="min-w-0 grow">
+          <span class="block truncate text-ink group-hover:text-accent">{@row.title}</span>
+          <.facts :if={@facts != []} row={@row} facts={@facts} />
+        </span>
         <.count of={@row.child_count} />
         <.icon
           name="hero-chevron-right-mini"
@@ -214,6 +233,10 @@ defmodule MyHiFiWeb.ItemList do
           <.icon :if={is_nil(@status)} name="hero-play-mini" class="size-4" />
         </span>
 
+        <span :if={@number? and place(@row)} class="numerals w-9 shrink-0 text-right text-xs text-ink-faint">
+          {place(@row)}
+        </span>
+
         <span class="min-w-0 grow">
           <span :if={@status} class="block text-[0.65rem] uppercase tracking-[0.18em] text-accent">
             {status_text(@status)}
@@ -224,15 +247,195 @@ defmodule MyHiFiWeb.ItemList do
           ]}>
             {@row.title}
           </span>
-          <span :if={@row.subtitle} class="block truncate text-xs text-ink-faint">
+          <.facts :if={@facts != []} row={@row} facts={@facts} />
+          <span
+            :if={@facts == [] and @row.subtitle}
+            class="block truncate text-xs text-ink-faint"
+          >
             {@row.subtitle}
           </span>
         </span>
+
+        <.audio_mark row={@row} reading={@reading} />
       </button>
       <.favourite row={@row} />
     </div>
     """
   end
+
+  attr :row, :any, required: true
+  attr :reading, :map, required: true
+
+  # **What this device holds of the audio of one row.** A person reads it to know what
+  # plays with no network, and a file that is arriving says how far it has come.
+  defp audio_mark(assigns) do
+    assigns = assign(assigns, :audio, audio(assigns.reading, assigns.row))
+
+    ~H"""
+    <span :if={@audio} class="flex shrink-0 items-center gap-1 text-xs text-ink-faint">
+      <span :if={@audio != :held} class="numerals">{@audio}</span>
+      <.icon :if={@audio == :held} name="hero-arrow-down-tray-mini" class="size-4" />
+      <span :if={@audio == :held} class="sr-only">On the card</span>
+      <.icon
+        :if={@audio != :held}
+        name="hero-arrow-path-mini"
+        class="size-4 motion-safe:animate-spin"
+      />
+    </span>
+    """
+  end
+
+  @doc """
+  What a row says about the audio of its item.
+
+  It gives `:held` for a file that the card holds, a share such as `"42%"` for one that
+  is arriving, and `nil` for an item that this device does not hold.
+
+  **The map wins over the row.** `audio_held?` of the row is what the read that drew the
+  list found, and a file that arrived after that read reaches the map alone. See
+  `MyHiFi.Event.Source.AudioChanged`.
+
+      iex> MyHiFiWeb.ItemList.audio(%{}, %{id: "a", audio_held?: true})
+      :held
+
+      iex> MyHiFiWeb.ItemList.audio(%{"a" => :held}, %{id: "a", audio_held?: false})
+      :held
+
+      iex> MyHiFiWeb.ItemList.audio(%{"a" => {:reading, 500}}, %{id: "a", byte_size: 1000})
+      "50%"
+
+      iex> MyHiFiWeb.ItemList.audio(%{}, %{id: "a", audio_held?: false})
+      nil
+  """
+  @spec audio(map(), map()) :: :held | String.t() | nil
+  def audio(reading, %{id: id} = row) do
+    case Map.get(reading, id) do
+      :held -> :held
+      {:reading, bytes} -> share(bytes, row)
+      :absent -> nil
+      nil -> if held?(row), do: :held
+    end
+  end
+
+  # A row that named no calculation holds `%Ash.NotLoaded{}`, and a list that draws no
+  # such mark must not fail for it.
+  defp held?(%{audio_held?: true}), do: true
+  defp held?(_row), do: false
+
+  # **A share needs the size of the file, and the item holds it.** A source that names
+  # none leaves a person with a mark that turns and no number, which still says that the
+  # device is reading it.
+  defp share(bytes, %{byte_size: total}) when is_integer(total) and total > 0 do
+    "#{min(round(bytes / total * 100), 100)}%"
+  end
+
+  defp share(_bytes, _row), do: "Reading"
+
+  attr :row, :any, required: true
+  attr :facts, :list, required: true
+
+  # A row draws its facts on one line, and a fact that says nothing takes no room and no
+  # separator with it.
+  defp facts(assigns) do
+    assigns = assign(assigns, :drawn, Enum.map(assigns.facts, &fact(&1, assigns.row)))
+
+    ~H"""
+    <span class="block truncate text-xs text-ink-faint">
+      {@drawn |> Enum.reject(&is_nil/1) |> Enum.join(" · ")}
+    </span>
+    """
+  end
+
+  @doc """
+  The place of one item inside its container, or `nil` for an item that holds none.
+
+  A set of more than one disc names the disc, because track 1 of disc 2 comes after
+  track 12 of disc 1 and the number alone cannot say that.
+
+      iex> MyHiFi.Playback.Item |> struct(number: 1, disc: 1) |> MyHiFiWeb.ItemList.place()
+      "1-01"
+
+      iex> MyHiFi.Playback.Item |> struct(number: 639) |> MyHiFiWeb.ItemList.place()
+      "639"
+
+      iex> MyHiFi.Playback.Item |> struct(%{}) |> MyHiFiWeb.ItemList.place()
+      nil
+  """
+  @spec place(map()) :: String.t() | nil
+  def place(%{disc: disc, number: number}) when is_integer(disc) and is_integer(number) do
+    "#{disc}-#{String.pad_leading(to_string(number), 2, "0")}"
+  end
+
+  def place(%{number: number}) when is_integer(number), do: to_string(number)
+
+  def place(_row), do: nil
+
+  @doc """
+  One fact of a row, as a person reads it.
+
+  Each name is a field of `MyHiFi.Playback.Item`, and `{:text, "…"}` says something
+  that no field holds. A fact of no value gives `nil`, and the row then draws neither
+  it nor a separator for it.
+
+      iex> MyHiFiWeb.ItemList.fact(:duration_ms, %{duration_ms: 367_000})
+      "6:07"
+
+      iex> MyHiFiWeb.ItemList.fact({:text, "128 kbit/s"}, %{})
+      "128 kbit/s"
+  """
+  @spec fact(MyHiFi.Source.fact(), map()) :: String.t() | nil
+  def fact({:text, text}, _row), do: text
+
+  def fact(:subtitle, %{subtitle: subtitle}), do: subtitle
+
+  def fact(:published_at, %{published_at: %DateTime{} = at}), do: day(at)
+
+  def fact(:duration_ms, %{duration_ms: ms}) when is_integer(ms) and ms > 0, do: clock(ms)
+
+  # **An episode that no person began reads as a length and not as a time left.**
+  # `remaining_ms` is the whole duration of such an item, because `position_ms` begins
+  # at 0, and "1h 2m left" of an episode that nobody touched says the wrong thing.
+  def fact(:remaining_ms, %{played?: true}), do: "Played"
+
+  def fact(:remaining_ms, %{remaining_ms: ms, duration_ms: ms}) when is_integer(ms),
+    do: clock(ms)
+
+  def fact(:remaining_ms, %{remaining_ms: ms}) when is_integer(ms) and ms > 0,
+    do: "#{minutes(ms)} left"
+
+  def fact(_name, _row), do: nil
+
+  # The day and the month, and the year of a date of another year. A person reads a
+  # podcast of this week and the year says nothing, and an album of 2013 needs it.
+  defp day(at) do
+    if at.year == DateTime.utc_now().year do
+      Calendar.strftime(at, "%-d %B")
+    else
+      Calendar.strftime(at, "%-d %B %Y")
+    end
+  end
+
+  defp clock(milliseconds) do
+    seconds = div(milliseconds, 1000)
+    minutes = div(seconds, 60)
+
+    case div(minutes, 60) do
+      0 -> "#{minutes}:#{pad(rem(seconds, 60))}"
+      hours -> "#{hours}:#{pad(rem(minutes, 60))}:#{pad(rem(seconds, 60))}"
+    end
+  end
+
+  # A time left is a round number, because a person reads it to decide whether they
+  # have time for the rest of an episode.
+  defp minutes(milliseconds) do
+    case div(milliseconds, 60_000) do
+      minutes when minutes < 60 -> "#{minutes}m"
+      minutes when rem(minutes, 60) == 0 -> "#{div(minutes, 60)}h"
+      minutes -> "#{div(minutes, 60)}h #{rem(minutes, 60)}m"
+    end
+  end
+
+  defp pad(seconds), do: String.pad_leading(to_string(seconds), 2, "0")
 
   attr :of, :integer, required: true
 
@@ -363,6 +566,23 @@ defmodule MyHiFiWeb.ItemList do
           true -> [pressed]
         end
     end
+  end
+
+  # **A row draws what the card holds, and this keeps that state in memory.** The read
+  # that drew the list gave `audio_held?` of each row, and a file that arrives after it
+  # would need a whole read of the list to show. This map holds what moved since, so a
+  # row that was empty fills while a person watches and no query runs for it. See
+  # `MyHiFi.Event.Source.AudioChanged`.
+  defp info(%Event.Source.AudioChanged{state: :reading} = event, socket) do
+    reading = Map.put(socket.assigns.reading, event.item_id, {:reading, event.bytes})
+
+    {:halt, Phoenix.Component.assign(socket, :reading, reading)}
+  end
+
+  defp info(%Event.Source.AudioChanged{state: state} = event, socket) do
+    reading = Map.put(socket.assigns.reading, event.item_id, state)
+
+    {:halt, Phoenix.Component.assign(socket, :reading, reading)}
   end
 
   # A device in standby draws no list, so this holds the mark and reads nothing. See the

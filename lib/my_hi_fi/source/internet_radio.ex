@@ -59,7 +59,7 @@ defmodule MyHiFi.Source.InternetRadio do
   @impl MyHiFi.Source
   def roots do
     [
-      {"Favourites", %{query: favourites_query(), kind: :item}},
+      {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle]}},
       {"Countries", %{query: facet_query("country"), kind: :facet}},
       {"Tags", %{query: facet_query("tag"), kind: :facet}}
     ]

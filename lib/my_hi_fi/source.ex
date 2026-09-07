@@ -14,6 +14,25 @@ defmodule MyHiFi.Source do
 
   require Logger
 
+  # **What a container held before a source could say otherwise.** The oldest item
+  # first, because a person who presses one episode of a show queues the rest behind
+  # it, so the order of the list is the order that they hear and a series makes sense
+  # from the start. See `inside/2`.
+  @default_inside %{
+    facts: [:published_at],
+    order: {"Date", "published_at"},
+    sort: [published_at: :asc, title: :asc]
+  }
+
+  # The list under a facet, which no container holds. A facet of this firmware names a
+  # country, a tag or a category, and the rows of one are the popular ones first: the
+  # sync of Radio Browser writes the click count of a station into `rank`.
+  @default_under_facet %{
+    facts: [:subtitle],
+    order: {"Popularity", "rank"},
+    sort: [rank: :desc, title: :asc]
+  }
+
   @typedoc """
   What a source holds, beyond the tree that every source holds.
 
@@ -247,6 +266,44 @@ defmodule MyHiFi.Source do
   @type listing :: %{
           required(:query) => Ash.Query.t(),
           required(:kind) => :item | :facet,
+          optional(:order) => {String.t(), String.t()},
+          optional(:number?) => boolean(),
+          optional(:facts) => [fact()]
+        }
+
+  @typedoc """
+  One thing that a row of a list says about an item, beside its title.
+
+  **A source names the facts, and each surface draws them.** A page of the web
+  interface holds a row across a browser and `MyHiFi.DeviceUi` holds one on a screen of
+  240 pixels, so "44m left" and "44 min" are one fact drawn two ways. A source that
+  gave text for a row would also be in the render path, because the time left of an
+  episode moves while it plays.
+
+  Each name is a field of `MyHiFi.Playback.Item`, and `{:text, "…"}` is the way to say
+  something that no field holds. A surface that meets a fact it does not know draws
+  nothing for it, so a new fact reaches a screen when that screen learns it and never
+  as an error.
+  """
+  @type fact ::
+          :subtitle
+          | :published_at
+          | :duration_ms
+          | :remaining_ms
+          | {:text, String.t()}
+
+  @typedoc """
+  What a source says about the items inside one of its containers.
+
+  The page builds the query, because "the items whose container is this one" is the
+  same read for every source. Everything else belongs to the source: `sort` is what
+  `Ash.Query.sort/2` takes, `order` names the sort control that a person presses, and
+  `number?` says that a row draws the place of the item in front of its title.
+  """
+  @type inside :: %{
+          optional(:number?) => boolean(),
+          optional(:facts) => [fact()],
+          optional(:sort) => keyword(),
           optional(:order) => {String.t(), String.t()}
         }
 
@@ -257,6 +314,20 @@ defmodule MyHiFi.Source do
   everything below them is generic.
   """
   @callback roots() :: [{String.t(), listing()}]
+
+  @doc """
+  How the items inside one container read, and in what order.
+
+  An album holds its tracks by number, and a show holds its episodes by date with the
+  newest first. **Neither of those is a rule that a page can hold**, because a page
+  holds no knowledge of any source: it sorted every container by date and labelled the
+  control "Date", so every album of a Jellyfin library listed alphabetically.
+
+  **`nil` is the list under a facet**, which no container holds: a country of Radio
+  Browser, or a category of the Podcast Index. A source that implements none gets the
+  default of `inside/2` for either case.
+  """
+  @callback listing(MyHiFi.Playback.Item.t() | nil) :: inside()
 
   @doc """
   A person opened one container.
@@ -397,7 +468,8 @@ defmodule MyHiFi.Source do
 
   # A source with no search leaves `search/1` out, and it names no `:search` in
   # `c:capabilities/0`.
-  @optional_callbacks finished: 1,
+  @optional_callbacks listing: 1,
+                      finished: 1,
                       opened: 1,
                       ready?: 0,
                       refresh: 1,
@@ -603,6 +675,30 @@ defmodule MyHiFi.Source do
       {:error, "#{module.title()} holds no such control."}
     end
   end
+
+  @doc """
+  How the items inside one container read, and in what order.
+
+  See `c:listing/1`. A source that names none gets the date of the item, oldest first,
+  which is what every container of this firmware held before a source could say
+  otherwise, and the popular ones first under a facet.
+
+      iex> MyHiFi.Source.inside(MyHiFi.Source.Podcasts, %MyHiFi.Playback.Item{}).order
+      {"Date", "published_at"}
+
+      iex> MyHiFi.Source.inside(MyHiFi.Source.Podcasts, nil).order
+      {"Popularity", "rank"}
+
+  """
+  @spec inside(module(), MyHiFi.Playback.Item.t() | nil) :: inside()
+  def inside(module, item) do
+    if implements?(module, :listing, 1),
+      do: module.listing(item),
+      else: default_inside(item)
+  end
+
+  defp default_inside(nil), do: @default_under_facet
+  defp default_inside(_item), do: @default_inside
 
   @doc """
   The values that a person can change for one source.

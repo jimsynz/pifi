@@ -222,20 +222,21 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     # A person who presses one episode queues the rest of the list behind it, so the
     # order of the list is the order that they hear.
-    test "the oldest episode comes first", %{conn: conn} do
+    # **The newest episode comes first**, because a person who opens a show wants the
+    # episode of this week. The source says so, and the sort control of the page flips
+    # it for a person who starts a series from the start. See
+    # `c:MyHiFi.Source.listing/1`.
+    test "the newest episode comes first", %{conn: conn} do
       created = show()
       {:ok, created} = Playback.set_favourite(created)
       episode(created, %{title: "The older one", published_at: ~U[2022-06-01 14:00:00Z]})
       episode(created, %{title: "The newer one", published_at: ~U[2024-06-01 14:00:00Z]})
-      episode(created, %{title: "The one with no date", published_at: nil})
 
       {:ok, view, _html} = live(conn, @podcasts)
       open(view, "Subscriptions")
       html = view |> element("button", "Road Work") |> render_click()
 
-      assert index_of(html, "The older one") < index_of(html, "The newer one")
-      # SQLite reads no date as the smallest one, so an episode with none leads.
-      assert index_of(html, "The one with no date") < index_of(html, "The older one")
+      assert index_of(html, "The newer one") < index_of(html, "The older one")
     end
 
     test "the date of an episode is in the row", %{conn: conn} do
@@ -247,7 +248,35 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       open(view, "Subscriptions")
       html = view |> element("button", "Road Work") |> render_click()
 
-      assert html =~ "1 Jun 2022"
+      assert html =~ "1 June 2022"
+    end
+
+    # A publisher that names a number gets one in front of the title, and one that names
+    # none gets no place at all.
+    test "the number of an episode is in the row", %{conn: conn} do
+      created = show()
+      {:ok, created} = Playback.set_favourite(created)
+      episode(created, %{title: "The numbered one", number: 639})
+
+      {:ok, view, _html} = live(conn, @podcasts)
+      open(view, "Subscriptions")
+      html = view |> element("button", "Road Work") |> render_click()
+
+      assert html =~ "639"
+    end
+
+    # A person reads this to decide whether they have time for the rest of an episode.
+    test "an episode that a person began says how much is left", %{conn: conn} do
+      created = show()
+      {:ok, created} = Playback.set_favourite(created)
+      one = episode(created, %{title: "The long one", duration_ms: 3_600_000})
+      {:ok, _one} = Playback.store_position(one, %{position_ms: 960_000})
+
+      {:ok, view, _html} = live(conn, @podcasts)
+      open(view, "Subscriptions")
+      html = view |> element("button", "Road Work") |> render_click()
+
+      assert html =~ "44m left"
     end
 
     test "a container that holds nothing says so", %{conn: conn} do
@@ -453,13 +482,16 @@ defmodule MyHiFiWeb.BrowseLiveTest do
   # The filters and the sort take the room of three rows, and a person wants them for a
   # long list alone.
   describe "the control that brings the filters and the sort" do
-    test "a list starts with neither of them", %{conn: conn} do
+    # **The sort shows for a list whose source names an order**, because a person who
+    # opens a show wants the newest episode and a person who reads a series wants the
+    # oldest, and one press must be enough. The filter still waits to be asked for.
+    test "a list starts with the sort and without the filter", %{conn: conn} do
       Stations.create(%{country_code: "NZ", title: "RNZ National"})
 
       {:ok, _view, html} = live(conn, "#{@radio}/countries/NZ")
 
       refute html =~ "Filter Title..."
-      refute html =~ "toggle_sort"
+      assert html =~ "toggle_sort"
       assert html =~ "RNZ National"
     end
 

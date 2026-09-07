@@ -78,7 +78,8 @@ defmodule MyHiFi.Source.Podcasts do
   def roots do
     [
       {"Subscriptions", %{query: subscriptions_query(), kind: :item}},
-      {"Trending", %{query: Trending.query(), kind: :item, order: Trending.order()}},
+      {"Trending",
+       %{query: Trending.query(), kind: :item, order: Trending.order(), facts: [:subtitle]}},
       {"Categories",
        %{query: Ash.Query.for_read(Facet, :by_key, %{key: "category"}), kind: :facet}}
     ]
@@ -88,6 +89,32 @@ defmodule MyHiFi.Source.Podcasts do
     Item
     |> Ash.Query.filter(source == ^@source and kind == :container and favourite? == true)
     |> Ash.Query.sort(title: :asc)
+  end
+
+  @doc """
+  A show holds its episodes with the newest one first, and a category holds the
+  trending shows.
+
+  **A person opening a show wants the episode of this week**, and a feed of a daily
+  programme holds 200 of them. The control that the page draws for this order flips it,
+  so a person who starts a series from the start presses one thing.
+
+  An episode says its number when the publisher gives one, its date, and how much of it
+  is left. `remaining_ms` is the whole duration for an episode that no person began, so
+  a row reads the same way whether they began it or not, and an episode of an unknown
+  length draws no time at all.
+  """
+  @impl MyHiFi.Source
+  def listing(nil),
+    do: %{facts: [:subtitle], sort: [rank: :desc, title: :asc], order: Trending.order()}
+
+  def listing(_item) do
+    %{
+      number?: true,
+      facts: [:published_at, :remaining_ms],
+      sort: [published_at: :desc],
+      order: {"Date", "published_at"}
+    }
   end
 
   # A person opening a show whose local copy is old must not wait for the network, so

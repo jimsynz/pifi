@@ -22,7 +22,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
 
       channel   title, description, itunes:author, itunes:image, image/url
       item      title, guid, pubDate, description, itunes:subtitle,
-                itunes:duration, itunes:image, enclosure
+                itunes:duration, itunes:episode, itunes:image, enclosure
 
   It also reads the two formats that a feed writes a date and a length in. See
   `published_at/1` and `duration_ms/1`.
@@ -101,6 +101,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
           byte_length: pos_integer() | nil,
           duration_ms: pos_integer() | nil,
           published_at: DateTime.t() | nil,
+          number: pos_integer() | nil,
           artwork_url: String.t() | nil
         }
 
@@ -322,6 +323,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
   defp field(["description", "item", "channel", "rss"]), do: {:episode, :description}
   defp field(["itunes:subtitle", "item", "channel", "rss"]), do: {:episode, :subtitle}
   defp field(["itunes:duration", "item", "channel", "rss"]), do: {:episode, :duration_ms}
+  defp field(["itunes:episode", "item", "channel", "rss"]), do: {:episode, :number}
   defp field(_path), do: nil
 
   defp store(%State{text: nil} = state), do: state
@@ -334,7 +336,20 @@ defmodule MyHiFi.Podcast.Feed.Parser do
 
   defp value(:published_at, text), do: published_at(text)
   defp value(:duration_ms, text), do: duration_ms(text)
+  defp value(:number, text), do: number(text)
   defp value(_key, text), do: presence(text)
+
+  # **A publisher that names no episode number gets none.** A feed writes the newest
+  # episode first and this reader keeps `:max_items` of them, so the place in the list
+  # is not the number of the episode: one feed of the measurement holds 2955 episodes
+  # and this keeps 200 of them. A row of such a show draws its date and no number. See
+  # `MyHiFi.Playback.Item`.
+  defp number(text) do
+    case Integer.parse(String.trim(text)) do
+      {number, ""} when number > 0 -> number
+      _other -> nil
+    end
+  end
 
   # An episode with no audio cannot play, so it never reaches the database. A feed
   # holds such an item for a post that carries text alone.

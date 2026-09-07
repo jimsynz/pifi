@@ -238,7 +238,11 @@ The software has four layers. They talk through Phoenix PubSub.
    `MyHiFi.Source`. The first source is internet radio. **A source names its own
    settings**, with `settings/0` and `settings_actions/0`, and it checks its own
    values in `put_settings/1`. The settings page draws that list and holds no
-   knowledge of any source. A person can also take a source out of use, and
+   knowledge of any source. **A source also names how its items read and in what
+   order**, with `listing/1`: an album holds its tracks by number and a show holds its
+   episodes by date with the newest first, and a page that held either rule listed
+   every album alphabetically. It names typed facts and never text, because one fact
+   reads as "44m left" in a browser and as "44 min" on a screen of 240 pixels. A person can also take a source out of use, and
    `MyHiFi.Playback.enable_source/2` is the one command for that.
 2. **The player** runs the Membrane pipeline and holds the playback state.
 3. **Outputs** send samples to hardware. An output implements `MyHiFi.Output`.

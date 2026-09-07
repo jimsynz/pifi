@@ -2,6 +2,8 @@ defmodule MyHiFi.Player.DownloadTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Cache
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Source, as: Events
   alias MyHiFi.Player.Download
 
   @id "episode-1"
@@ -139,6 +141,32 @@ defmodule MyHiFi.Player.DownloadTest do
 
       assert cache_path == Path.join([Cache.directory(), Download.namespace(), @id])
       assert partial_path == Path.join(Download.directory(), @id)
+    end
+  end
+
+  describe "what a page hears" do
+    # **A page draws a share of a number that a person reads, and a watcher needs every
+    # count.** The download writes about one message for each 16 KB, so a page that drew
+    # itself again for each one would spend the board on a figure that moves too fast to
+    # see. See `MyHiFi.Event.Source.AudioChanged`.
+    test "the audio of an item arriving reaches the source topic" do
+      Event.subscribe(:source)
+      serve("the audio")
+      start()
+
+      await(:done)
+
+      assert_receive %Events.AudioChanged{item_id: @id, state: :held}
+    end
+
+    test "a read that fails says that the device holds nothing" do
+      Event.subscribe(:source)
+      serve("go away", status: 403)
+      start()
+
+      await({:error, {:unexpected_status, 403}})
+
+      assert_receive %Events.AudioChanged{item_id: @id, state: :absent}
     end
   end
 

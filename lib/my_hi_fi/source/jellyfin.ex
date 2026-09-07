@@ -87,9 +87,35 @@ defmodule MyHiFi.Source.Jellyfin do
   def roots do
     [
       {"Artists", %{query: artists_query(), kind: :item}},
-      {"Albums", %{query: albums_query(), kind: :item}},
-      {"Favourites", %{query: favourites_query(), kind: :item}}
+      {"Albums", %{query: albums_query(), kind: :item, facts: [:subtitle]}},
+      {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle]}}
     ]
+  end
+
+  @doc """
+  An album holds its tracks in the order that the record holds them.
+
+  **The number decides, and not the date.** `PremiereDate` of a track is the date of
+  the album, so every track of one carries the same value, and a list that sorted on it
+  fell through to the alphabet: a person opening *The Bones of What You Believe* read
+  "By The Throat" first and "Broken Bones" third from last.
+
+  `disc` comes before `number`, or track 1 of disc 2 sorts beside track 1 of disc 1. A
+  server that names neither leaves both absent, SQLite reads an absent value as the
+  smallest one, and the title then decides.
+
+  An artist holds albums and not tracks, and an album row draws its own facts. The rows
+  of both kinds read the same way here, because a person who opened either one wants
+  the same three things: the place, the name, and how long it runs.
+  """
+  @impl MyHiFi.Source
+  def listing(_item) do
+    %{
+      number?: true,
+      facts: [:subtitle, :duration_ms],
+      sort: [disc: :asc, number: :asc, title: :asc],
+      order: {"Track", "number"}
+    }
   end
 
   # An artist is the one container of this source with no parent, so this branch

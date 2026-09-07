@@ -143,7 +143,7 @@ defmodule MyHiFiWeb.SearchLive do
         sort_label="Sort"
         show_filters={true}
         search={[label: "Name", placeholder: "Search #{@source.title()}…", fn: &match/3]}
-        query_opts={[load: [:child_count]]}
+        query_opts={[load: [:child_count, :artwork, :audio_held?]]}
         on_query_change={:list_query}
       >
         <:col field="title" label="Title" search sort />
@@ -157,7 +157,7 @@ defmodule MyHiFiWeb.SearchLive do
         />
 
         <:item :let={item}>
-          <.row row={item} playing={@playing} source={@source} />
+          <.row row={item} playing={@playing} source={@source} reading={@reading} />
         </:item>
       </Cinder.collection>
     </div>

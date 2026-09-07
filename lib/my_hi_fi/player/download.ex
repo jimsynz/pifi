@@ -50,12 +50,17 @@ defmodule MyHiFi.Player.Download do
   require Logger
 
   alias MyHiFi.Cache
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Source, as: Events
 
   # Sobelow reads `@sobelow_skip` from the source. This registration stops the
   # compiler warning that no Elixir code reads the attribute.
   Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
 
   @keep_partial_hours 24
+  # How often a page hears that the file grew. See `announce/1`.
+  @announce_ms 1_000
+
   @namespace "download"
   @directory "partial"
   @registry MyHiFi.Player.Download.Registry
@@ -73,10 +78,11 @@ defmodule MyHiFi.Player.Download do
             request: reference() | nil,
             written: non_neg_integer(),
             watchers: [pid()],
+            told_at: integer() | nil,
             done?: boolean()
           }
 
-    defstruct [:id, :uri, :path, :request, written: 0, watchers: [], done?: false]
+    defstruct [:id, :uri, :path, :request, :told_at, written: 0, watchers: [], done?: false]
   end
 
   @doc """
@@ -198,14 +204,15 @@ defmodule MyHiFi.Player.Download do
   def handle_info({:wrote, count}, %State{} = state) do
     written = state.written + count
     tell(state, {:bytes, written})
-    {:noreply, %State{state | written: written}}
+
+    {:noreply, announce(%State{state | written: written})}
   end
 
   # The request truncated the file and began again, because the server ignored the
   # range. The count therefore starts from nothing.
   @impl GenServer
   def handle_info(:restarted, %State{} = state) do
-    {:noreply, %State{state | written: 0}}
+    {:noreply, %State{state | written: 0, told_at: nil}}
   end
 
   # One process makes one request, so the answer needs no identifier of its own.
@@ -423,6 +430,7 @@ defmodule MyHiFi.Player.Download do
         Cache.prune()
         Logger.info("Read #{state.written} bytes of #{state.uri}.")
         tell(state, :done)
+        publish(state, :held)
         {:stop, :normal, %State{state | done?: true}}
 
       {:error, reason} ->
@@ -435,11 +443,36 @@ defmodule MyHiFi.Player.Download do
   defp fail(%State{} = state, reason) do
     Logger.warning("Could not read #{state.uri}: #{inspect(reason)}")
     tell(state, {:error, reason})
+    publish(state, :absent)
     state
   end
 
   defp tell(%State{watchers: watchers}, message) do
     Enum.each(watchers, &send(&1, {:download, message}))
+  end
+
+  # **A watcher hears every count, and a page hears one each second.** A watcher is the
+  # element that reads the file, and it needs each count to serve the next byte. A page
+  # draws a share of a number that a person reads, and 2500 renders for a track of 40 MB
+  # would spend the board on a figure that moves too fast to see.
+  # `MyHiFi.Event.Player.Progress` holds the same period for the same reason.
+  defp announce(%State{} = state) do
+    now = System.monotonic_time(:millisecond)
+
+    if is_nil(state.told_at) or now - state.told_at >= @announce_ms do
+      publish(state, :reading)
+      %State{state | told_at: now}
+    else
+      state
+    end
+  end
+
+  defp publish(%State{} = state, audio_state) do
+    Event.publish(:source, %Events.AudioChanged{
+      item_id: state.id,
+      state: audio_state,
+      bytes: state.written
+    })
   end
 
   defp stale?(path, before) do

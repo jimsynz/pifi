@@ -115,6 +115,8 @@ defmodule MyHiFi.Jellyfin.Server do
           optional(:duration_ms) => pos_integer() | nil,
           optional(:byte_size) => pos_integer() | nil,
           optional(:published_at) => DateTime.t() | nil,
+          optional(:number) => pos_integer() | nil,
+          optional(:disc) => pos_integer() | nil,
           optional(:format) => :aac | :flac | :mp3
         }
 
@@ -431,6 +433,8 @@ defmodule MyHiFi.Jellyfin.Server do
           duration_ms: duration_ms(item["RunTimeTicks"]),
           byte_size: byte_size_of(item),
           published_at: published_at(item),
+          number: whole(item["IndexNumber"]),
+          disc: whole(item["ParentIndexNumber"]),
           format: format(item["Container"])
         })
     end
@@ -551,6 +555,17 @@ defmodule MyHiFi.Jellyfin.Server do
        do: size
 
   defp byte_size_of(_item), do: nil
+
+  # **The track number and the disc, and the reason that a track needs them.**
+  # `PremiereDate` of a track is the date of the album, so it is the same for every
+  # track of one, and a list that sorted on it alone fell through to the alphabet. A
+  # server that names neither number gives nothing, and the list then sorts by title.
+  #
+  # `ParentIndexNumber` is the disc of a set. Without it track 1 of disc 2 sorts beside
+  # track 1 of disc 1.
+  defp whole(number) when is_integer(number) and number > 0, do: number
+
+  defp whole(_other), do: nil
 
   defp published_at(item) do
     with date when is_binary(date) <- presence(item["PremiereDate"]),
