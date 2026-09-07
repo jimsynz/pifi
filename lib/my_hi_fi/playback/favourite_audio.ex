@@ -21,10 +21,15 @@ defmodule MyHiFi.Playback.FavouriteAudio do
     does not.
   - A song of a library keeps no place and it reads from a file, so it reads.
 
-  **A container reads the tracks that it holds, and not the tracks below those.** An
-  album holds tracks, so a mark on an album reads every one of them. An artist holds
-  albums, so a mark on an artist reads nothing: a discography is gigabytes, and no
-  person who presses one control asks for that.
+  **A mark reaches two levels.** An album holds tracks, so a mark on an album reads
+  every one of them. An artist holds albums and no track of its own, so a mark on an
+  artist reads the tracks of each album, one album after the other. A discography is
+  gigabytes, and **a person who marks one has said what they want the card for**: the
+  three steps below stop the run at the first track that the card holds no room for,
+  and the marks that a person put on most recently are the ones that the device holds.
+
+  A run that reads album by album leaves whole albums on the card when it stops, and
+  not one track of each.
 
   ## How much the card holds, in three steps
 
@@ -178,12 +183,33 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   end
 
   def tracks(%{kind: :container} = item) do
+    case held_by(item) do
+      [] -> item |> containers() |> Enum.flat_map(&held_by/1)
+      tracks -> tracks
+    end
+  end
+
+  # **A container that holds no track of its own holds containers, and this reads
+  # theirs.** An artist gives its albums, one after the other, and each album gives its
+  # tracks in the order of the record. A run that stops half way through a discography
+  # therefore holds whole albums and not a track from each of them.
+  #
+  # It reads one query for each album of a marked artist. That is five queries for the
+  # artists of the measured library, and it happens when a person presses a control.
+  defp containers(item) do
+    Item
+    |> Ash.Query.filter(parent_id == ^item.id and kind == :container)
+    |> Ash.Query.sort(published_at: :asc, title: :asc)
+    |> Ash.read!()
+  end
+
+  defp held_by(item) do
     Item
     |> Ash.Query.filter(
       parent_id == ^item.id and kind == :track and transport == :download and
         keeps_place? == false
     )
-    |> Ash.Query.sort(published_at: :asc, title: :asc)
+    |> Ash.Query.sort(place: :asc, title: :asc)
     |> Ash.read!()
   end
 

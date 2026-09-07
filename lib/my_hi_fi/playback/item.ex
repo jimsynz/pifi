@@ -613,7 +613,8 @@ defmodule MyHiFi.Playback.Item do
               expr(
                 favourite? == true and
                   ((kind == :track and transport == :download and keeps_place? == false) or
-                     exists(children, transport == :download and keeps_place? == false))
+                     exists(children, transport == :download and keeps_place? == false) or
+                     exists(children.children, transport == :download and keeps_place? == false))
               ) do
       description """
       A person marked this item, and this device holds the audio of what it covers.
@@ -623,9 +624,11 @@ defmodule MyHiFi.Playback.Item do
       and not an episode of a podcast. A subscription to a show therefore reads
       nothing, and a mark on an album reads every track of it.
 
-      A container names the tracks that it holds, and not the tracks below those. An
-      artist holds albums, so a mark on one reads nothing. See
-      `MyHiFi.Playback.FavouriteAudio`.
+      **A mark reaches two levels, so an artist reads a whole discography.** A person
+      who marks one has said what they want the card for, and the run stops at the
+      first track that the card holds no room for. A show holds episodes, and an
+      episode keeps its place, so a subscription still reads nothing at either level.
+      See `MyHiFi.Playback.FavouriteAudio`.
       """
     end
 

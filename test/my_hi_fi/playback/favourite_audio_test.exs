@@ -48,6 +48,23 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
     Req.Test.stub(Download, fn conn -> Plug.Conn.send_resp(conn, 200, body) end)
   end
 
+  defp artist(ref \\ "artist-1") do
+    Fill.artists([%{ref: ref, title: "Massive Attack", parent_ref: nil, artwork_url: nil}])
+
+    item(ref)
+  end
+
+  defp album_of(ref, title, published_at \\ nil) do
+    %{
+      ref: ref,
+      title: title,
+      parent_ref: "artist-1",
+      artwork_url: nil,
+      subtitle: nil,
+      published_at: published_at
+    }
+  end
+
   defp album(ref \\ "album-1") do
     Fill.albums([
       %{ref: ref, title: "Mezzanine", parent_ref: nil, artwork_url: nil, subtitle: nil}
@@ -66,6 +83,7 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
         subtitle: nil,
         duration_ms: Keyword.get(options, :duration_ms),
         byte_size: Keyword.get(options, :byte_size, 100),
+        number: Keyword.get(options, :number),
         format: :flac
       }
     ])
@@ -155,28 +173,49 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
       assert held(second.id)
     end
 
-    # An artist holds albums, so a mark on one reads nothing. A discography is
-    # gigabytes, and no person who presses one control asks for that.
-    test "marking an artist reads nothing, because it holds no track of its own" do
-      Fill.artists([
-        %{ref: "artist-1", title: "Massive Attack", parent_ref: nil, artwork_url: nil}
-      ])
+    # **A mark reaches two levels.** An artist holds albums and no track of its own, so
+    # a mark on one reads the tracks of each album. A discography is gigabytes, and a
+    # person who marks one has said what they want the card for.
+    test "marking an artist reads the tracks of each album that it holds" do
+      serve(100)
+      artist()
+      Fill.albums([album_of("album-1", "Mezzanine"), album_of("album-2", "Blue Lines")])
+      first = track("track-1", album: "album-1")
+      second = track("track-2", album: "album-2")
+
+      assert FavouriteAudio.read(item("artist-1")) == 2
+
+      assert held(first.id)
+      assert held(second.id)
+    end
+
+    # A run that reads album by album leaves whole albums on the card when it stops, and
+    # not one track of each.
+    test "it reads one album after the other, in the order of the albums" do
+      serve(100)
+      artist()
 
       Fill.albums([
-        %{
-          ref: "album-1",
-          title: "Mezzanine",
-          parent_ref: "artist-1",
-          artwork_url: nil,
-          subtitle: nil
-        }
+        album_of("album-2", "Blue Lines", ~U[1991-04-08 00:00:00Z]),
+        album_of("album-1", "Mezzanine", ~U[1998-04-20 00:00:00Z])
       ])
 
-      track("track-1")
+      first = track("track-1", album: "album-1", number: 1)
+      second = track("track-2", album: "album-2", number: 1)
 
-      Req.Test.stub(Download, fn _conn -> raise "the network must not be read" end)
+      assert [one, two] = FavouriteAudio.tracks(item("artist-1"))
+      assert one.id == second.id
+      assert two.id == first.id
+    end
 
-      assert FavouriteAudio.read(item("artist-1")) == 0
+    # An album that holds tracks of its own reads those, and it reaches no further.
+    test "an album reads its own tracks and not the tracks of a container below it" do
+      serve(100)
+      album()
+      one = track("track-1")
+
+      assert FavouriteAudio.read(item("album-1")) == 1
+      assert held(one.id)
     end
 
     test "a track that the cache holds already reads nothing, and it touches nothing" do
