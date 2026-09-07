@@ -10,6 +10,9 @@ defmodule MyHiFi.Setup do
   80, and its captive portal needs port 80 as well. `MyHiFiWeb.Endpoint` uses the
   same port. `MyHiFi.Application` therefore starts one or the other, and never
   both.
+
+  The access point carries the name of the device, and so does the page of the wizard.
+  See `MyHiFi.Device.Identity`.
   """
 
   @doc """
@@ -47,13 +50,25 @@ defmodule MyHiFi.Setup do
   else
     require Logger
 
+    alias MyHiFi.Device.Identity
     alias Nerves.Runtime.KV
 
+    # **The access point carries the name of the device.** `VintageNetWizard.APMode`
+    # reads `:ssid` from the application environment each time that it makes the access
+    # point, and it uses the host name when it finds none. A person looks for the name
+    # that they gave the device, and a household with two of them cannot tell
+    # `nerves-1234` from `nerves-5678`.
+    #
+    # This is also the reason that the name lives in `Nerves.Runtime.KV`: the wizard
+    # runs before the Repo. See `MyHiFi.Device.Identity`.
     defp do_start do
+      name = Identity.name()
+      Application.put_env(:vintage_net_wizard, :ssid, name)
+
       case VintageNetWizard.run_if_unconfigured(
              on_exit: {__MODULE__, :finished, []},
              device_info: device_info(),
-             ui: [title: "MyHiFi"]
+             ui: [title: name]
            ) do
         :configured ->
           :not_needed

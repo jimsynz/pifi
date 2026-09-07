@@ -17,6 +17,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   use Emerge.UI
 
   alias Emerge.UI.{Background, Border, Font}
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Peripheral.BatteryIcon
 
   @width 320
@@ -27,6 +28,11 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   `state` decides the whole picture. `:stopped` shows the name of the device,
   because a person who sees nothing else needs to know that the device is awake.
+
+  `device_name` is that name, and `splash_path` is the disk path of the picture that a
+  person chose for that moment, or `nil` for a device that holds none. A device with a
+  picture draws it over the whole screen, and the name sits in a band at the foot of
+  it. See `MyHiFi.Device.Identity`.
 
   `artwork_path` is the disk path of a thumbnail image, or `nil` for no artwork.
   The path must be absolute and allowed by Emerge's runtime paths configuration.
@@ -39,6 +45,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
+          device_name: String.t(),
+          splash_path: String.t() | nil,
           title: String.t() | nil,
           subtitle: String.t() | nil,
           message: String.t() | nil,
@@ -61,6 +69,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   def new do
     %{
       state: :stopped,
+      device_name: Identity.default_name(),
+      splash_path: nil,
       title: nil,
       subtitle: nil,
       message: nil,
@@ -75,8 +85,27 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
     }
   end
 
+  @doc """
+  The view that a stop leaves.
+
+  A stop clears the track. It clears neither what the hardware says nor what the device
+  is called, so the charge of the cell, the name and the picture stay.
+  """
+  @spec stopped(view()) :: view()
+  def stopped(view) do
+    %{
+      new()
+      | battery_percent: view.battery_percent,
+        low_battery?: view.low_battery?,
+        device_name: view.device_name,
+        splash_path: view.splash_path
+    }
+  end
+
   @doc "Draw one view."
   @spec render(view()) :: Emerge.tree()
+  def render(%{state: :stopped, splash_path: path} = view) when is_binary(path), do: splash(view)
+
   def render(view) do
     column(
       [
@@ -97,7 +126,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   know that there is nothing to skip.
   """
   @spec status_text(view()) :: String.t()
-  def status_text(%{state: :stopped}), do: "MyHiFi"
+  def status_text(%{state: :stopped} = view), do: view.device_name
   def status_text(%{state: :failed}), do: "Failed"
   def status_text(%{state: :buffering, percent: percent}), do: "Buffering #{percent}%"
   def status_text(%{state: :paused}), do: "Paused"
@@ -119,6 +148,50 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       0 -> "#{minutes}:#{pad(rem(seconds, 60))}"
       hours -> "#{hours}:#{pad(rem(minutes, 60))}:#{pad(rem(seconds, 60))}"
     end
+  end
+
+  # **The picture fills the screen, and a band at the foot holds the name.** That is the
+  # layout of `MyHiFi.Peripheral.PirateAudio.Screen`, and the reason is the same one: no
+  # measurement of a picture says whether text over it reads, because the variance of
+  # the pixels hides letters and a mean says nothing about variance. A flat band
+  # flattens both, so one code path serves every picture. Read that module for why the
+  # band is flat and not a gradient.
+  defp splash(view) do
+    el(
+      [
+        width(px(@width)),
+        height(px(@height)),
+        Background.image({:path, view.splash_path}, fit: :cover)
+      ],
+      column([width(fill()), height(fill())], [
+        splash_battery(view),
+        el([width(fill()), height(fill())], none()),
+        splash_name(view)
+      ])
+    )
+  end
+
+  # The status row is absent from this layout, so the battery of a device that holds one
+  # sits over the picture, on a band that keeps it readable.
+  defp splash_battery(%{battery_percent: nil}), do: none()
+
+  defp splash_battery(view) do
+    row([width(fill()), padding_xy(12, 10)], [
+      el([width(fill())], none()),
+      el(
+        [padding_xy(6, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
+        BatteryIcon.render(view.battery_percent, view.low_battery?)
+      )
+    ])
+  end
+
+  defp splash_name(view) do
+    el(
+      [width(fill()), padding_xy(16, 14), Background.color(color_rgba(0, 0, 0, 0.72))],
+      paragraph([width(fill()), Font.size(24), Font.color(color(:slate, 50))], [
+        text(view.device_name)
+      ])
+    )
   end
 
   defp status_row(view) do

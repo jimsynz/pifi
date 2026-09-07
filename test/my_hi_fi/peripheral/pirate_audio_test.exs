@@ -3,11 +3,13 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
   # same time.
   use MyHiFi.DataCase, async: false
 
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PirateAudio
   alias MyHiFi.Peripheral.PirateAudio.Screen
   alias MyHiFi.Test.RecordingScreen
+  alias Nerves.Runtime.KV
 
   @memory_write 0x2C
   @sleep_in 0x10
@@ -46,6 +48,19 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
     refute state.awake?
     assert frames() == 0
     refute 1 in RecordingScreen.backlight_line()
+  end
+
+  # The name lives in `Nerves.Runtime.KV`, and a screen may start long after a person
+  # wrote it, so the first frame reads it and waits for no event.
+  test "the first frame holds the name that a person gave the device" do
+    :ok = Identity.put_name("Kitchen")
+    on_exit(fn -> KV.put("myhifi_device_name", "") end)
+
+    RecordingScreen.use_it(@board)
+
+    {:ok, state} = PirateAudio.init([])
+
+    assert state.view.device_name == "Kitchen"
   end
 
   test "it reads the player topic and the device topic" do
@@ -113,6 +128,24 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
 
       assert state.view.state == :stopped
       assert state.view.title == nil
+    end
+
+    test "a name that a person gave reaches the view", %{state: state} do
+      event = %DeviceEvents.IdentityChanged{name: "Kitchen", splash_path: nil}
+
+      {:ok, state} = PirateAudio.handle_event(event, state)
+
+      assert state.view.device_name == "Kitchen"
+    end
+
+    test "a stop keeps the name, because the device did not change", %{state: state} do
+      event = %DeviceEvents.IdentityChanged{name: "Kitchen", splash_path: nil}
+
+      {:ok, state} = PirateAudio.handle_event(event, state)
+      {:ok, state} = PirateAudio.handle_event(%Player.Stopped{reason: :requested}, state)
+
+      assert state.view.state == :stopped
+      assert state.view.device_name == "Kitchen"
     end
 
     test "a failure says what went wrong", %{state: state} do

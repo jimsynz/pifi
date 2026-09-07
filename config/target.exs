@@ -152,8 +152,9 @@ end
 #
 # See https://github.com/nerves-networking/vintage_net for more information
 # The wizard makes the access point name from the hostname, and the hostname is
-# `nerves-<serial>`. A person looks for the name of the product instead.
-config :vintage_net_wizard, ssid: "myhifi"
+# `nerves-<serial>`. A person looks for the name that they gave the device instead, so
+# `MyHiFi.Setup` writes `config :vintage_net_wizard, ssid: ...` at the moment that it
+# starts the wizard. A name here would take the place of that one.
 
 config :vintage_net,
   # A real country code gives the correct channel list. Access point mode needs
@@ -191,6 +192,10 @@ config :mdns_lite,
   # because otherwise any of the devices may respond to nerves.local leading to
   # unpredictable behavior.
 
+  #
+  # **`MyHiFi.Device.Identity.announce/0` replaces this list at each boot.** It names
+  # the device first, so the advertisement of the web service carries the name that a
+  # person gave, and `nerves.local` goes for the reason above.
   hosts: [:hostname, "nerves"],
   ttl: 120,
 

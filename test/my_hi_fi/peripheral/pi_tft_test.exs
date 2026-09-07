@@ -3,9 +3,12 @@ defmodule MyHiFi.Peripheral.PiTftTest do
   # the same time.
   use MyHiFi.DataCase, async: false
 
+  alias MyHiFi.Device.Identity
+  alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PiTft
   alias MyHiFi.Test.RecordingScreen
+  alias Nerves.Runtime.KV
 
   # A JPEG of 16 by 16 pixels that Skia can read. A picture of a few bytes that names
   # itself a JPEG would draw the same mark as a picture that Emerge refuses, and this
@@ -54,6 +57,19 @@ defmodule MyHiFi.Peripheral.PiTftTest do
     # off. It was on from the moment that the board had power, so a person sees no
     # change. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
     assert List.last(RecordingScreen.backlight()) == 0
+  end
+
+  # The name lives in `Nerves.Runtime.KV`, and a screen may start long after a person
+  # wrote it, so the first frame reads it and waits for no event.
+  test "the first frame holds the name that a person gave the device" do
+    :ok = Identity.put_name("Kitchen")
+    on_exit(fn -> KV.put("myhifi_device_name", "") end)
+
+    RecordingScreen.use_it()
+
+    {:ok, state} = PiTft.init([])
+
+    assert state.view.device_name == "Kitchen"
   end
 
   test "it reads the player topic and the device topic" do
@@ -135,6 +151,24 @@ defmodule MyHiFi.Peripheral.PiTftTest do
       assert state.view.state == :paused
       assert state.view.title == "The Detail"
       assert state.view.position_ms == 44_000
+    end
+
+    test "a name that a person gave reaches the view", %{state: state} do
+      event = %DeviceEvents.IdentityChanged{name: "Kitchen", splash_path: nil}
+
+      {:ok, state} = PiTft.handle_event(event, state)
+
+      assert state.view.device_name == "Kitchen"
+    end
+
+    test "a stop keeps the name, because the device did not change", %{state: state} do
+      event = %DeviceEvents.IdentityChanged{name: "Kitchen", splash_path: nil}
+
+      {:ok, state} = PiTft.handle_event(event, state)
+      {:ok, state} = PiTft.handle_event(%Player.Stopped{reason: :requested}, state)
+
+      assert state.view.state == :stopped
+      assert state.view.device_name == "Kitchen"
     end
 
     test "a stop leaves nothing selected", %{state: state} do

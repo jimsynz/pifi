@@ -20,6 +20,11 @@ defmodule MyHiFi.Artwork do
   The name of an entry is a hash of the address, and it carries no extension. The
   type lives on the row, so serving one picture reads one row and the name needs no
   guess about which of four files exists.
+
+  **A person also gives a picture, and it lives here too.** The splash of the device
+  screen comes from a browser and not from a service, so `put/1` names it by the hash
+  of the bytes. That name holds 64 characters like the hash of an address, and every
+  reader of this module therefore takes it. See `MyHiFi.Device.Identity`.
   """
 
   alias MyHiFi.Artwork.Accent
@@ -142,6 +147,62 @@ defmodule MyHiFi.Artwork do
   end
 
   def fetch(_url), do: {:error, :no_address}
+
+  @doc """
+  Hold a picture that a person gave, and give the name of the entry.
+
+  A person gives bytes and no address, so the name of the entry is the hash of the
+  bytes. That name holds 64 hexadecimal characters like every other name here, so
+  `serve/1`, `serve_thumbnail/1` and `accent/1` take it and no route needs a rule of
+  its own. The same file twice is therefore one entry.
+
+  **The entry stays against every eviction.** No address can read these bytes again, so
+  an eviction that took them would leave a setting that names a picture which is gone.
+  See `MyHiFi.Device.Identity`.
+
+  It refuses a GIF and a WebP. libvips in this firmware writes neither type, so such a
+  picture can never hold a thumbnail, and a screen of this device draws the thumbnail
+  and never the picture. The person who gave the file learns that at the moment that
+  they give it.
+
+  A host build holds no `vipsthumbnail`, and that one fault gives no error: the picture
+  is held, and the screen of a target is where the thumbnail matters.
+  """
+  @spec put(binary()) :: {:ok, String.t()} | {:error, term()}
+  def put(bytes) when is_binary(bytes) do
+    with {:ok, content_type} <- given_type(bytes),
+         :ok <- small_enough(bytes),
+         {:ok, entry} <-
+           Cache.put(@namespace, hash(bytes), %{
+             bytes: bytes,
+             content_type: content_type,
+             keep?: true
+           }),
+         :ok <- thumbnail_of(entry) do
+      # A picture of 4 MB can put the cache over its limit, so the eviction runs at the
+      # moment that the cache grew, as it does for a logo that arrives.
+      Cache.prune()
+      {:ok, entry.entry_key}
+    end
+  end
+
+  @doc """
+  Remove one picture, and the thumbnail of it.
+
+  A name that the cache does not hold gives `:ok`, because the cache then holds what
+  the caller asked for.
+  """
+  @spec remove(String.t()) :: :ok
+  def remove(name) do
+    case Cache.fetch(@namespace, name) do
+      {:ok, entry} ->
+        Cache.purge!(entry)
+        :ok
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
 
   @doc """
   Whether this firmware can read one address.
@@ -337,6 +398,11 @@ defmodule MyHiFi.Artwork do
   defp store_thumbnail(source, bytes, metadata) do
     Cache.put(@namespace, thumbnail_key(source.entry_key), %{
       bytes: bytes,
+      # A variant of an entry that stays against an eviction must stay with it. A
+      # picture that a person gave holds `keep?`, and a screen draws the thumbnail and
+      # never the picture, so a thumbnail that an eviction took would empty the screen
+      # and leave the bytes that made it on the card.
+      keep?: source.keep?,
       content_type: Map.get(metadata, :content_type, source.content_type),
       metadata: Map.drop(metadata, [:content_type, :filename]),
       variant_of_blob_id: source.id,
@@ -348,6 +414,31 @@ defmodule MyHiFi.Artwork do
   # The key of the picture and a name for what this is. It holds no hash of 64
   # characters, so `serve/1` refuses it and the thumbnail route is the one way to it.
   defp thumbnail_key(source_key), do: "#{source_key}.thumbnail"
+
+  defp given_type(bytes) do
+    with {:ok, extension} <- extension(bytes, "an upload") do
+      content_type = Map.fetch!(@content_types, extension)
+
+      if Thumbnail.accept?(content_type),
+        do: {:ok, content_type},
+        else: {:error, {:not_an_image, content_type}}
+    end
+  end
+
+  defp small_enough(bytes) when byte_size(bytes) > @byte_limit,
+    do: {:error, {:too_large, byte_size(bytes)}}
+
+  defp small_enough(_bytes), do: :ok
+
+  # A host build holds no `vipsthumbnail`, and a picture without one still belongs to
+  # the device. Every other fault reaches the person who gave the file.
+  defp thumbnail_of(entry) do
+    case generate_thumbnail(entry) do
+      {:ok, _variant} -> :ok
+      {:error, :vipsthumbnail_not_found} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp download(url) do
     with {:ok, response} <- get(url),

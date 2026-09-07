@@ -7,6 +7,7 @@ defmodule MyHiFiWeb.SettingsLive do
   browser moves out of it.
 
       /settings                        the menu
+      /settings/device                 the name and the picture of the device
       /settings/output                 the sound card
       /settings/sources                the sources, and which ones are in use
       /settings/sources/internet-radio one source
@@ -30,6 +31,10 @@ defmodule MyHiFiWeb.SettingsLive do
   image runs on a board with a screen and on a board with none. See
   `MyHiFi.Peripheral`.
 
+  The name of the device and the picture of the idle screen are the two things on this
+  page that reach the hardware and the network together, and `MyHiFi.Device.Identity`
+  holds both. This page gives the name to that module and it draws what comes back.
+
   The network state and the storage state are reports, and a person changes neither
   one here. The Wi-Fi details belong to the setup wizard. See `MyHiFi.Setup`.
 
@@ -44,8 +49,13 @@ defmodule MyHiFiWeb.SettingsLive do
 
   use MyHiFiWeb, :live_view
 
+  # Sobelow reads `@sobelow_skip` from the source. This registration stops the
+  # compiler warning that no Elixir code reads the attribute.
+  Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
+
   alias MyHiFi.AutoSync
   alias MyHiFi.Device
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: Events
   alias MyHiFi.Hardware
@@ -56,6 +66,17 @@ defmodule MyHiFiWeb.SettingsLive do
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
     if connected?(socket), do: Event.subscribe(:device)
+
+    # **The browser holds the bytes until a person presses the control.** One picture,
+    # and 4 MB, which is the limit that `MyHiFi.Artwork` holds for a picture of any
+    # kind. A GIF and a WebP are absent because libvips in this firmware writes
+    # neither, so a screen could never draw one. See `MyHiFi.Artwork.put/1`.
+    socket =
+      allow_upload(socket, :splash,
+        accept: ~w(.jpg .jpeg .png),
+        max_entries: 1,
+        max_file_size: 4 * 1024 * 1024
+      )
 
     {:ok, refresh(socket)}
   end
@@ -85,6 +106,15 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_info(%Events.IdentityChanged{} = event, socket) do
+    {:noreply,
+     socket
+     |> assign(:device_name, event.name)
+     |> assign(:device_slug, Identity.slug(event.name))
+     |> assign(:splash_path, event.splash_path)}
+  end
+
+  @impl Phoenix.LiveView
   def handle_info(%Events.StorageChanged{} = event, socket) do
     fields = [:path, :total_bytes, :free_bytes, :used_bytes, :database_bytes, :full?]
 
@@ -95,6 +125,46 @@ defmodule MyHiFiWeb.SettingsLive do
   # it.
   @impl Phoenix.LiveView
   def handle_info(_message, socket), do: {:noreply, socket}
+
+  @impl Phoenix.LiveView
+  def handle_event("save_device_name", %{"device" => %{"name" => name}}, socket) do
+    case Identity.put_name(name) do
+      :ok ->
+        {:noreply, socket |> put_flash(:info, "This device is #{Identity.name()}.") |> refresh()}
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  # A file input needs a change event of its own, and the answer is the upload that
+  # LiveView already holds. Nothing here reads the parameters.
+  @impl Phoenix.LiveView
+  def handle_event("validate_splash", _params, socket), do: {:noreply, socket}
+
+  # **The browser sends the file to a temporary path, and this reads it there.**
+  # `MyHiFi.Artwork` writes the bytes to the cache, so the picture reaches the disk one
+  # time and the temporary file goes when this function answers.
+  @sobelow_skip ["Traversal.FileModule"]
+  @impl Phoenix.LiveView
+  def handle_event("save_splash", _params, socket) do
+    read = fn %{path: path}, _entry -> {:ok, File.read!(path)} end
+
+    case consume_uploaded_entries(socket, :splash, read) do
+      [bytes] -> {:noreply, splash_answer(socket, Identity.put_splash(bytes))}
+      [] -> {:noreply, put_flash(socket, :error, "Choose a picture first.")}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("remove_splash", _params, socket) do
+    :ok = Identity.remove_splash()
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "The screen shows the name of the device now.")
+     |> refresh()}
+  end
 
   @impl Phoenix.LiveView
   def handle_event("enable_source", %{"slug" => slug, "enabled" => enabled}, socket) do
@@ -211,6 +281,10 @@ defmodule MyHiFiWeb.SettingsLive do
   def render(%{live_action: :menu} = assigns) do
     ~H"""
     <div id="settings" class="glass sheen divide-y divide-edge rounded-xl">
+      <.row id="device-row" to={~p"/settings/device"} icon="hero-identification" title="Device">
+        {@device_name}
+      </.row>
+
       <.row id="output-row" to={~p"/settings/output"} icon="hero-speaker-wave" title="Output device">
         {output_summary(@output)}
       </.row>
@@ -246,6 +320,93 @@ defmodule MyHiFiWeb.SettingsLive do
         {size(@storage.free_bytes)} free of {size(@storage.total_bytes)}
       </.row>
     </div>
+    """
+  end
+
+  @impl Phoenix.LiveView
+  def render(%{live_action: :device} = assigns) do
+    ~H"""
+    <.section id="settings-device" title="Device" back={~p"/settings"}>
+      <p class="mb-3 text-sm text-ink-dim">
+        The name reaches the network, the screen of the device, and the access point
+        that the Wi-Fi setup makes. A household with two of these needs two names.
+      </p>
+
+      <.form for={@device_form} id="device-form" phx-submit="save_device_name">
+        <.input field={@device_form[:name]} type="text" label="Name" maxlength="32" />
+
+        <p class="mt-1 text-sm text-ink-dim">
+          This device answers at <span class="numerals">{@device_slug}.local</span>,
+          and at the name that the board came with. A name holds 32 characters or less.
+        </p>
+
+        <button type="submit" id="save-device-name" class="control mt-3 rounded-lg px-4 py-2 text-sm">
+          Save
+        </button>
+      </.form>
+
+      <div class="mt-4 border-t border-edge pt-4">
+        <p class="mb-3 text-sm text-ink-dim">
+          The screen of the device shows this picture when it plays nothing. Give a JPEG
+          or a PNG of 4096 KB or less.
+        </p>
+
+        <img
+          :if={@splash_path}
+          id="splash"
+          src={@splash_path}
+          alt="The picture that the screen shows when the device plays nothing"
+          class="mb-3 max-h-40 rounded-lg"
+        />
+
+        <p :if={is_nil(@splash_path)} id="no-splash" class="mb-3 text-sm text-ink-dim">
+          This device holds no picture, so each screen shows its name.
+        </p>
+
+        <.form
+          for={@splash_form}
+          id="splash-form"
+          phx-submit="save_splash"
+          phx-change="validate_splash"
+        >
+          <.live_file_input upload={@uploads.splash} class="text-sm text-ink-dim" />
+
+          <p
+            :for={error <- upload_errors(@uploads.splash)}
+            class="mt-1 text-sm text-red-300"
+          >
+            {upload_message(error)}
+          </p>
+
+          <div :for={entry <- @uploads.splash.entries} class="mt-2 text-sm text-ink-dim">
+            <p>{entry.client_name}</p>
+
+            <p
+              :for={error <- upload_errors(@uploads.splash, entry)}
+              class="text-red-300"
+            >
+              {upload_message(error)}
+            </p>
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button type="submit" id="save-splash" class="control rounded-lg px-4 py-2 text-sm">
+              Use this picture
+            </button>
+
+            <button
+              :if={@splash_path}
+              type="button"
+              id="remove-splash"
+              phx-click="remove_splash"
+              class="control rounded-lg px-4 py-2 text-sm"
+            >
+              Remove the picture
+            </button>
+          </div>
+        </.form>
+      </div>
+    </.section>
     """
   end
 
@@ -748,6 +909,17 @@ defmodule MyHiFiWeb.SettingsLive do
     """
   end
 
+  defp splash_answer(socket, :ok) do
+    socket |> put_flash(:info, "Each screen shows that picture now.") |> refresh()
+  end
+
+  defp splash_answer(socket, {:error, message}), do: put_flash(socket, :error, message)
+
+  defp upload_message(:too_large), do: "That file is larger than 4096 KB."
+  defp upload_message(:not_accepted), do: "That file is not a JPEG and not a PNG."
+  defp upload_message(:too_many_files), do: "Give one picture."
+  defp upload_message(error), do: "That file did not arrive: #{inspect(error)}"
+
   defp title(socket), do: assign(socket, :page_title, "Settings")
 
   # A source reads its own current values, and a description of one holds a count
@@ -782,7 +954,14 @@ defmodule MyHiFiWeb.SettingsLive do
   # A person who opens the page has had no event yet, and a person who changed
   # something wants to see the answer of that change now.
   defp refresh(socket) do
+    name = Identity.name()
+
     socket
+    |> assign(:device_name, name)
+    |> assign(:device_slug, Identity.slug(name))
+    |> assign(:device_form, to_form(%{"name" => name}, as: :device))
+    |> assign(:splash_path, Identity.splash_path())
+    |> assign(:splash_form, to_form(%{}, as: :splash))
     |> assign(:profiles, Hardware.profiles())
     |> assign(:profile, Hardware.chosen())
     |> assign(:output, MyHiFi.Playback.output!())

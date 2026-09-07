@@ -60,6 +60,7 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   alias MyHiFi.Artwork
   alias MyHiFi.Artwork.Accent
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Input
@@ -89,7 +90,7 @@ defmodule MyHiFi.Peripheral.PiTft do
         screen: screen,
         stmpe: stmpe,
         buttons: buttons,
-        view: with_battery(Screen.new()),
+        view: Screen.new() |> with_battery() |> with_identity(),
         awake?: true
       })
     end
@@ -106,6 +107,18 @@ defmodule MyHiFi.Peripheral.PiTft do
     end
   end
 
+  # **A person names the device and gives it a picture at any time, and a screen may
+  # start long after that.** An event says that one of the two moved, so a screen that
+  # waited for an event would show the name that no person chose. See
+  # `MyHiFi.Device.Identity`.
+  defp with_identity(view) do
+    %{
+      view
+      | device_name: Identity.name(),
+        splash_path: artwork_disk_path(Identity.splash_path())
+    }
+  end
+
   # A person can turn the screen on while the device is in standby, and a device that
   # lost its power in standby comes back in standby. The player holds that state and it
   # publishes no event for a state that did not change, so this asks one time. A page
@@ -120,6 +133,9 @@ defmodule MyHiFi.Peripheral.PiTft do
   The `:device` topic carries `MyHiFi.Event.Device.BatteryChanged`. A device on the mains
   publishes none of those and this screen then draws no battery, which is the whole of
   what it needs to know. See `MyHiFi.Peripheral.Battery`.
+
+  It also carries `MyHiFi.Event.Device.IdentityChanged`, so a person who names the
+  device on the web page reads that name on the screen at once.
   """
   @impl MyHiFi.Peripheral
   def subscriptions, do: [:player, :device]
@@ -227,6 +243,9 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp view(%DeviceEvents.BatteryChanged{} = event, view),
     do: %{view | battery_percent: event.percent, low_battery?: event.low?}
 
+  defp view(%DeviceEvents.IdentityChanged{} = event, view),
+    do: %{view | device_name: event.name, splash_path: artwork_disk_path(event.splash_path)}
+
   defp view(%Player.Buffering{} = event, view),
     do: %{view | state: :buffering, percent: event.percent}
 
@@ -236,9 +255,8 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp view(%Player.Failed{} = event, view),
     do: %{view | state: :failed, message: message(event.reason)}
 
-  # A stop clears the track, and it does not clear the cell.
-  defp view(%Player.Stopped{}, view),
-    do: %{Screen.new() | battery_percent: view.battery_percent, low_battery?: view.low_battery?}
+  # A stop clears the track, and it clears neither the cell nor the name of the device.
+  defp view(%Player.Stopped{}, view), do: Screen.stopped(view)
 
   # A hint or a view event changes nothing that this screen shows. An ignored event is
   # normal. See `MyHiFi.Peripheral`.

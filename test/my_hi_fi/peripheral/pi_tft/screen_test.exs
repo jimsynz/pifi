@@ -3,6 +3,12 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
 
   alias MyHiFi.Peripheral.PiTft.Screen
 
+  # One flat red picture of 8 by 8 pixels. A flat colour is what makes a measurement of
+  # the pixels mean something: every place that the picture covers holds one value.
+  @red_png Base.decode64!(
+             "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGO4o6GBFTEMLQkAe3tLAfuiUfAAAAAASUVORK5CYII="
+           )
+
   describe "clock/1" do
     test "gives minutes and seconds under an hour" do
       assert Screen.clock(0) == "0:00"
@@ -18,6 +24,10 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
   end
 
   describe "status_text/1" do
+    test "a device that plays nothing names itself, so a person knows it is awake" do
+      assert Screen.status_text(%{Screen.new() | device_name: "Kitchen"}) == "Kitchen"
+    end
+
     test "tells a person which state the player is in" do
       assert Screen.status_text(Screen.new()) == "MyHiFi"
       assert Screen.status_text(%{Screen.new() | state: :playing}) == "Playing"
@@ -41,6 +51,89 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
       view = %{Screen.new() | state: :paused, live?: true}
 
       assert Screen.status_text(view) == "Paused"
+    end
+  end
+
+  describe "stopped/1" do
+    # A person who stopped the music reads the name of the device and the charge of the
+    # cell. Neither one belongs to the track that went.
+    test "it clears the track and keeps the device and the hardware" do
+      playing = %{
+        Screen.new()
+        | state: :playing,
+          title: "The Detail",
+          position_ms: 512_000,
+          duration_ms: 1_284_000,
+          battery_percent: 42,
+          low_battery?: true,
+          device_name: "Kitchen",
+          splash_path: "/root/cache/artwork/abc.thumbnail"
+      }
+
+      stopped = Screen.stopped(playing)
+
+      assert stopped.state == :stopped
+      assert stopped.title == nil
+      assert stopped.position_ms == 0
+      assert stopped.battery_percent == 42
+      assert stopped.low_battery?
+      assert stopped.device_name == "Kitchen"
+      assert stopped.splash_path == "/root/cache/artwork/abc.thumbnail"
+    end
+  end
+
+  describe "the picture of the idle screen" do
+    setup [:splash_file]
+
+    test "it fills the screen, and the name reads over it", %{path: path, assets: assets} do
+      {width, height} = Screen.size()
+      view = %{Screen.new() | device_name: "Kitchen", splash_path: path}
+
+      pixels =
+        view
+        |> Screen.render()
+        |> EmergeSkia.render_to_pixels(
+          otp_app: :my_hi_fi,
+          width: width,
+          height: height,
+          assets: assets
+        )
+
+      assert byte_size(pixels) == width * height * 4
+
+      # The picture is one flat red, so a row above the band holds it and the band at
+      # the foot is dark enough to read light text on.
+      assert {red, _green, _blue} = pixel(pixels, width, 4, 40)
+      assert red > 150
+      assert {red, green, blue} = pixel(pixels, width, 4, height - 4)
+      assert red < 90 and green < 90 and blue < 90
+    end
+
+    # A track that plays holds the picture of that track, and the splash belongs to the
+    # moment when the device plays nothing.
+    test "a track that plays draws the layout of a track", %{path: path, assets: assets} do
+      {width, height} = Screen.size()
+
+      view = %{
+        Screen.new()
+        | state: :playing,
+          title: "Tiny Ruins",
+          device_name: "Kitchen",
+          splash_path: path
+      }
+
+      pixels =
+        view
+        |> Screen.render()
+        |> EmergeSkia.render_to_pixels(
+          otp_app: :my_hi_fi,
+          width: width,
+          height: height,
+          assets: assets
+        )
+
+      assert {red, green, blue} = pixel(pixels, width, 160, 120)
+      assert red < 40 and green < 40 and blue < 40
     end
   end
 
@@ -109,6 +202,28 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
 
       assert pixels(view, width, height) == pixels(%{view | accent: nil}, width, height)
     end
+  end
+
+  # Emerge refuses a runtime path by its extension, so the file carries the name that
+  # the cache gives a thumbnail. See `MyHiFi.Peripheral.PiTft.asset_options/0`.
+  defp splash_file(_context) do
+    directory = Path.join(System.tmp_dir!(), "splash_#{:erlang.unique_integer([:positive])}")
+    path = Path.join(directory, "splash.thumbnail")
+
+    File.mkdir_p!(directory)
+    File.write!(path, @red_png)
+    on_exit(fn -> File.rm_rf(directory) end)
+
+    assets = [runtime_paths: [enabled: true, allowlist: [directory], extensions: [".thumbnail"]]]
+
+    %{path: path, assets: assets}
+  end
+
+  defp pixel(pixels, width, x, y) do
+    offset = (y * width + x) * 4
+    <<_::binary-size(^offset), red, green, blue, _alpha, _rest::binary>> = pixels
+
+    {red, green, blue}
   end
 
   defp pixels(view, width, height) do

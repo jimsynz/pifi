@@ -75,6 +75,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   @behaviour MyHiFi.Peripheral
 
   alias MyHiFi.Artwork
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Input
@@ -121,7 +122,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
         screen: screen,
         buttons: buttons,
         show_ms: Keyword.get(opts, :show_ms, @show_ms),
-        view: with_battery(Screen.new()),
+        view: Screen.new() |> with_battery() |> with_identity(),
         awake?: true
       })
     end
@@ -134,6 +135,18 @@ defmodule MyHiFi.Peripheral.PirateAudio do
       nil -> view
       reading -> %{view | battery_percent: reading.percent, low_battery?: reading.low?}
     end
+  end
+
+  # **A person names the device and gives it a picture at any time, and a screen may
+  # start long after that.** An event says that one of the two moved, so a screen that
+  # waited for an event would show the name that no person chose. See
+  # `MyHiFi.Device.Identity`.
+  defp with_identity(view) do
+    %{
+      view
+      | device_name: Identity.name(),
+        splash_path: artwork_disk_path(Identity.splash_path())
+    }
   end
 
   # A person can turn the screen on while the device is in standby, and a device that
@@ -152,6 +165,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   The `:device` topic carries `MyHiFi.Event.Device.BatteryChanged`, and a cell that is
   nearly flat is the one thing that this screen says over the top of everything else.
+
+  It also carries `MyHiFi.Event.Device.IdentityChanged`, so a person who names the
+  device on the web page reads that name on the screen at once.
   """
   @impl MyHiFi.Peripheral
   def subscriptions, do: [:player, :device]
@@ -262,6 +278,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   defp view(%DeviceEvents.SafeToSwitchOff{safe?: safe?}, view),
     do: %{view | safe_to_switch_off?: safe?}
 
+  defp view(%DeviceEvents.IdentityChanged{} = event, view),
+    do: %{view | device_name: event.name, splash_path: artwork_disk_path(event.splash_path)}
+
   defp view(%Player.Buffering{}, view), do: %{view | state: :buffering}
 
   defp view(%Player.Paused{}, view), do: %{view | state: :paused}
@@ -269,11 +288,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   defp view(%Player.Failed{} = event, view),
     do: %{view | state: :failed, message: message(event.reason)}
 
-  # A stop clears the track, and it does not clear the cell. The warning belongs to the
-  # hardware, so only the gauge takes it away.
-  defp view(%Player.Stopped{}, view) do
-    %{Screen.new() | battery_percent: view.battery_percent, low_battery?: view.low_battery?}
-  end
+  # A stop clears the track, and it clears neither the cell nor the name of the device.
+  # The warning belongs to the hardware, so only the gauge takes it away.
+  defp view(%Player.Stopped{}, view), do: Screen.stopped(view)
 
   # `Player.Progress` lands here, and so do the other events of the `:device` topic. An
   # ignored event is normal. See `MyHiFi.Peripheral`.

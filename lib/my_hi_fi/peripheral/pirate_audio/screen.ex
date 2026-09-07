@@ -42,6 +42,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   use Emerge.UI
 
   alias Emerge.UI.{Background, Border, Font}
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Peripheral.BatteryIcon
 
   @width 240
@@ -53,11 +54,18 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   `state` decides the words. `artwork_path` is the disk path of a thumbnail, or `nil`
   for a track that holds no picture, and the screen then draws a plain dark field.
 
+  `device_name` is the name that a person gave the device, and the screen shows it when
+  the player plays nothing. `splash_path` is the disk path of the picture for that
+  moment, and it fills the field in the place of the dark one. See
+  `MyHiFi.Device.Identity`.
+
   There is no `position_ms` and no `duration_ms`, because this screen draws no bar. See
   the moduledoc.
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
+          device_name: String.t(),
+          splash_path: String.t() | nil,
           title: String.t() | nil,
           subtitle: String.t() | nil,
           message: String.t() | nil,
@@ -76,6 +84,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   def new do
     %{
       state: :stopped,
+      device_name: Identity.default_name(),
+      splash_path: nil,
       title: nil,
       subtitle: nil,
       message: nil,
@@ -83,6 +93,23 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
       low_battery?: false,
       battery_percent: nil,
       safe_to_switch_off?: false
+    }
+  end
+
+  @doc """
+  The view that a stop leaves.
+
+  A stop clears the track. It clears neither what the hardware says nor what the device
+  is called, so the charge of the cell, the name and the picture stay.
+  """
+  @spec stopped(view()) :: view()
+  def stopped(view) do
+    %{
+      new()
+      | battery_percent: view.battery_percent,
+        low_battery?: view.low_battery?,
+        device_name: view.device_name,
+        splash_path: view.splash_path
     }
   end
 
@@ -116,13 +143,21 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   def headline(%{title: title}) when is_binary(title), do: title
   def headline(%{state: :failed} = view), do: view.message || "Failed"
   def headline(%{state: :buffering}), do: "Buffering"
-  def headline(%{state: :stopped}), do: "MyHiFi"
+  def headline(%{state: :stopped} = view), do: view.device_name
   def headline(_view), do: "Nothing is playing"
 
   # The artwork covers the screen, and a track with none gets the slate that the rest of
   # this firmware uses, so the words sit on a field that reads the same way.
-  defp field(%{artwork_path: nil}), do: Background.color(color(:slate, 950))
-  defp field(%{artwork_path: path}), do: Background.image({:path, path}, fit: :cover)
+  #
+  # A device that plays nothing draws the picture that a person chose, and the scrim
+  # keeps the name readable over it in the way that it does over a cover.
+  defp field(%{artwork_path: path}) when is_binary(path),
+    do: Background.image({:path, path}, fit: :cover)
+
+  defp field(%{state: :stopped, splash_path: path}) when is_binary(path),
+    do: Background.image({:path, path}, fit: :cover)
+
+  defp field(_view), do: Background.color(color(:slate, 950))
 
   # The picture takes every row that the words leave.
   defp spacer, do: el([width(fill()), height(fill())], none())

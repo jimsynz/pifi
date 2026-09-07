@@ -52,6 +52,7 @@ defmodule MyHiFi.Jellyfin.Server do
   Jellyfin client uses it for a direct address.
   """
 
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Settings
 
   @address_setting "jellyfin_address"
@@ -197,16 +198,13 @@ defmodule MyHiFi.Jellyfin.Server do
   @doc """
   The name that the server lists this device under.
 
-  It is the host name of the board, so a household with two of them reads which is
-  which. A host that answers no name gives `MyHiFi`.
+  It is the name that a person gave the device, so a household with two of them reads
+  which is which. The session of the server does not move with it: `device_id/0` is
+  what a Jellyfin server holds a session against, and that one never changes. See
+  `MyHiFi.Device.Identity`.
   """
   @spec device_name() :: String.t()
-  def device_name do
-    case :inet.gethostname() do
-      {:ok, name} -> to_string(name)
-      _other -> @client
-    end
-  end
+  def device_name, do: Identity.name()
 
   @doc """
   The `Authorization` header of one request.

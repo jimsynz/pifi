@@ -2,6 +2,8 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   use MyHiFiWeb.ConnCase, async: false
   use Oban.Testing, repo: MyHiFi.Repo
 
+  alias MyHiFi.Artwork
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: Events
   alias MyHiFi.Peripheral
@@ -13,6 +15,13 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   alias MyHiFi.Test.NoCardOutput
   alias MyHiFi.Test.Stations
   alias MyHiFi.Test.TwoCardOutput
+  alias Nerves.Runtime.KV
+
+  # One flat picture of 2 by 2 pixels, and a whole one. `MyHiFi.Artwork.put/1` runs
+  # `vipsthumbnail` over the bytes, and a header alone does not answer that.
+  @png Base.decode64!(
+         "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGM4IacBRAwQCgAgFgQ5YebC6gAAAABJRU5ErkJggg=="
+       )
 
   @radio Source.slug(Source.InternetRadio)
   @podcasts Source.slug(Source.Podcasts)
@@ -29,6 +38,12 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     start_supervised!(MyHiFi.AutoStandby)
 
     on_exit(fn ->
+      # The name lives in `Nerves.Runtime.KV`, and a host build keeps that store in
+      # memory for the whole node. See `MyHiFi.Device.Identity`.
+      KV.put("myhifi_device_name", "")
+      Identity.remove_splash()
+      File.rm_rf(Artwork.directory())
+
       # The settings outlive a test, because they are rows and not process state.
       for key <- [
             MyHiFi.AutoStandby.key(),
@@ -55,6 +70,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, view, html} = live(conn, ~p"/settings")
 
       assert html =~ "Settings"
+      assert has_element?(view, "#device-row")
       assert has_element?(view, "#output-row")
       assert has_element?(view, "#sources-row")
       assert has_element?(view, "#peripherals-row")
@@ -77,6 +93,91 @@ defmodule MyHiFiWeb.SettingsLiveTest do
         view |> element("#sources-row") |> render_click() |> follow_redirect(conn)
 
       assert html =~ "Internet radio"
+    end
+  end
+
+  describe "the device section" do
+    test "it draws the name and the address of the device", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/device")
+
+      assert html =~ "MyHiFi"
+      assert html =~ "myhifi.local"
+      assert has_element?(view, "#device-form")
+      assert has_element?(view, "#splash-form")
+      assert has_element?(view, "#no-splash")
+    end
+
+    test "a person names the device", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/device")
+
+      html =
+        view
+        |> form("#device-form", device: %{name: "Kitchen"})
+        |> render_submit()
+
+      assert html =~ "This device is Kitchen."
+      assert html =~ "kitchen.local"
+      assert Identity.name() == "Kitchen"
+    end
+
+    test "a name that no person can read is refused, and the device keeps its own",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/device")
+
+      html =
+        view
+        |> form("#device-form", device: %{name: "   "})
+        |> render_submit()
+
+      assert html =~ "A device needs a name."
+      assert Identity.name() == "MyHiFi"
+    end
+
+    test "a person gives the picture of the idle screen, and takes it away again",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/device")
+
+      picture =
+        file_input(view, "#splash-form", :splash, [
+          %{name: "splash.png", content: @png, type: "image/png"}
+        ])
+
+      assert render_upload(picture, "splash.png") =~ "splash.png"
+
+      html = view |> form("#splash-form") |> render_submit()
+
+      assert html =~ "Each screen shows that picture now."
+      assert has_element?(view, "#splash")
+      assert Identity.splash_path() != nil
+
+      html = view |> element("#remove-splash") |> render_click()
+
+      assert html =~ "The screen shows the name of the device now."
+      assert has_element?(view, "#no-splash")
+      assert Identity.splash_path() == nil
+    end
+
+    # The browser refuses a type that the upload does not name, so this reads the answer
+    # of that check and not the one of `MyHiFi.Artwork`.
+    test "a file that is not a JPEG and not a PNG is refused", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/device")
+
+      picture =
+        file_input(view, "#splash-form", :splash, [
+          %{name: "notes.txt", content: "words", type: "text/plain"}
+        ])
+
+      assert {:error, [[_ref, :not_accepted]]} = render_upload(picture, "notes.txt")
+      assert render(view) =~ "not a JPEG and not a PNG"
+    end
+
+    # Two browsers hold this page, and one of them names the device.
+    test "a name that another page wrote reaches this one", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/device")
+
+      Event.publish(:device, %Events.IdentityChanged{name: "Study", splash_path: nil})
+
+      assert render(view) =~ "study.local"
     end
   end
 

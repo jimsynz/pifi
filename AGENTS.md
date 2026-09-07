@@ -197,6 +197,17 @@ Licence: Apache-2.0.
   `MyHiFiWeb.Endpoint` uses the same port. `MyHiFi.Application` therefore starts
   the wizard or the web interface, and never both. See `MyHiFi.Setup` and section
   14 of the spec.
+- **The name of the device lives in `Nerves.Runtime.KV`, and not in the settings
+  table.** The wizard above starts before the Repo does, and the access point carries
+  that name, so a name in the database is unreadable in the one mode that needs it.
+  `fwup` writes the same block, so a factory can name a device, and no upgrade task of
+  the system runs `uboot_clearenv`, so the name goes when a person writes an SD card
+  and at no other time. **The name of the board does not move**: erlinit sets the
+  hostname at the boot, and nothing can change it after that, so
+  `MdnsLite.set_hosts/1` puts the name of the person first and the device answers for
+  both. The picture of the idle screen is not in that block: it is bytes, so
+  `MyHiFi.Artwork` holds it under the hash of those bytes and each screen reads the
+  thumbnail of it. See `MyHiFi.Device.Identity`.
 - **A target-only module must hold no reference on the host.** `vintage_net` and
   `vintage_net_wizard` are target dependencies, so the host build breaks the
   compiler check. Wrap the module in `if Mix.target() != :host do`, as

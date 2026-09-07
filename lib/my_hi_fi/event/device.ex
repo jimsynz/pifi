@@ -2,8 +2,10 @@ defmodule MyHiFi.Event.Device do
   @moduledoc """
   What the hardware is doing, on the `:device` topic.
 
-  No person changes any of this: a DAC arrives, Wi-Fi connects, a download fills the
-  card, and a battery runs down. `MyHiFiWeb.SettingsLive` drew three of these reports on
+  A DAC arrives, Wi-Fi connects, a download fills the card, and a battery runs down. No
+  person changes any of those. `IdentityChanged` is the one event here that a person
+  starts, and it sits with them because the name of a device is what the hardware
+  answers to on the network. `MyHiFiWeb.SettingsLive` drew three of these reports on
   an interval before,
   and an interval reads the same answer again and again. `MyHiFi.Device.Monitor` owns
   the three sources of truth instead, and it publishes one of these when the answer
@@ -58,6 +60,25 @@ defmodule MyHiFi.Event.Device do
     @type t :: %__MODULE__{safe?: boolean()}
 
     defstruct safe?: false
+  end
+
+  defmodule IdentityChanged do
+    @moduledoc """
+    A person named the device, or gave it a picture.
+
+    `name` is what each screen shows when the player plays nothing, and what each page
+    of the web interface carries in its title.
+
+    `splash_path` is the address of the picture that a screen draws at that moment, and
+    it is `nil` for a device that holds none. It is an address of the web interface and
+    not a path of the disk, because the page and the screen both read it: a page asks
+    for it, and a screen turns it into the path of a thumbnail. See
+    `MyHiFi.Device.Identity`.
+    """
+
+    @type t :: %__MODULE__{name: String.t(), splash_path: String.t() | nil}
+
+    defstruct [:name, :splash_path]
   end
 
   defmodule NetworkChanged do

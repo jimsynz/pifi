@@ -5,6 +5,7 @@ defmodule MyHiFi.Application do
 
   use Application
 
+  alias MyHiFi.Device.Identity
   alias MyHiFi.Player.Download
 
   @impl true
@@ -37,6 +38,10 @@ defmodule MyHiFi.Application do
       # bus with nothing on it gives an error, so one screen that no person wired
       # would stop the start of the whole firmware. See `MyHiFi.Peripheral`.
       MyHiFi.Peripheral.start_enabled()
+
+      # The mDNS advertisement lives in memory, and the name of the device lives on the
+      # card, so each boot says the name again. See `MyHiFi.Device.Identity`.
+      Identity.announce()
 
       {:ok, supervisor}
     end
