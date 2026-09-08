@@ -4,6 +4,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   alias MyHiFi.Event
   alias MyHiFi.Event.Player, as: Events
+  alias MyHiFi.Jellyfin.Fill, as: JellyfinFill
   alias MyHiFi.Playback
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Fill, as: PodcastFill
@@ -15,6 +16,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
   # load takes longer than that.
   @async_wait :timer.seconds(5)
 
+  @jellyfin "/browse/jellyfin"
   @radio "/browse/internet-radio"
   @podcasts "/browse/podcasts"
 
@@ -123,6 +125,25 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     )
   end
 
+  defp jellyfin_album do
+    JellyfinFill.artists([
+      %{ref: "artist-1", title: "Massive Attack", parent_ref: nil, artwork_url: nil}
+    ])
+
+    JellyfinFill.albums([
+      %{
+        ref: "album-1",
+        title: "Mezzanine",
+        parent_ref: "artist-1",
+        artwork_url: nil,
+        subtitle: "Massive Attack",
+        release_year: 1998
+      }
+    ])
+
+    Enum.find(Playback.list_items!(), &(&1.source_ref == "album-1"))
+  end
+
   describe "the branches of a source" do
     test "the page draws what the source names, in that order", %{conn: conn} do
       {:ok, _view, html} = live(conn, @radio)
@@ -137,6 +158,15 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       assert html =~ "Subscriptions"
       assert html =~ "Trending"
+    end
+
+    test "an album row shows its release year", %{conn: conn} do
+      album = jellyfin_album()
+      {:ok, view, _html} = live(conn, "#{@jellyfin}/albums")
+
+      render_async(view, @async_wait)
+
+      assert has_element?(view, "#open-#{album.id}", "1998")
     end
 
     test "an address that names no source goes to the first one", %{conn: conn} do

@@ -35,7 +35,8 @@ defmodule MyHiFi.Jellyfin.SyncTest do
       "Id" => "album-#{number}",
       "Name" => "Album #{number}",
       "AlbumArtist" => "Artist #{artist}",
-      "AlbumArtists" => [%{"Id" => "artist-#{artist}", "Name" => "Artist #{artist}"}]
+      "AlbumArtists" => [%{"Id" => "artist-#{artist}", "Name" => "Artist #{artist}"}],
+      "ProductionYear" => 1998
     }
   end
 
@@ -106,6 +107,7 @@ defmodule MyHiFi.Jellyfin.SyncTest do
       assert [album] = items(expr(kind == :container and not is_nil(parent_id)))
       assert album.title == "Album 1"
       assert album.parent_id == artist.id
+      assert album.release_year == 1998
 
       assert tracks = items(expr(kind == :track))
       assert Enum.map(tracks, & &1.title) == ["Track 1", "Track 2"]

@@ -385,13 +385,23 @@ defmodule MyHiFi.Jellyfin.ServerTest do
         "Name" => "Mezzanine",
         "AlbumArtist" => "Massive Attack",
         "AlbumArtists" => [%{"Id" => "artist-1", "Name" => "Massive Attack"}],
-        "PremiereDate" => "1998-04-20T00:00:00.0000000Z"
+        "PremiereDate" => "1998-04-20T00:00:00.0000000Z",
+        "ProductionYear" => 1998
       }
 
       assert entry = Server.album(item, @address)
       assert entry.parent_ref == "artist-1"
       assert entry.subtitle == "Massive Attack"
       assert entry.published_at == ~U[1998-04-20 00:00:00.000000Z]
+      assert entry.release_year == 1998
+    end
+
+    test "an album needs no premiere date to hold its release year" do
+      assert %{published_at: nil, release_year: 1998} =
+               Server.album(
+                 %{"Id" => "a", "Name" => "Mezzanine", "ProductionYear" => 1998},
+                 @address
+               )
     end
 
     test "an album whose artist the server does not name holds no parent" do

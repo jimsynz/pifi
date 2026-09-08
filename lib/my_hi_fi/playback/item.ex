@@ -185,6 +185,7 @@ defmodule MyHiFi.Playback.Item do
         :keeps_place?,
         :rank,
         :published_at,
+        :release_year,
         :number,
         :disc,
         :url,
@@ -440,6 +441,11 @@ defmodule MyHiFi.Playback.Item do
       `MyHiFi.Playback.Facet`.
       """
 
+      public? true
+    end
+
+    attribute :release_year, :integer do
+      description "The release year of an album."
       public? true
     end
 

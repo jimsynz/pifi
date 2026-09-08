@@ -115,6 +115,7 @@ defmodule MyHiFi.Jellyfin.Server do
           optional(:duration_ms) => pos_integer() | nil,
           optional(:byte_size) => pos_integer() | nil,
           optional(:published_at) => DateTime.t() | nil,
+          optional(:release_year) => pos_integer() | nil,
           optional(:number) => pos_integer() | nil,
           optional(:disc) => pos_integer() | nil,
           optional(:format) => :aac | :flac | :mp3
@@ -408,7 +409,8 @@ defmodule MyHiFi.Jellyfin.Server do
         Map.merge(entry, %{
           parent_ref: album_artist_ref(item),
           subtitle: presence(item["AlbumArtist"]),
-          published_at: published_at(item)
+          published_at: published_at(item),
+          release_year: release_year(item["ProductionYear"])
         })
     end
   end
@@ -598,6 +600,9 @@ defmodule MyHiFi.Jellyfin.Server do
       _other -> nil
     end
   end
+
+  defp release_year(year) when is_integer(year) and year > 0, do: year
+  defp release_year(_year), do: nil
 
   # The pipeline decodes these three as they are. Every other container becomes
   # `:mp3`, and `stream_url/2` then asks the server to convert the file.

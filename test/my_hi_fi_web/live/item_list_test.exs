@@ -80,9 +80,14 @@ defmodule MyHiFiWeb.ItemListTest do
                "24 September 2013"
     end
 
+    test "an album release year reads as four digits" do
+      assert ItemList.fact(:release_year, item(release_year: 1998)) == "1998"
+    end
+
     test "a fact of no value draws nothing, so a row draws no separator for it" do
       assert ItemList.fact(:subtitle, item(subtitle: nil)) == nil
       assert ItemList.fact(:published_at, item(published_at: nil)) == nil
+      assert ItemList.fact(:release_year, item(release_year: nil)) == nil
       assert ItemList.fact(:remaining_ms, item(%{})) == nil
     end
 

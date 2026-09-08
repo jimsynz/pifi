@@ -396,6 +396,9 @@ defmodule MyHiFiWeb.ItemList do
 
   def fact(:subtitle, %{subtitle: subtitle}), do: subtitle
 
+  def fact(:release_year, %{release_year: year}) when is_integer(year) and year > 0,
+    do: to_string(year)
+
   def fact(:published_at, %{published_at: %DateTime{} = at}), do: day(at)
 
   def fact(:duration_ms, %{duration_ms: ms}) when is_integer(ms) and ms > 0, do: clock(ms)

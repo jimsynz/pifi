@@ -199,9 +199,19 @@ defmodule MyHiFi.Source.JellyfinTest do
       assert Enum.map(Ash.read!(favourites.query), & &1.title) == ["Teardrop"]
 
       assert [artists.kind, albums.kind, favourites.kind] == [:item, :item, :item]
+      assert albums.facts == [:subtitle, :release_year]
+      assert favourites.facts == [:subtitle, :release_year]
       # An artist is the one container of this source with no parent, so the Artists
       # branch needs no facet and no column of its own.
       assert one_of("artist-1").parent_id == nil
+    end
+
+    test "the albums of an artist show a release year, and the tracks of an album do not" do
+      artist = struct(MyHiFi.Playback.Item, kind: :container, parent_id: nil)
+      album = struct(MyHiFi.Playback.Item, kind: :container, parent_id: "artist-1")
+
+      assert Source.inside(Jellyfin, artist).facts == [:subtitle, :release_year]
+      assert Source.inside(Jellyfin, album).facts == [:subtitle, :duration_ms]
     end
 
     test "no branch shows an item of another source" do

@@ -61,6 +61,9 @@ defmodule MyHiFi.MixProject do
       deps: deps(),
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # The EEF OSV record includes Decimal 3 in error. The advisory affects versions
+      # before 3.0.0. The `decimal` override below must stay while this exclusion exists.
+      hex: [ignore_advisories: ["CVE-2026-32686"]],
       listeners: listeners(Mix.target(), Mix.env()),
       releases: [{@app, release()}],
       start_permanent: Mix.env() == :prod,

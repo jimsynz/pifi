@@ -86,8 +86,8 @@ defmodule MyHiFi.Source.Jellyfin do
   def roots do
     [
       {"Artists", %{query: artists_query(), kind: :item}},
-      {"Albums", %{query: albums_query(), kind: :item, facts: [:subtitle]}},
-      {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle]}}
+      {"Albums", %{query: albums_query(), kind: :item, facts: [:subtitle, :release_year]}},
+      {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle, :release_year]}}
     ]
   end
 
@@ -106,19 +106,21 @@ defmodule MyHiFi.Source.Jellyfin do
   2-01, 1-02, 2-02. A server that names neither number leaves `place` absent, SQLite
   reads that as the smallest value, and the title then decides.
 
-  An artist holds albums and not tracks, and an album row draws its own facts. The rows
-  of both kinds read the same way here, because a person who opened either one wants
-  the same three things: the place, the name, and how long it runs.
+  An artist holds albums, and an album row shows its artist and its release year. An
+  album holds tracks, and a track row shows its artist and its duration.
   """
   @impl MyHiFi.Source
-  def listing(_item) do
+  def listing(item) do
     %{
       number?: true,
-      facts: [:subtitle, :duration_ms],
+      facts: listing_facts(item),
       sort: [place: :asc, title: :asc],
       order: {"Track", "place"}
     }
   end
+
+  defp listing_facts(%{kind: :container, parent_id: nil}), do: [:subtitle, :release_year]
+  defp listing_facts(_item), do: [:subtitle, :duration_ms]
 
   # An artist is the one container of this source with no parent, so this branch
   # needs no facet and no column of its own. See `MyHiFi.Jellyfin.Fill`.

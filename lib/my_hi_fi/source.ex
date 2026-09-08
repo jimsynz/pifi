@@ -290,6 +290,7 @@ defmodule MyHiFi.Source do
   @type fact ::
           :subtitle
           | :published_at
+          | :release_year
           | :duration_ms
           | :remaining_ms
           | {:text, String.t()}
