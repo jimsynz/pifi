@@ -108,6 +108,16 @@ defmodule MyHiFiWeb.BrowseLive do
     end
   end
 
+  # **A person reaches an album from the list of albums, from the favourites and from a
+  # search, and no crumb of those paths names the artist.** The head of the collection
+  # therefore draws the container that holds this one, and this opens it.
+  #
+  # The address holds that identifier and nothing above it, because a container opens
+  # by its identifier under no branch. See `step/3`.
+  def handle_event("open_parent", %{"id" => id}, socket) do
+    {:noreply, go(socket, [id])}
+  end
+
   # The controls take the room of three rows of the list, and a person wants them for a
   # long list alone. They therefore start out of sight, and this control brings them.
   def handle_event("find", _params, socket) do
@@ -363,6 +373,8 @@ defmodule MyHiFiWeb.BrowseLive do
   # Three lines is enough to know what a thing is, and it leaves the first rows of the
   # list in sight on a telephone.
   defp collection_header(assigns) do
+    assigns = assign(assigns, :parent, parent(assigns.item))
+
     ~H"""
     <div id="collection-header" class="glass mb-3 flex items-start gap-3 rounded-xl p-3">
       <.cover
@@ -373,7 +385,19 @@ defmodule MyHiFiWeb.BrowseLive do
 
       <div class="min-w-0 grow">
         <p class="truncate font-medium text-ink">{@item.title}</p>
-        <p :if={@item.subtitle} class="truncate text-xs text-ink-faint">{@item.subtitle}</p>
+        <button
+          :if={@parent}
+          type="button"
+          id="open-parent"
+          phx-click="open_parent"
+          phx-value-id={@parent.id}
+          class="block max-w-full truncate rounded text-xs text-ink-faint hover:text-accent"
+        >
+          {@parent.title}
+        </button>
+        <p :if={is_nil(@parent) and @item.subtitle} class="truncate text-xs text-ink-faint">
+          {@item.subtitle}
+        </p>
         <p :if={@item.description} class="mt-1 line-clamp-3 text-xs text-ink-dim">
           {@item.description}
         </p>
@@ -605,8 +629,9 @@ defmodule MyHiFiWeb.BrowseLive do
 
     # `artwork` is a calculation, and the head of the collection draws it. A read that
     # does not name it gives `%Ash.NotLoaded{}`, and the head then drew a folder for a
-    # container that holds a picture.
-    case Playback.get_item(id, load: [:artwork]) do
+    # container that holds a picture. The head names the container that holds this one
+    # as well, so `parent` comes with it.
+    case Playback.get_item(id, load: [:artwork, :parent]) do
       {:ok, %{kind: :container, source: ^slug} = item} ->
         opened(source, item)
         inside = Source.inside(source, item)
@@ -626,6 +651,11 @@ defmodule MyHiFiWeb.BrowseLive do
         nil
     end
   end
+
+  # The container that holds this one, when the catalogue holds one. An album names its
+  # artist, and a show at the top of its source names nothing.
+  defp parent(%{parent: %Item{kind: :container} = parent}), do: parent
+  defp parent(_item), do: nil
 
   # A branch is named by its name, in lower case with a dash for each space.
   defp slug(name), do: name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-")

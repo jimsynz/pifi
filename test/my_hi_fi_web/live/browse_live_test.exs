@@ -1097,6 +1097,51 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       assert html =~ MyHiFi.Artwork.thumbnail_path(album.artwork_url)
     end
 
+    # A person reaches an album from the list of albums, from the favourites and from a
+    # search, and no crumb of those paths names the artist.
+    test "it names the collection that holds this one", %{conn: conn} do
+      {_artist, album} = collection_tree()
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      assert has_element?(view, "#open-parent", "An artist")
+    end
+
+    test "a press on that name opens the collection that holds this one", %{conn: conn} do
+      {artist, album} = collection_tree()
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      view |> element("#open-parent") |> render_click()
+
+      assert_patched(view, "#{@podcasts}/#{artist.id}")
+      assert has_element?(view, "#collection-header", "An artist")
+    end
+
+    # A show sits at the top of its source, so there is nothing above it to open.
+    test "a collection that nothing holds names none", %{conn: conn} do
+      {artist, _album} = collection_tree()
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{artist.id}")
+
+      refute has_element?(view, "#open-parent")
+    end
+
+    test "a collection that nothing holds shows its own words instead", %{conn: conn} do
+      show =
+        Playback.upsert_item!(%{
+          source: "podcasts",
+          source_ref: "show-1",
+          kind: :container,
+          title: "A show",
+          subtitle: "Every week"
+        })
+
+      {:ok, _view, html} = live(conn, "#{@podcasts}/subscriptions/#{show.id}")
+
+      assert html =~ "Every week"
+    end
+
     test "a collection of tracks alone holds a play control", %{conn: conn} do
       {_artist, album} = collection_tree()
       with_tracks(album, 2)
