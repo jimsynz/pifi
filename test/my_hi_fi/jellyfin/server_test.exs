@@ -61,6 +61,7 @@ defmodule MyHiFi.Jellyfin.ServerTest do
         "Album" => "Mezzanine",
         "AlbumId" => "album-1",
         "AlbumArtist" => "Massive Attack",
+        "Artists" => ["Massive Attack"],
         "Container" => "flac",
         "RunTimeTicks" => 3_296_000_000,
         "MediaSources" => [%{"Size" => 41_000_000}],
@@ -399,11 +400,11 @@ defmodule MyHiFi.Jellyfin.ServerTest do
   end
 
   describe "track/2" do
-    test "a track names its album, its length and its size" do
+    test "a track names its artist, its album, its length and its size" do
       assert entry = Server.track(audio(), @address)
 
       assert entry.parent_ref == "album-1"
-      assert entry.subtitle == "Mezzanine"
+      assert entry.subtitle == "Massive Attack"
       assert entry.duration_ms == 329_600
       assert entry.byte_size == 41_000_000
       assert entry.format == :flac
@@ -432,8 +433,29 @@ defmodule MyHiFi.Jellyfin.ServerTest do
                Server.track(audio(%{"MediaSources" => [%{"Size" => 0}]}), @address)
     end
 
-    test "the album artist names the line under the title of a track with no album" do
-      assert %{subtitle: "Massive Attack"} = Server.track(audio(%{"Album" => nil}), @address)
+    # A person who opens a compilation reads the artist of each track, and the artist of
+    # the record says the same thing for every row of that list.
+    test "the artist of the track takes the place of the artist of the record" do
+      assert %{subtitle: "Elizabeth Fraser"} =
+               Server.track(audio(%{"Artists" => ["Elizabeth Fraser"]}), @address)
+    end
+
+    test "a track of more than one artist names them all" do
+      assert %{subtitle: "Tricky, Martina Topley-Bird"} =
+               Server.track(
+                 audio(%{"Artists" => ["Tricky", " ", "Martina Topley-Bird"]}),
+                 @address
+               )
+    end
+
+    test "the artist of the record names the line under a track that names none" do
+      assert %{subtitle: "Massive Attack"} = Server.track(audio(%{"Artists" => nil}), @address)
+      assert %{subtitle: "Massive Attack"} = Server.track(audio(%{"Artists" => []}), @address)
+    end
+
+    test "a track that names no artist at all holds no line under its title" do
+      assert %{subtitle: nil} =
+               Server.track(audio(%{"Artists" => [], "AlbumArtist" => nil}), @address)
     end
   end
 

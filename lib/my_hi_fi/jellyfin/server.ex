@@ -416,6 +416,11 @@ defmodule MyHiFi.Jellyfin.Server do
   @doc """
   Turn one track of the server into the attributes of an item.
 
+  `subtitle` names the artist. **The album says nothing that a person needs there.**
+  A person inside an album reads the name of that album at the head of the list, and
+  a person at the now playing screen of the device reads the title of the track and
+  one line under it. That line must name who plays.
+
   `format` comes from the container that the server reports, and `stream_url/2`
   names that same container back. A container that this firmware does not decode
   becomes `:mp3`, and the server converts the file.
@@ -429,7 +434,7 @@ defmodule MyHiFi.Jellyfin.Server do
       entry ->
         Map.merge(entry, %{
           parent_ref: presence(item["AlbumId"]),
-          subtitle: presence(item["Album"]) || presence(item["AlbumArtist"]),
+          subtitle: artist(item),
           duration_ms: duration_ms(item["RunTimeTicks"]),
           byte_size: byte_size_of(item),
           published_at: published_at(item),
@@ -540,6 +545,24 @@ defmodule MyHiFi.Jellyfin.Server do
     case item["AlbumArtists"] do
       [%{"Id" => ref} | _rest] -> presence(ref)
       _other -> nil
+    end
+  end
+
+  # **`Artists` holds the artist of the track, and `AlbumArtist` holds the artist of the
+  # record that holds it.** The two differ on a compilation, and the artist of the track
+  # is the one that a person wants, so it comes first. A track of more than one artist
+  # names them all, because a screen that named the first alone would tell a person that
+  # the other artists are absent.
+  defp artist(item) do
+    names =
+      item["Artists"]
+      |> List.wrap()
+      |> Enum.map(&presence/1)
+      |> Enum.reject(&is_nil/1)
+
+    case names do
+      [] -> presence(item["AlbumArtist"])
+      names -> Enum.join(names, ", ")
     end
   end
 

@@ -52,7 +52,7 @@ defmodule MyHiFi.Source.JellyfinTest do
           title: "Teardrop",
           parent_ref: "album-1",
           artwork_url: nil,
-          subtitle: "Mezzanine",
+          subtitle: "Massive Attack",
           duration_ms: 329_600,
           byte_size: 41_000_000,
           format: :flac
