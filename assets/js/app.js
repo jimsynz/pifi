@@ -23,6 +23,7 @@ import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 import {accent} from "./accent"
 import {cover} from "./cover"
+import {Flash} from "./flash"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 // **No fallback transport, because `MyHiFiWeb.Endpoint` serves none.** A window here
@@ -32,7 +33,8 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 // answers a library of thousands of albums is busy for a moment now and then, and it
 // must not lose its socket for that. With no fallback the client retries the websocket.
 const liveSocket = new LiveSocket("/live", Socket, {
-  params: {_csrf_token: csrfToken}
+  params: {_csrf_token: csrfToken},
+  hooks: {Flash}
 })
 
 accent()

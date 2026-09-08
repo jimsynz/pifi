@@ -35,6 +35,9 @@ defmodule MyHiFiWeb.CoreComponents do
   @doc """
   Renders flash notices.
 
+  A notice goes away when a person presses it, and `assets/js/flash.js` presses it for
+  the person after a few seconds.
+
   ## Examples
 
       <.flash kind={:info} flash={@flash} />
@@ -55,6 +58,7 @@ defmodule MyHiFiWeb.CoreComponents do
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
       role="alert"
+      phx-hook="Flash"
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> JS.hide(to: "##{@id}")}
       class={[
         "glass sheen pointer-events-auto cursor-pointer rounded-xl px-4 py-3 text-sm shadow-2xl",
