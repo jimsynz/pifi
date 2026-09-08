@@ -235,8 +235,8 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   # **The newest episodes that a person has not played, and no more than the source
   # holds.** A feed grows every day and a person wants the episode of this week, so a
   # count is what stops a subscription from filling the card. An episode that a person
-  # played is one that they are done with, and `MyHiFi.Source.Podcasts.finished/1`
-  # released its file already.
+  # played is one that they are done with, and the `:mark_played` action released its
+  # file already.
   defp episodes_of(item) do
     query =
       Item

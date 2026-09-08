@@ -41,7 +41,6 @@ defmodule MyHiFi.Source.Podcasts do
 
   alias MyHiFi.Playback.Facet
   alias MyHiFi.Playback.Item
-  alias MyHiFi.Player.Download
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Fill
   alias MyHiFi.Podcast.Index
@@ -186,13 +185,6 @@ defmodule MyHiFi.Source.Podcasts do
   def resolve(%{kind: :track} = item), do: playable(item)
 
   def resolve(item), do: {:error, {:not_a_track, item.id}}
-
-  # `MyHiFi.Player` marks the item played. The file held `keep?` while the person was
-  # in the middle of it, and they reached the end, so an eviction may take it now.
-  @impl MyHiFi.Source
-  def finished(%{kind: :track} = item), do: Download.release(item.id)
-
-  def finished(_item), do: :ok
 
   @impl MyHiFi.Source
   def settings do

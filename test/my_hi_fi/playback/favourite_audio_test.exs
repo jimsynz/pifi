@@ -374,7 +374,7 @@ defmodule MyHiFi.Playback.FavouriteAudioTest do
       end
     end
 
-    # A row that goes reaches neither `c:MyHiFi.Source.finished/1` nor
+    # A row that goes reaches neither the `:mark_played` action nor
     # `MyHiFi.Player.release_file/1`, so without this the file holds the card for ever
     # and nothing can name it again. See `MyHiFi.Jellyfin.Sync.Library`, which removes
     # the rows that a server no longer holds.

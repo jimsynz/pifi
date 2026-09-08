@@ -1,8 +1,10 @@
 defmodule MyHiFi.Playback.ItemTest do
   use MyHiFi.DataCase, async: false
 
+  alias MyHiFi.Cache
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
+  alias MyHiFi.Player.Download
 
   defp item(overrides \\ %{}) do
     Playback.upsert_item!(
@@ -20,6 +22,16 @@ defmodule MyHiFi.Playback.ItemTest do
         overrides
       )
     )
+  end
+
+  # The audio of a track that a person is in the middle of, as `MyHiFi.Player.Download`
+  # writes it.
+  defp hold_audio(item) do
+    Cache.put(Download.namespace(), item.id, %{
+      bytes: "some audio",
+      content_type: "audio/mpeg",
+      keep?: true
+    })
   end
 
   describe "what identifies an item" do
@@ -152,6 +164,28 @@ defmodule MyHiFi.Playback.ItemTest do
       assert played.position_ms == 0
       assert played.position_bytes == nil
       assert played.last_played_at
+    end
+
+    # A track that a person is in the middle of holds its file against every eviction,
+    # and a track that they are done with holds nothing. See
+    # `MyHiFi.Playback.Item.Changes.ReleaseAudio`.
+    test "the mark lets an eviction take the file of the track" do
+      created = item(%{keeps_place?: true})
+      {:ok, _entry} = hold_audio(created)
+
+      assert {:ok, _played} = Playback.mark_played(created)
+      assert {:ok, %{keep?: false}} = Cache.fetch(Download.namespace(), created.id)
+    end
+
+    # A person who marked an episode by mistake, and a person who wants to hear one
+    # again, press the same control.
+    test "a person takes the mark off" do
+      created = item(%{keeps_place?: true})
+      {:ok, played} = Playback.mark_played(created)
+
+      assert {:ok, cleared} = Playback.clear_played(played)
+      assert cleared.played? == false
+      assert cleared.position_ms == 0
     end
   end
 

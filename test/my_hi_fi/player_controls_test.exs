@@ -63,9 +63,6 @@ defmodule MyHiFi.PlayerControlsTest do
        }}
     end
 
-    @impl MyHiFi.Source
-    def finished(item), do: record({:finished, item.id})
-
     @doc "The three episodes of this source, in order, written into the catalogue."
     @spec episodes() :: [MyHiFi.Playback.Item.t()]
     def episodes do
@@ -89,22 +86,10 @@ defmodule MyHiFi.PlayerControlsTest do
       Application.put_env(:my_hi_fi, :episodes_options, options)
     end
 
-    @doc "Everything that the player has said, oldest first."
-    def calls, do: Enum.reverse(Application.get_env(:my_hi_fi, :episodes_calls, []))
-
-    def forget do
-      Application.delete_env(:my_hi_fi, :episodes_calls)
-      Application.delete_env(:my_hi_fi, :episodes_options)
-    end
+    def forget, do: Application.delete_env(:my_hi_fi, :episodes_options)
 
     defp option(name, default) do
       Application.get_env(:my_hi_fi, :episodes_options, []) |> Keyword.get(name, default)
-    end
-
-    defp record(call) do
-      calls = Application.get_env(:my_hi_fi, :episodes_calls, [])
-      Application.put_env(:my_hi_fi, :episodes_calls, [call | calls])
-      :ok
     end
   end
 

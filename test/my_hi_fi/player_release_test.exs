@@ -2,10 +2,10 @@ defmodule MyHiFi.PlayerReleaseTest do
   @moduledoc """
   What the player does to the file of a track that a person stops.
 
-  `c:MyHiFi.Source.finished/1` covers a track that reaches its end by itself. A person
-  who stops half way through a song reaches that path never, so the file of that song
-  held `keep?` for ever and no eviction could take it. Each such track made the card
-  smaller. `keeps_place?` of the item is what separates the two.
+  The `:mark_played` action of `MyHiFi.Playback.Item` covers a track that reaches its
+  end by itself. A person who stops half way through a song reaches that path never, so
+  the file of that song held `keep?` for ever and no eviction could take it. Each such
+  track made the card smaller. `keeps_place?` of the item is what separates the two.
   """
 
   use MyHiFi.DataCase, async: false

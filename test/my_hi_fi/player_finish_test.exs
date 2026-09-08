@@ -16,11 +16,10 @@ defmodule MyHiFi.PlayerFinishTest do
 
   defmodule Recorder do
     @moduledoc """
-    A source of one track, and a note of what the player told it.
+    A source of one track, for the player to reach the end of.
 
-    `MyHiFi.Player` writes the place and the played mark on to the item itself, so the
-    tests read the catalogue for those. This source records `finished/1` alone, which
-    is the one thing that a source still hears about the end of a track.
+    `MyHiFi.Player` writes the place and the played mark on to the item itself, so
+    each test here reads the catalogue.
     """
 
     @behaviour MyHiFi.Source
@@ -59,9 +58,6 @@ defmodule MyHiFi.PlayerFinishTest do
        }}
     end
 
-    @impl MyHiFi.Source
-    def finished(item), do: record({:finished, item.id})
-
     @doc "The one episode of this source, in the catalogue."
     @spec episode() :: MyHiFi.Playback.Item.t()
     def episode do
@@ -83,20 +79,9 @@ defmodule MyHiFi.PlayerFinishTest do
       Application.put_env(:my_hi_fi, :recorder_position_ms, position_ms)
     end
 
-    @doc "Everything that the player has said, oldest first."
-    def calls, do: Enum.reverse(Application.get_env(:my_hi_fi, :recorder_calls, []))
-
-    def forget, do: Application.delete_env(:my_hi_fi, :recorder_calls)
-
     defp live?, do: Application.get_env(:my_hi_fi, :recorder_live?, false)
 
     defp position_ms, do: Application.get_env(:my_hi_fi, :recorder_position_ms, 0)
-
-    defp record(call) do
-      calls = Application.get_env(:my_hi_fi, :recorder_calls, [])
-      Application.put_env(:my_hi_fi, :recorder_calls, [call | calls])
-      :ok
-    end
   end
 
   defp play_it do
@@ -110,7 +95,6 @@ defmodule MyHiFi.PlayerFinishTest do
     EndingPipeline.use_it()
     Playback.clear_queue!()
     Application.put_env(:my_hi_fi, :sources, [Recorder])
-    Recorder.forget()
     Recorder.live!(false)
     Recorder.begins_at!(0)
     Event.subscribe(:player)
@@ -119,7 +103,7 @@ defmodule MyHiFi.PlayerFinishTest do
       Player.stop()
       Playback.clear_queue!()
 
-      for key <- [:sources, :recorder_live?, :recorder_position_ms, :recorder_calls] do
+      for key <- [:sources, :recorder_live?, :recorder_position_ms] do
         Application.delete_env(:my_hi_fi, key)
       end
     end)
@@ -142,11 +126,10 @@ defmodule MyHiFi.PlayerFinishTest do
       assert %{playing?: false} = Player.state()
     end
 
-    test "it marks the item played, and it tells the source" do
+    test "it marks the item played" do
       one = play_it()
       assert_receive %Events.Stopped{reason: :finished}, 2000
 
-      assert {:finished, one.id} in Recorder.calls()
       assert Playback.get_item!(one.id).played? == true
     end
 
@@ -186,7 +169,7 @@ defmodule MyHiFi.PlayerFinishTest do
       refute_received %Events.Stopped{reason: :finished}
     end
 
-    test "it tells the source no place, because a live stream holds none" do
+    test "it marks nothing, because a live stream reaches no end" do
       Recorder.live!(true)
 
       one = play_it()
@@ -194,7 +177,6 @@ defmodule MyHiFi.PlayerFinishTest do
       assert_receive %Events.Started{}, 2000
       assert_receive %Events.Buffering{}, 2000
 
-      refute Enum.any?(Recorder.calls(), &match?({:finished, _id}, &1))
       refute Playback.get_item!(one.id).played?
     end
   end

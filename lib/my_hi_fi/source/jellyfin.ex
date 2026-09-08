@@ -56,7 +56,6 @@ defmodule MyHiFi.Source.Jellyfin do
   alias MyHiFi.Jellyfin.Server
   alias MyHiFi.Jellyfin.Sync
   alias MyHiFi.Playback.Item
-  alias MyHiFi.Player.Download
   alias MyHiFi.Settings
 
   @source "jellyfin"
@@ -145,14 +144,6 @@ defmodule MyHiFi.Source.Jellyfin do
   def resolve(%{kind: :track} = item), do: playable(item)
 
   def resolve(item), do: {:error, {:not_a_track, item.id}}
-
-  # `MyHiFi.Player` marks the item played. A track that a person marked was released
-  # when the download finished, and this covers the one that they only played. See
-  # `MyHiFi.Player.Download.release/1`.
-  @impl MyHiFi.Source
-  def finished(%{kind: :track} = item), do: Download.release(item.id)
-
-  def finished(_item), do: :ok
 
   # A device that holds no link reaches nothing, so `MyHiFi.AutoSync` writes no job
   # that can only fail.

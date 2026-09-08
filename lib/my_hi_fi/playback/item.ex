@@ -273,12 +273,36 @@ defmodule MyHiFi.Playback.Item do
     end
 
     update :mark_played do
-      description "The item reached its end, so the place in it goes."
+      description """
+      The item is played, so the place in it goes.
+
+      `MyHiFi.Player` runs this when a track reaches its end, and a person runs it by
+      hand for an episode that they are done with. Both mean the same thing, so both
+      take the same step: the audio of the track becomes an ordinary entry of the
+      cache, which an eviction may take.
+      """
+
+      # The change reads the cache, and no statement of SQLite can do that.
+      require_atomic? false
 
       change set_attribute(:played?, true)
       change set_attribute(:position_ms, 0)
       change set_attribute(:position_bytes, nil)
       change set_attribute(:last_played_at, &DateTime.utc_now/0)
+      change MyHiFi.Playback.Item.Changes.ReleaseAudio
+    end
+
+    update :clear_played do
+      description """
+      Take the mark off an item that a person wants to hear again.
+
+      The place is already gone, because `:mark_played` dropped it, so the item begins
+      at the start. The file of a track that keeps its place comes back at the next
+      read of the source: `MyHiFi.Playback.FavouriteAudio` holds the newest few
+      episodes that a person has not played, and this item is one of them again.
+      """
+
+      change set_attribute(:played?, false)
     end
 
     destroy :destroy do
@@ -295,10 +319,9 @@ defmodule MyHiFi.Playback.Item do
       change {MyHiFi.Cache.Attachment.Changes.DetachRecord, type: "item"}
 
       # A track that goes takes its audio with it. `MyHiFi.Player.Download` writes the
-      # file with `keep?`, and `c:MyHiFi.Source.finished/1` and
-      # `MyHiFi.Player.release_file/1` are the two things that take that mark off. A
-      # row that goes reaches neither, so the file would hold the card for ever and
-      # nothing could ever name it again.
+      # file with `keep?`, and `:mark_played` and `MyHiFi.Player.release_file/1` are the
+      # two things that take that mark off. A row that goes reaches neither, so the file
+      # would hold the card for ever and nothing could ever name it again.
       change MyHiFi.Playback.Item.Changes.ReleaseAudio
     end
   end
@@ -515,7 +538,7 @@ defmodule MyHiFi.Playback.Item do
     end
 
     attribute :last_played_at, :utc_datetime_usec do
-      description "When a person last played it."
+      description "When the item last reached its end, or when a person marked it played."
       public? true
     end
 

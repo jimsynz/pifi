@@ -42,6 +42,7 @@ defmodule MyHiFi.Playback do
       define :clear_favourite, action: :clear_favourite
       define :store_position, action: :store_position
       define :mark_played, action: :mark_played
+      define :clear_played, action: :clear_played
       define :destroy_item, action: :destroy
     end
 

@@ -456,6 +456,40 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     end
   end
 
+  describe "the played mark" do
+    # A person hears an episode over several days, so an episode is the kind of track
+    # that a person leaves unfinished and then wants to say that they are done with.
+    test "an episode takes the mark, and gives it back", %{conn: conn} do
+      created = show()
+      {:ok, created} = Playback.set_favourite(created)
+      one = episode(created, %{title: "The first one"})
+
+      {:ok, view, _html} = live(conn, @podcasts)
+      open(view, "Subscriptions")
+      view |> element("button", "Road Work") |> render_click()
+
+      assert has_element?(view, "#played-#{one.id}[aria-pressed='false']")
+
+      view |> element("#played-#{one.id}") |> render_click()
+      assert Playback.get_item!(one.id).played?
+
+      view |> element("#played-#{one.id}") |> render_click()
+      refute Playback.get_item!(one.id).played?
+    end
+
+    # A station holds no place, so a person is never in the middle of one.
+    test "a station holds no control", %{conn: conn} do
+      station = Stations.create(%{country_code: "NZ"})
+
+      {:ok, view, _html} = live(conn, @radio)
+      open(view, "Countries")
+      view |> element("button", "NZ") |> render_click()
+
+      assert has_element?(view, "#play-#{station.id}")
+      refute has_element?(view, "#played-#{station.id}")
+    end
+  end
+
   # A source reads a service behind the page, so what a container holds can change
   # while a person looks at it.
   test "the page reads the list again when a source says that it changed", %{conn: conn} do

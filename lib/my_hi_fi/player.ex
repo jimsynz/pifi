@@ -940,12 +940,14 @@ defmodule MyHiFi.Player do
   # A track ended by itself. A podcast marks the episode played, and a station never
   # reaches this, because a live stream that ends is a network that failed.
   #
+  # The mark releases the file of the track as well, so an eviction may take it. See
+  # the `:mark_played` action of `MyHiFi.Playback.Item`.
+  #
   # The row stays in the queue and the mark moves past it, so a person can go back to
   # what they heard.
-  defp finish(%State{source: source, item: item} = state) do
+  defp finish(%State{item: item} = state) do
     state = stop_pipeline(state)
     Playback.mark_played(item)
-    finished(source, item)
     Event.publish(:player, %Events.Stopped{reason: :finished})
 
     advance(%State{
@@ -973,12 +975,6 @@ defmodule MyHiFi.Player do
     end
   end
 
-  # A source that must do something of its own when a track ends says so. Podcasts
-  # release the file of the episode, so an eviction may take it.
-  defp finished(source, item) do
-    if function_exported?(source, :finished, 1), do: source.finished(item), else: :ok
-  end
-
   # `keeps_place?` of the item decides whether the place is written at all, so a
   # station keeps none and an episode keeps one. See
   # `MyHiFi.Playback.Item.Changes.KeepPlaceOnly`.
@@ -986,9 +982,9 @@ defmodule MyHiFi.Player do
   # A track that never began has no place to keep, and writing 0 would lose the
   # place that a person already had.
   # A track that keeps no place holds nothing for a person to go back to, so a stop is
-  # the end of it and its file must stop holding the card against every eviction.
-  # `c:MyHiFi.Source.finished/1` does this for a track that reaches its end by itself,
-  # and a person who stops half way through a song reaches that path never. Such a file
+  # the end of it and its file must stop holding the card against every eviction. The
+  # `:mark_played` action does this for a track that reaches its end by itself, and a
+  # person who stops half way through a song reaches that path never. Such a file
   # therefore held `keep?` for ever, and each one made the card smaller.
   #
   # A track that keeps its place is the opposite. A person goes on from where they

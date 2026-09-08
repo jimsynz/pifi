@@ -480,18 +480,4 @@ defmodule MyHiFi.Source.JellyfinTest do
       assert {:error, _message} = Jellyfin.run_settings_action("nonsense")
     end
   end
-
-  # `MyHiFi.Player` marks the item played. The file held `keep?` while a person was in
-  # the middle of it, so an eviction may take it now.
-  describe "finished/1" do
-    test "a track that reached its end releases its file" do
-      one = track()
-
-      assert :ok = Jellyfin.finished(one)
-    end
-
-    test "a container has nothing to release" do
-      assert :ok = Jellyfin.finished(album())
-    end
-  end
 end

@@ -411,20 +411,6 @@ defmodule MyHiFi.Source do
   @callback resolve(MyHiFi.Playback.Item.t()) :: {:ok, playable()} | {:error, term()}
 
   @doc """
-  Note that a track reached its end.
-
-  `MyHiFi.Player` marks the item played by itself, so a source implements this only
-  for something of its own. Podcasts release the file of the episode, so an eviction
-  of the cache may take it.
-
-  A live stream that ends is a network that failed, and the player starts it again, so
-  this never runs for a source of live streams.
-
-  A source with nothing of its own to do leaves it out.
-  """
-  @callback finished(MyHiFi.Playback.Item.t()) :: :ok | {:error, term()}
-
-  @doc """
   The values that a person can change for this source.
 
   A settings page draws one control for each field, and it holds no knowledge of
@@ -486,7 +472,6 @@ defmodule MyHiFi.Source do
   # `c:capabilities/0`.
   @optional_callbacks hold_limit: 0,
                       listing: 1,
-                      finished: 1,
                       opened: 1,
                       ready?: 0,
                       refresh: 1,

@@ -13,9 +13,9 @@ defmodule MyHiFiWeb.ItemList do
       on_mount MyHiFiWeb.ItemList
       import MyHiFiWeb.ItemList, only: [row: 1, count: 1]
 
-  `on_mount/1` subscribes to the sources, assigns `:playing`, and answers the `play` and
-  the `favourite` events and every event of the player. A page therefore holds none of
-  that.
+  `on_mount/1` subscribes to the sources, assigns `:playing`, and answers the `play`,
+  the `favourite` and the `played` events and every event of the player. A page
+  therefore holds none of that.
 
   **`MyHiFiWeb.Shell` holds the subscription to the `:player` topic**, and this hook
   takes it again for nothing: two subscriptions of one process give two copies of each
@@ -262,6 +262,7 @@ defmodule MyHiFiWeb.ItemList do
 
         <.audio_mark row={@row} reading={@reading} />
       </button>
+      <.played row={@row} />
       <.favourite row={@row} />
     </div>
     """
@@ -498,6 +499,44 @@ defmodule MyHiFiWeb.ItemList do
     """
   end
 
+  @doc """
+  The control that says that a person is done with a track, or takes that back.
+
+  **A track that keeps its place draws it, and no other row does.** An episode of a
+  show and a chapter of an audiobook are the tracks that a person hears over several
+  days, so they are the tracks that a person leaves unfinished. A song holds no place
+  at all, and a station holds none either. See `keeps_place?` of
+  `MyHiFi.Playback.Item`.
+
+  A track that reaches its end takes the same mark from `MyHiFi.Player`, so this
+  control says what the end of the track says. The row of a marked episode reads
+  "Played" in the place of the time that is left.
+  """
+  attr :row, :any, required: true
+
+  def played(assigns) do
+    ~H"""
+    <button
+      :if={@row.keeps_place?}
+      type="button"
+      id={"played-#{@row.id}"}
+      phx-click="played"
+      phx-value-id={@row.id}
+      aria-pressed={to_string(@row.played? == true)}
+      aria-label="Played"
+      class={[
+        "flex size-9 shrink-0 items-center justify-center rounded-full",
+        if(@row.played?, do: "text-accent", else: "text-ink-faint hover:text-ink")
+      ]}
+    >
+      <.icon
+        name={if @row.played?, do: "hero-check-circle-solid", else: "hero-check-circle"}
+        class="size-5"
+      />
+    </button>
+    """
+  end
+
   # An episode belongs to a show, and a person subscribes to the show.
   defp markable?(%Item{kind: :container}), do: true
   defp markable?(%Item{parent_id: nil}), do: true
@@ -539,6 +578,18 @@ defmodule MyHiFiWeb.ItemList do
     with {:ok, item} <- Playback.get_item(id),
          {:ok, marked} <- mark(item) do
       {:halt, socket |> opened(marked) |> read_again()}
+    else
+      {:error, reason} ->
+        {:halt, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+    end
+  end
+
+  # A marked row draws "Played" in the place of the time that is left, so the list
+  # reads itself again and a person sees both the control and the fact.
+  defp event("played", %{"id" => id}, socket) do
+    with {:ok, item} <- Playback.get_item(id),
+         {:ok, _marked} <- mark_played(item) do
+      {:halt, read_again(socket)}
     else
       {:error, reason} ->
         {:halt, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
@@ -650,6 +701,9 @@ defmodule MyHiFiWeb.ItemList do
 
   defp mark(%{favourite?: true} = item), do: Playback.clear_favourite(item)
   defp mark(item), do: Playback.set_favourite(item)
+
+  defp mark_played(%{played?: true} = item), do: Playback.clear_played(item)
+  defp mark_played(item), do: Playback.mark_played(item)
 
   defp playing(%{playing?: true, item: %{id: id}}), do: %{item_id: id, status: :playing}
   defp playing(%{paused?: true, item: %{id: id}}), do: %{item_id: id, status: :paused}
