@@ -143,9 +143,22 @@ defmodule MyHiFi.Source.Jellyfin do
   end
 
   @impl MyHiFi.Source
-  def resolve(%{kind: :track} = item), do: playable(item)
+  def resolve(%{kind: :track} = item), do: playable(item, nil)
 
   def resolve(item), do: {:error, {:not_a_track, item.id}}
+
+  @doc """
+  Turn a track into something that the player can play, with a link already read.
+
+  A caller that reads many tracks of this source reads the link once and passes it
+  here, so a loop of many tracks makes one read of the settings and not three for
+  each one. See `MyHiFi.Playback.FavouriteAudio`.
+  """
+  @spec resolve(MyHiFi.Playback.Item.t(), map() | nil) ::
+          {:ok, MyHiFi.Source.playable()} | {:error, term()}
+  def resolve(%{kind: :track} = item, link), do: playable(item, link)
+
+  def resolve(item, _link), do: {:error, {:not_a_track, item.id}}
 
   # A device that holds no link reaches nothing, so `MyHiFi.AutoSync` writes no job
   # that can only fail.
@@ -359,10 +372,10 @@ defmodule MyHiFi.Source.Jellyfin do
 
   defp found(info), do: "#{info.name} answered. Press Link this device to finish."
 
-  defp playable(%{format: nil} = item), do: {:error, {:not_read_yet, item.title}}
+  defp playable(%{format: nil} = item, _link), do: {:error, {:not_read_yet, item.title}}
 
-  defp playable(item) do
-    case Server.stream_url(item.source_ref, item.format) do
+  defp playable(item, link) do
+    case Server.stream_url(item.source_ref, item.format, link) do
       {:ok, uri} ->
         {:ok,
          %{
@@ -372,11 +385,7 @@ defmodule MyHiFi.Source.Jellyfin do
            container: :none,
            format: item.format,
            live?: false,
-           # A song keeps no place, so it plays from the start every time. See
-           # `keeps_place?` of `MyHiFi.Playback.Item`.
            position_ms: 0,
-           # `MyHiFi.Player.Download` holds the file under this name, and the
-           # eviction of the cache reclaims a file that an older release wrote.
            key: item.id,
            position_bytes: 0
          }}

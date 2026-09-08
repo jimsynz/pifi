@@ -112,6 +112,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   require Logger
 
   alias MyHiFi.Cache
+  alias MyHiFi.Jellyfin.Server
   alias MyHiFi.Playback.Item
   alias MyHiFi.Player.Download
   alias MyHiFi.Source
@@ -164,9 +165,17 @@ defmodule MyHiFi.Playback.FavouriteAudio do
 
   It stops at the first track that the card holds no room for, and it counts the ones
   that arrived before that. See the moduledoc.
+
+  **The link of a source that holds one is read once before the loop.** A source that
+  needs credentials to build an address reads them here and not for each track, so a
+  marked album of twelve tracks makes one read of the settings and not twelve.
   """
   @spec read(Item.t()) :: non_neg_integer()
-  def read(item), do: item |> tracks() |> hold_each(0, DateTime.utc_now())
+  def read(item) do
+    item
+    |> tracks()
+    |> hold_each(0, DateTime.utc_now(), source_links(item))
+  end
 
   @doc """
   Let an eviction take the audio of one item.
@@ -294,31 +303,28 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   defp holdable?(%{transport: :download, keeps_place?: false}), do: true
   defp holdable?(_item), do: false
 
-  defp hold_each([], held, _started_at), do: held
+  defp hold_each([], held, _started_at, _links), do: held
 
-  defp hold_each([track | rest], held, started_at) do
-    case hold(track, started_at) do
-      :ok -> hold_each(rest, held + 1, started_at)
-      :error -> hold_each(rest, held, started_at)
+  defp hold_each([track | rest], held, started_at, links) do
+    case hold(track, started_at, links) do
+      :ok -> hold_each(rest, held + 1, started_at, links)
+      :error -> hold_each(rest, held, started_at, links)
       :full -> held
     end
   end
 
-  # The key of the cache is the identifier of the item, and both
-  # `MyHiFi.Source.Podcasts` and `MyHiFi.Source.Jellyfin` name it that way in the
-  # `key` of their playable. `MyHiFi.Player.Download.release/1` reads the same one.
-  defp hold(track, started_at) do
+  defp hold(track, started_at, links) do
     case Cache.fetch(Download.namespace(), track.id) do
       {:ok, _entry} -> :ok
-      {:error, _reason} -> with_room(track, started_at)
+      {:error, _reason} -> with_room(track, started_at, links)
     end
   end
 
-  defp with_room(track, started_at) do
+  defp with_room(track, started_at, links) do
     bytes = size(track)
 
     if room?(bytes) or evicted?(bytes, started_at),
-      do: start(track, started_at),
+      do: start(track, started_at, links),
       else: full(track)
   end
 
@@ -333,16 +339,40 @@ defmodule MyHiFi.Playback.FavouriteAudio do
     room?(bytes)
   end
 
-  # Only the source can turn an item into an address, and it is the source that holds
-  # the token of a server and the address of a publisher. See
-  # `c:MyHiFi.Source.resolve/1`.
-  defp start(track, started_at) do
+  defp start(track, started_at, links) do
     with {:ok, module} <- Source.from_slug(track.source),
-         {:ok, %{transport: :download, key: key, uri: uri}} <- module.resolve(track),
+         {:ok, %{transport: :download, key: key, uri: uri}} <- resolve(module, track, links),
          {:ok, %{complete?: complete?}} <- Download.ensure(key, uri) do
       if complete?, do: arrived(key, started_at), else: wait(key, track, started_at)
     else
       other -> failed(track, other)
+    end
+  end
+
+  defp resolve(MyHiFi.Source.Jellyfin = module, track, links) do
+    module.resolve(track, Map.get(links, module))
+  end
+
+  defp resolve(module, track, _links), do: module.resolve(track)
+
+  defp source_links(item) do
+    item
+    |> tracks()
+    |> Enum.map(& &1.source)
+    |> Enum.uniq()
+    |> Enum.reduce(%{}, &add_link/2)
+  end
+
+  defp add_link(slug, acc) do
+    case Source.from_slug(slug) do
+      {:ok, module} when module == MyHiFi.Source.Jellyfin ->
+        case Server.link() do
+          {:ok, link} -> Map.put(acc, module, link)
+          {:error, _reason} -> acc
+        end
+
+      _other ->
+        acc
     end
   end
 

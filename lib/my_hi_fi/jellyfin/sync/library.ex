@@ -93,7 +93,8 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   defp sync do
     %{started_at: started_at, kind: kind, offset: offset} = start_point()
 
-    with {:ok, counts} <- read_from(kind, offset, started_at) do
+    with {:ok, link} <- Server.link(),
+         {:ok, counts} <- read_from(kind, offset, started_at, link) do
       gone = remove_unseen(started_at)
       forget_point()
       announce()
@@ -147,14 +148,14 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   # **The counts are of this read alone.** A read that continues wrote none of what the
   # read before it wrote, so the number that it reports is smaller than the library.
   # Nothing reads those numbers but a person, and the log says which read they belong to.
-  defp read_from(kind, offset, started_at) do
+  defp read_from(kind, offset, started_at, link) do
     kinds = Enum.drop_while(@kinds, &(&1 != kind))
     counts = Map.new(@kinds, &{&1, 0})
 
     Enum.reduce_while(kinds, {:ok, counts}, fn one, {:ok, acc} ->
       start = if one == kind, do: offset, else: 0
 
-      case read(one, start, 0, started_at) do
+      case read(one, start, 0, started_at, link) do
         {:ok, written} -> {:cont, {:ok, Map.put(acc, one, written)}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -189,10 +190,10 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
     count
   end
 
-  defp read(kind, start, written, started_at) do
+  defp read(kind, start, written, started_at, link) do
     Checkpoint.write(started_at, kind, start)
 
-    case Server.page(kind, start) do
+    case Server.page(kind, start, link) do
       {:ok, %{count: 0}} ->
         {:ok, written}
 
@@ -201,7 +202,7 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
 
         case fill(kind, entries) + written do
           all when next >= total -> {:ok, all}
-          all -> read(kind, next, all, started_at)
+          all -> read(kind, next, all, started_at, link)
         end
 
       {:error, reason} ->

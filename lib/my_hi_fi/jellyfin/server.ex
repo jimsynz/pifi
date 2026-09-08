@@ -213,7 +213,8 @@ defmodule MyHiFi.Jellyfin.Server do
   The `Authorization` header of one request.
 
   The token is absent for a request that needs none, such as the first step of Quick
-  Connect.
+  Connect. A caller that holds the device identifier passes it as the second argument,
+  so a loop of many requests makes one read of the settings and not one for each.
 
       iex> header = authorization("SECRETTOKEN")
       iex> String.starts_with?(header, ~s(MediaBrowser Client="PiFi", Device="))
@@ -221,10 +222,12 @@ defmodule MyHiFi.Jellyfin.Server do
       iex> String.ends_with?(header, ~s(, Token="SECRETTOKEN"))
       true
   """
-  @spec authorization(String.t() | nil) :: String.t()
-  def authorization(token \\ nil) do
+  @spec authorization(String.t() | nil, String.t() | nil) :: String.t()
+  def authorization(token \\ nil, device_id \\ nil) do
+    device_id = device_id || device_id()
+
     ~s(MediaBrowser Client="#{@client}", Device="#{device_name()}", ) <>
-      ~s(DeviceId="#{device_id()}", Version="#{@version}", Token="#{token}")
+      ~s(DeviceId="#{device_id}", Version="#{@version}", Token="#{token}")
   end
 
   @doc """
@@ -237,7 +240,7 @@ defmodule MyHiFi.Jellyfin.Server do
   @spec public_info(String.t()) ::
           {:ok, %{name: String.t(), version: String.t() | nil}} | {:error, term()}
   def public_info(address) do
-    with {:ok, body} <- request(:get, address, nil, "/System/Info/Public", []) do
+    with {:ok, body} <- request(:get, address, nil, nil, "/System/Info/Public", []) do
       {:ok, %{name: body["ServerName"] || "a Jellyfin server", version: body["Version"]}}
     end
   end
@@ -275,7 +278,7 @@ defmodule MyHiFi.Jellyfin.Server do
           {:ok, :authenticated | :waiting} | {:error, term()}
   def quick_connect_state(secret) do
     with {:ok, address} <- address(),
-         {:ok, body} <- request(:get, address, nil, "/QuickConnect/Connect", secret: secret) do
+         {:ok, body} <- request(:get, address, nil, nil, "/QuickConnect/Connect", secret: secret) do
       if body["Authenticated"] == true, do: {:ok, :authenticated}, else: {:ok, :waiting}
     else
       {:error, :not_found} -> {:error, :unknown_secret}
@@ -293,7 +296,7 @@ defmodule MyHiFi.Jellyfin.Server do
   def authenticate_with_quick_connect(secret) do
     with {:ok, address} <- address(),
          {:ok, body} <-
-           request(:post, address, nil, "/Users/AuthenticateWithQuickConnect", [],
+           request(:post, address, nil, nil, "/Users/AuthenticateWithQuickConnect", [],
              json: %{"Secret" => secret}
            ) do
       store_link(body)
@@ -310,7 +313,7 @@ defmodule MyHiFi.Jellyfin.Server do
   def authenticate_by_name(username, password) do
     with {:ok, address} <- address(),
          {:ok, body} <-
-           request(:post, address, nil, "/Users/AuthenticateByName", [],
+           request(:post, address, nil, nil, "/Users/AuthenticateByName", [],
              json: %{"Username" => username, "Pw" => password}
            ) do
       store_link(body)
@@ -341,11 +344,21 @@ defmodule MyHiFi.Jellyfin.Server do
   `start` is the number of entries to step over, and `page_size/0` gives how many
   each answer holds. The answer names how many the whole listing holds, so a caller
   reads pages until it has them all. See `MyHiFi.Jellyfin.Sync.Library`.
+
+  A caller that holds the link already passes it as the third argument, so a loop
+  of many pages makes one read of the settings and not four for each one.
   """
-  @spec page(:artists | :albums | :tracks, non_neg_integer()) :: {:ok, page()} | {:error, term()}
-  def page(kind, start) do
-    with {:ok, %{address: address, token: token, user_id: user_id}} <- link(),
-         {:ok, body} <- request(:get, address, token, "/Items", params(kind, user_id, start)) do
+  @spec page(:artists | :albums | :tracks, non_neg_integer(), map() | nil) ::
+          {:ok, page()} | {:error, term()}
+  def page(kind, start, link \\ nil)
+
+  def page(kind, start, nil) do
+    with {:ok, link} <- link(), do: page(kind, start, link)
+  end
+
+  def page(kind, start, %{address: address, token: token, user_id: user_id, device_id: device_id}) do
+    with {:ok, body} <-
+           request(:get, address, token, device_id, "/Items", params(kind, user_id, start)) do
       items = Map.get(body, "Items", [])
 
       {:ok,
@@ -366,21 +379,34 @@ defmodule MyHiFi.Jellyfin.Server do
 
   It names the container that `format` asks for, so the server sends the file as it
   is when the two agree and converts it when they do not. See the moduledoc.
-  """
-  @spec stream_url(String.t(), :aac | :flac | :mp3) :: {:ok, String.t()} | {:error, term()}
-  def stream_url(ref, format) do
-    with {:ok, %{address: address, token: token, user_id: user_id}} <- link() do
-      query =
-        [
-          {"UserId", user_id},
-          {"DeviceId", device_id()},
-          {"container", container(format)},
-          {"maxStreamingBitrate", @max_bitrate},
-          {"api_key", token}
-        ] ++ audio_codec(format)
 
-      {:ok, "#{address}/Audio/#{ref}/universal?#{URI.encode_query(query)}"}
-    end
+  A caller that holds the link already passes it as the third argument, so a loop
+  of many tracks makes one read of the settings and not four for each one.
+  """
+  @spec stream_url(String.t(), :aac | :flac | :mp3, map() | nil) ::
+          {:ok, String.t()} | {:error, term()}
+  def stream_url(ref, format, link \\ nil)
+
+  def stream_url(ref, format, nil) do
+    with {:ok, link} <- link(), do: stream_url(ref, format, link)
+  end
+
+  def stream_url(ref, format, %{
+        address: address,
+        token: token,
+        user_id: user_id,
+        device_id: device_id
+      }) do
+    query =
+      [
+        {"UserId", user_id},
+        {"DeviceId", device_id},
+        {"container", container(format)},
+        {"maxStreamingBitrate", @max_bitrate},
+        {"api_key", token}
+      ] ++ audio_codec(format)
+
+    {:ok, "#{address}/Audio/#{ref}/universal?#{URI.encode_query(query)}"}
   end
 
   @doc """
@@ -484,18 +510,37 @@ defmodule MyHiFi.Jellyfin.Server do
 
   # A server of an older version answers 405 for the POST, and it takes a GET.
   defp initiate(address) do
-    case request(:post, address, nil, "/QuickConnect/Initiate", []) do
-      {:error, :method_not_allowed} -> request(:get, address, nil, "/QuickConnect/Initiate", [])
-      {:error, :unauthorised} -> {:error, :quick_connect_off}
-      other -> other
+    case request(:post, address, nil, nil, "/QuickConnect/Initiate", []) do
+      {:error, :method_not_allowed} ->
+        request(:get, address, nil, nil, "/QuickConnect/Initiate", [])
+
+      {:error, :unauthorised} ->
+        {:error, :quick_connect_off}
+
+      other ->
+        other
     end
   end
 
-  defp link do
+  @doc """
+  The address, the token, the user and the device identifier of the server, in one read.
+
+  A caller that needs all four reads them once and passes them on, so a loop of
+  many pages makes one read and not four for each one. See
+  `MyHiFi.Jellyfin.Sync.Library`.
+
+  It gives `{:error, :no_address}` for a device that holds none, and
+  `{:error, :not_linked}` for one that holds no token or no user.
+  """
+  @spec link() ::
+          {:ok,
+           %{address: String.t(), token: String.t(), user_id: String.t(), device_id: String.t()}}
+          | {:error, :no_address | :not_linked}
+  def link do
     with {:ok, address} <- address(),
          {:ok, %{value: token}} <- Settings.fetch(@token_setting),
          {:ok, %{value: user_id}} <- Settings.fetch(@user_setting) do
-      {:ok, %{address: address, token: token, user_id: user_id}}
+      {:ok, %{address: address, token: token, user_id: user_id, device_id: device_id()}}
     else
       {:error, :no_address} -> {:error, :no_address}
       _other -> {:error, :not_linked}
@@ -624,12 +669,15 @@ defmodule MyHiFi.Jellyfin.Server do
   # A test gives a stub with `config :my_hi_fi, MyHiFi.Jellyfin.Server, plug: ...`,
   # in the same way that `MyHiFi.Podcast.Index` takes one. Nothing sets this in
   # production.
-  defp request(method, address, token, path, params, options \\ []) do
+  defp request(method, address, token, device_id, path, params, options \\ []) do
     [
       base_url: address,
       url: path,
       params: params,
-      headers: [{"authorization", authorization(token)}, {"accept", "application/json"}],
+      headers: [
+        {"authorization", authorization(token, device_id)},
+        {"accept", "application/json"}
+      ],
       receive_timeout: @timeout,
       retry: :transient
     ]
