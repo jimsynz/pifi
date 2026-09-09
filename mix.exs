@@ -225,7 +225,7 @@ defmodule MyHiFi.MixProject do
       # Targets
       {:nerves_system_bbb, "~> 2.19", runtime: false, targets: :bbb},
       {:nerves_system_mangopi_mq_pro, "~> 0.6", runtime: false, targets: :mangopi_mq_pro},
-      {:nerves_system_qemu_aarch64, "~> 0.1", runtime: false, targets: :qemu_aarch64},
+      {:nerves_system_qemu_aarch64, "~> 0.4", runtime: false, targets: :qemu_aarch64},
       {:nerves_system_rpi, "~> 2.0", runtime: false, targets: :rpi},
       {:nerves_system_rpi0, "~> 2.0", runtime: false, targets: :rpi0},
       # The stock rpi0_2 system holds no USB host stack and no USB audio driver,
