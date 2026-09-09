@@ -38,6 +38,7 @@ defmodule MyHiFi.Playback do
       define :favourite_items, action: :favourites
       define :items_marked_for_audio, action: :marked_for_audio, args: [:source]
       define :items_holding_audio, action: :holding_audio
+      define :items_by_ids, action: :by_ids, args: [:ids]
       define :upsert_item, action: :upsert
       define :set_favourite, action: :set_favourite
       define :clear_favourite, action: :clear_favourite
@@ -57,6 +58,7 @@ defmodule MyHiFi.Playback do
       define :move_queue, action: :move, args: [:direction]
       define :queue_next_up, action: :next_up
       define :remove_from_queue, action: :remove, args: [:id]
+      define :reorder_queue, action: :reorder, args: [:id, :position]
       define :clear_queue, action: :clear
     end
 

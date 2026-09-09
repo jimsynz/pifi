@@ -32,6 +32,88 @@ defmodule MyHiFi.Playback.QueueTest do
     end
   end
 
+  # **A person will move a row to change what comes next.** The mark stays where it is,
+  # because moving a row is not choosing what to listen to. See
+  # `MyHiFi.Playback.Queue.Order`.
+  describe "moving a row" do
+    setup do
+      ids = Enum.map(["Alpha", "Bravo", "Charlie", "Delta"], &item(&1).id)
+      {:ok, rows} = Playback.replace_queue(ids, %{playing_index: 1})
+
+      %{rows: rows}
+    end
+
+    test "a row moves up, and the rest close around it", %{rows: rows} do
+      third = Enum.find(rows, &(&1.position == 2))
+
+      assert {:ok, moved} = Playback.reorder_queue(third.id, 1)
+      assert moved.position == 1
+      assert titles() == ["Alpha", "Charlie", "Bravo", "Delta"]
+    end
+
+    test "a row moves down", %{rows: rows} do
+      first = Enum.find(rows, &(&1.position == 0))
+
+      assert {:ok, moved} = Playback.reorder_queue(first.id, 2)
+      assert moved.position == 2
+      assert titles() == ["Bravo", "Charlie", "Alpha", "Delta"]
+    end
+
+    test "a row moves to the end", %{rows: rows} do
+      first = Enum.find(rows, &(&1.position == 0))
+
+      assert {:ok, _moved} = Playback.reorder_queue(first.id, 3)
+      assert titles() == ["Bravo", "Charlie", "Delta", "Alpha"]
+    end
+
+    # A person who presses "up" on the first row means the first row, and not an error.
+    test "a place outside the queue takes the nearest end", %{rows: rows} do
+      first = Enum.find(rows, &(&1.position == 0))
+      last = Enum.find(rows, &(&1.position == 3))
+
+      assert {:ok, _moved} = Playback.reorder_queue(first.id, -1)
+      assert titles() == ["Alpha", "Bravo", "Charlie", "Delta"]
+
+      assert {:ok, _moved} = Playback.reorder_queue(last.id, 99)
+      assert titles() == ["Alpha", "Bravo", "Charlie", "Delta"]
+    end
+
+    # **A person who moves a row is still listening to the same track.**
+    test "it moves no mark", %{rows: rows} do
+      third = Enum.find(rows, &(&1.position == 2))
+
+      assert playing_title() == "Bravo"
+
+      {:ok, _moved} = Playback.reorder_queue(third.id, 0)
+
+      assert playing_title() == "Bravo"
+    end
+
+    # The row that plays is a row like any other, and a person may move it.
+    test "the row that plays can move, and it keeps the mark", %{rows: rows} do
+      playing = Enum.find(rows, &(&1.position == 1))
+
+      assert {:ok, moved} = Playback.reorder_queue(playing.id, 3)
+      assert moved.position == 3
+      assert moved.playing?
+      assert titles() == ["Alpha", "Charlie", "Delta", "Bravo"]
+      assert playing_title() == "Bravo"
+    end
+
+    test "the places hold no gap after a move", %{rows: rows} do
+      third = Enum.find(rows, &(&1.position == 2))
+
+      {:ok, _moved} = Playback.reorder_queue(third.id, 0)
+
+      assert Enum.map(Playback.queue!(), & &1.position) == [0, 1, 2, 3]
+    end
+
+    test "a row that is not there gives a reason and moves nothing" do
+      assert {:error, _reason} = Playback.reorder_queue(Ash.UUID.generate(), 0)
+      assert titles() == ["Alpha", "Bravo", "Charlie", "Delta"]
+    end
+  end
+
   describe "putting a list in the queue" do
     test "it holds the order that a person saw" do
       ids = Enum.map(["Alpha", "Bravo", "Charlie"], &item(&1).id)

@@ -172,6 +172,23 @@ defmodule MyHiFi.Playback.Item do
       prepare build(sort: [favourited_at: :desc])
     end
 
+    read :by_ids do
+      description """
+      The items with these identifiers, in no particular order.
+
+      **The play queue reads this.** A queue row lives in ETS and an item lives in
+      SQLite, so Ash cannot join the two, and reading one item per row would mean one
+      query per row. See `MyHiFi.Playback.Queue`.
+
+      The caller keeps the order, because a queue is ordered by its rows and not by its
+      items.
+      """
+
+      argument :ids, {:array, :uuid}, allow_nil?: false
+
+      filter expr(id in ^arg(:ids))
+    end
+
     read :holding_audio do
       description """
       Every item whose audio this device holds on the card.

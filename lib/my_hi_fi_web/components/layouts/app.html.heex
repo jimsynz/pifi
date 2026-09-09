@@ -18,6 +18,17 @@
         </nav>
 
         <.faceplate_control
+          id="queue-link"
+          navigate={~p"/queue"}
+          label="Play queue"
+          current?={false}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
+        >
+          <.icon name="hero-queue-list" class="size-5" />
+        </.faceplate_control>
+
+        <.faceplate_control
           id="settings-link"
           navigate={~p"/settings"}
           label="Settings"

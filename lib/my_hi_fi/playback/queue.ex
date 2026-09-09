@@ -114,6 +114,23 @@ defmodule MyHiFi.Playback.Queue do
       run MyHiFi.Playback.Queue.Remove
     end
 
+    action :reorder, :struct do
+      description """
+      Move one row to another position, and renumber the rest around it.
+
+      `position` counts from 0. A position outside the queue is clamped to the nearest
+      end, so pressing "up" on the first row leaves it where it is. This does not change
+      which row is playing. See `MyHiFi.Playback.Queue.Reorder`.
+      """
+
+      constraints instance_of: __MODULE__
+
+      argument :id, :uuid, allow_nil?: false
+      argument :position, :integer, allow_nil?: false
+
+      run MyHiFi.Playback.Queue.Reorder
+    end
+
     action :next_up, :struct do
       description """
       The row after the one that plays, and this moves no mark.

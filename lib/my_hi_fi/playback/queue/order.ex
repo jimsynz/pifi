@@ -8,16 +8,41 @@ defmodule MyHiFi.Playback.Queue.Order do
 
   ## Why this is its own module
 
-  A person will drag a row to another place. That write moves one row and renumbers the
-  rest, which is the same work that a removal does. One module holds it, so the two
-  writes cannot disagree about what a place means.
+  Removing a row and moving a row both renumber the rows that follow. Keeping that
+  arithmetic in one place stops the two from disagreeing about what a position means.
 
-  **A renumber never touches `playing?`.** The order of the queue and the row that plays
-  are two separate things: a person who moves a row means to change what comes next, and
-  not to change what they are listening to now.
+  **Renumbering never changes `playing?`.** The order of the queue and the row that
+  plays are separate: a person who moves a row wants to change what comes next, not to
+  change what they are listening to now.
   """
 
   alias MyHiFi.Playback.Queue
+
+  @doc """
+  Move one row to a given position, and renumber the rest around it.
+
+  `position` counts from 0. A position outside the queue is clamped to the nearest end,
+  so pressing "up" on the first row leaves it where it is instead of failing.
+
+  **This does not change which row is playing.** A person who moves the playing row is
+  still listening to it.
+
+  It returns the row at its new position.
+  """
+  @spec move_to(Queue.t(), integer()) :: {:ok, Queue.t()} | {:error, term()}
+  def move_to(row, position) do
+    others = Enum.reject(sorted(), &(&1.id == row.id))
+    place = position |> Kernel.max(0) |> Kernel.min(length(others))
+
+    others
+    |> List.insert_at(place, row)
+    |> Enum.with_index()
+    |> Enum.each(fn {one, index} ->
+      if one.position != index, do: Ash.update!(one, %{position: index}, action: :set_position)
+    end)
+
+    Ash.get(Queue, row.id)
+  end
 
   @doc """
   Number the rows again, from 0, in the order that they hold now.
@@ -26,14 +51,18 @@ defmodule MyHiFi.Playback.Queue.Order do
   """
   @spec close_gaps() :: non_neg_integer()
   def close_gaps do
-    Queue
-    |> Ash.Query.sort(position: :asc)
-    |> Ash.read!()
+    sorted()
     |> Enum.with_index()
     |> Enum.reject(fn {row, index} -> row.position == index end)
     |> Enum.map(fn {row, index} ->
       Ash.update!(row, %{position: index}, action: :set_position)
     end)
     |> length()
+  end
+
+  defp sorted do
+    Queue
+    |> Ash.Query.sort(position: :asc)
+    |> Ash.read!()
   end
 end
