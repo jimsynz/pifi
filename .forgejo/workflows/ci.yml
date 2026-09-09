@@ -14,6 +14,13 @@ jobs:
     with:
       targets: "myhifi_rpi0_2"
       assets_deploy_enabled: true
+      # The Emerge NIF names `libxkbcommon.so.0`, and the dynamic loader reads
+      # that name when it opens the NIF. The CI image holds every other library
+      # that the NIF names, and not this one, so 82 tests of the screen stopped
+      # with `EmergeSkia.Native is not available`. See the Emerge section of
+      # CLAUDE.md for why the firmware itself gets the library from the Nerves
+      # system.
+      extra_packages: "libxkbcommon0"
       # `nbpr` holds the programs that decode Ogg Vorbis and FLAC. NBPR shares the
       # read key of that organization on purpose: it gates the download and it
       # guards nothing, and `mix nbpr.install` holds the same value. The key
