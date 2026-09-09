@@ -38,6 +38,12 @@ defmodule MyHiFiWeb.BrowseLive do
   The sort, the filters and the page go in the query, and `Cinder.UrlSync` writes them:
   `/browse/internet-radio/countries/NZ?sort=-title&title=rock`. Each level is a
   collection of its own, so a sort belongs to the list that a person set it on.
+
+  ## The letter bar
+
+  `letter` is this page and not Cinder, and `?letter=G` holds it. A press narrows the
+  list to the titles that begin with that letter. See `letters/1` for why it narrows the
+  list and does not move to a page of it, and why the bar draws every letter.
   """
 
   use MyHiFiWeb, :live_view
@@ -57,12 +63,21 @@ defmodule MyHiFiWeb.BrowseLive do
 
   @collection "browse"
 
+  # The buttons of the letter bar. `#` is every title that begins with something that is
+  # not a letter of the alphabet: a digit, a mark, or a letter of another writing system.
+  @letters Enum.map(?A..?Z, &<<&1>>) ++ ["#"]
+
+  # What `Cinder.UrlSync` writes to say which page of a list a person is on. A press of
+  # a letter takes all three away. See `letter_address/2`.
+  @cursor_params ~w[after before page]
+
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, "Browse")
      |> assign(:finding?, false)
+     |> assign(:letter, nil)
      |> assign(:root_counts, %{})
      |> assign(:opened, nil)
      |> assign(:tracks_only?, false)
@@ -82,6 +97,7 @@ defmodule MyHiFiWeb.BrowseLive do
       {:noreply,
        socket
        |> assign(:finding?, params["find"] == "1")
+       |> assign(:letter, chosen_letter(params["letter"]))
        |> at(module, params["path"] || [])
        |> then(&Cinder.UrlSync.handle_params(params, uri, &1))}
     else
@@ -125,6 +141,14 @@ defmodule MyHiFiWeb.BrowseLive do
     socket = assign(socket, :finding?, !socket.assigns.finding?)
 
     {:noreply, go(socket, socket.assigns.segments)}
+  end
+
+  # **A press of the letter that is on takes the narrowing away**, because the bar holds
+  # no control for "every letter" and a person who pressed G must be able to go back.
+  def handle_event("letter", %{"letter" => letter}, socket) do
+    chosen = if socket.assigns.letter == letter, do: nil, else: chosen_letter(letter)
+
+    {:noreply, push_patch(socket, to: letter_address(socket, chosen))}
   end
 
   # A person who will not wait for the schedule asks for the read now. The source
@@ -206,6 +230,8 @@ defmodule MyHiFiWeb.BrowseLive do
 
         <.collection_header :if={@opened} item={@opened} playable?={@tracks_only?} />
 
+        <.letters :if={@finding? and item_list?(@here)} letter={@letter} />
+
         <Cinder.collection
           :if={@here}
           id={@collection_id}
@@ -252,6 +278,50 @@ defmodule MyHiFiWeb.BrowseLive do
     </div>
     """
   end
+
+  attr :letter, :string, default: nil
+
+  # **A press narrows the list to the titles that begin with one letter.** A library of
+  # this device holds 4377 albums and the list reads 25 of them in a page, so a person
+  # who wanted one that begins with G moved through 176 pages one press at a time.
+  #
+  # **Every letter draws, and the bar says nothing about what the list holds.** A count
+  # for each letter reads `substr` of every row, and no index of this table serves that,
+  # so a library of 68,273 rows would build a temporary tree for each draw of the page.
+  # A letter that holds nothing gives "Nothing here.", and one more press takes it away.
+  #
+  # It draws beside the filter and the sort, and not over the list, because a list of an
+  # album holds 12 tracks and a bar of 27 controls above it is noise.
+  defp letters(assigns) do
+    assigns = assign(assigns, :letters, @letters)
+
+    ~H"""
+    <nav id="letters" aria-label="The first letter of the title" class="mb-3 flex flex-wrap gap-1">
+      <button
+        :for={letter <- @letters}
+        type="button"
+        id={letter_id(letter)}
+        phx-click="letter"
+        phx-value-letter={letter}
+        aria-pressed={to_string(letter == @letter)}
+        class={[
+          "control flex size-7 shrink-0 items-center justify-center rounded-lg text-xs",
+          if(letter == @letter, do: "control-on")
+        ]}
+      >
+        {letter}
+      </button>
+    </nav>
+    """
+  end
+
+  # A `#` is no name for a part of a page, and a selector of a test cannot read one.
+  defp letter_id("#"), do: "letter-other"
+  defp letter_id(letter), do: "letter-#{String.downcase(letter)}"
+
+  # The bar draws for the items alone. See `starting_with/2`.
+  defp item_list?(%{kind: :item}), do: true
+  defp item_list?(_here), do: false
 
   attr :path, :list, required: true
   attr :source, :any, required: true
@@ -479,8 +549,54 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   defp here(%{path: []}), do: nil
-  defp here(%{path: path}), do: List.last(path).listing
+
+  defp here(%{path: path} = assigns),
+    do: path |> List.last() |> Map.fetch!(:listing) |> starting_with(assigns[:letter])
+
   defp here(_assigns), do: nil
+
+  # **The letter narrows the list, and it does not move a page of it.** These read
+  # actions hold a keyset pagination, so a page has a cursor and no number, and there is
+  # no page to jump to. A list of one letter is what a person who pressed G asked for in
+  # any case, and it reads in the same order under the same sort.
+  #
+  # A facet holds a value of a union, which SQLite keeps as JSON text, so the bar draws
+  # for the items alone. See `MyHiFi.Playback.Item`.
+  defp starting_with(listing, nil), do: listing
+  defp starting_with(%{kind: :facet} = listing, _letter), do: listing
+
+  # `lower` of SQLite moves the letters of ASCII and no others, so `Ä` reads as a title
+  # that begins with something that is not a letter. `title COLLATE NOCASE` holds the
+  # same rule, which is what the order of this list already uses.
+  defp starting_with(%{query: query} = listing, "#") do
+    %{
+      listing
+      | query:
+          Ash.Query.filter(
+            query,
+            fragment("substr(lower(?), 1, 1) not between 'a' and 'z'", title)
+          )
+    }
+  end
+
+  defp starting_with(%{query: query} = listing, letter) do
+    down = String.downcase(letter)
+
+    %{
+      listing
+      | query: Ash.Query.filter(query, fragment("substr(lower(?), 1, 1) = ?", title, ^down))
+    }
+  end
+
+  # A hand can write anything in an address, and a letter that this bar does not hold
+  # would narrow the list to nothing with no control to press to get it back.
+  defp chosen_letter(letter) when is_binary(letter) do
+    upper = String.upcase(letter)
+
+    if upper in @letters, do: upper
+  end
+
+  defp chosen_letter(_letter), do: nil
 
   # A branch and a facet are lists that this page makes, and a container is a row of the
   # catalogue. Only a container names a thing that a source can read again.
@@ -578,20 +694,57 @@ defmodule MyHiFiWeb.BrowseLive do
     end
   end
 
-  defp go(socket, segments), do: push_patch(socket, to: address(socket, segments))
+  # **A letter belongs to the list that a person set it on**, as a sort does, so a level
+  # change takes it away. A person who pressed G under Albums did not ask for the artists
+  # of G as well.
+  defp go(socket, segments) do
+    socket =
+      if segments == socket.assigns.segments, do: socket, else: assign(socket, :letter, nil)
+
+    push_patch(socket, to: address(socket, segments))
+  end
 
   # An empty list gives the address of the source, and not one with a slash on the end of
   # it. `find` says that the controls are in sight, and it stays through a level change,
   # because it is what a person chose and not a part of the level.
   defp address(socket, segments) do
     source = socket.assigns.current_source
-    query = if socket.assigns.finding?, do: %{find: 1}, else: %{}
+    query = Map.merge(find_param(socket.assigns.finding?), letter_param(socket.assigns.letter))
 
     case segments do
       [] -> ~p"/browse/#{source}?#{query}"
       _other -> ~p"/browse/#{source}/#{segments}?#{query}"
     end
   end
+
+  # **A press of a letter keeps the sort and the filter of the person.** The bar draws
+  # beside those two controls, so a person who sorted by date and then pressed G asked
+  # for the G of that order. `address/2` builds the address of a level and it holds
+  # neither, so this one changes the address that the page is on.
+  #
+  # The cursor of the page goes, because it names a row of the list before the letter
+  # narrowed it. See `Cinder.UrlSync`, which keeps a parameter that it does not know and
+  # is the other half of this.
+  defp letter_address(socket, letter) do
+    uri = URI.parse(socket.assigns.url_state.uri)
+
+    query =
+      (uri.query || "")
+      |> URI.decode_query()
+      |> Map.drop(@cursor_params)
+      |> put_letter(letter)
+
+    if query == %{}, do: uri.path, else: "#{uri.path}?#{URI.encode_query(query)}"
+  end
+
+  defp put_letter(query, nil), do: Map.delete(query, "letter")
+  defp put_letter(query, letter), do: Map.put(query, "letter", letter)
+
+  defp find_param(true), do: %{find: 1}
+  defp find_param(false), do: %{}
+
+  defp letter_param(nil), do: %{}
+  defp letter_param(letter), do: %{letter: letter}
 
   # Walk the same two steps that a person walked, one segment at a time. A segment that
   # names nothing ends the walk, so a stale bookmark gives the level that still stands

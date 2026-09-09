@@ -696,6 +696,137 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     end
   end
 
+  # A person who wants an album that begins with G reads 70 pages of a library of 4377 to
+  # reach it. See `MyHiFiWeb.BrowseLive.letters/1`.
+  describe "the letter bar" do
+    test "it draws with the filters, and not before them", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "RNZ National"})
+
+      {:ok, view, html} = live(conn, "#{@radio}/countries/NZ")
+
+      refute html =~ ~s(id="letters")
+
+      assert view |> element("#find") |> render_click() =~ ~s(id="letters")
+    end
+
+    test "a press narrows the list to that letter", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Rock FM"})
+      Stations.create(%{country_code: "NZ", title: "Zulu FM"})
+
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1")
+
+      html = view |> element("#letter-r") |> render_click()
+
+      assert html =~ "Rock FM"
+      refute html =~ "Zulu FM"
+    end
+
+    test "the letter goes in the address, so a reload reads the same list", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Rock FM"})
+      Stations.create(%{country_code: "NZ", title: "Zulu FM"})
+
+      {:ok, _view, html} = live(conn, "#{@radio}/countries/NZ?find=1&letter=R")
+
+      assert html =~ "Rock FM"
+      refute html =~ "Zulu FM"
+    end
+
+    # The bar holds no control for "every letter", so the letter that is on is the one
+    # that takes the narrowing away.
+    test "a press of the same letter takes the narrowing away", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Rock FM"})
+      Stations.create(%{country_code: "NZ", title: "Zulu FM"})
+
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1&letter=R")
+
+      html = view |> element("#letter-r") |> render_click()
+
+      assert html =~ "Rock FM"
+      assert html =~ "Zulu FM"
+    end
+
+    test "the letter that is on says so", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Rock FM"})
+
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1&letter=R")
+
+      assert view |> element("#letter-r") |> render() =~ ~s(aria-pressed="true")
+      assert view |> element("#letter-z") |> render() =~ ~s(aria-pressed="false")
+    end
+
+    # SQLite compares text byte by byte, so a title that begins with a small letter read
+    # after every Z. The bar reads the same rule as the order of the list. See
+    # `MyHiFi.Playback.Item`.
+    test "the case of the title does not matter", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "alt-J Radio"})
+
+      {:ok, _view, html} = live(conn, "#{@radio}/countries/NZ?find=1&letter=A")
+
+      assert html =~ "alt-J Radio"
+    end
+
+    test "a hash gives the titles that begin with something that is not a letter", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "95bFM"})
+      Stations.create(%{country_code: "NZ", title: "Zulu FM"})
+
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1")
+
+      html = view |> element("#letter-other") |> render_click()
+
+      assert html =~ "95bFM"
+      refute html =~ "Zulu FM"
+    end
+
+    # The bar draws beside the sort control, so a press of a letter that lost the sort
+    # would take away what the person set one control before.
+    test "a press keeps the sort of the person", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Rock FM"})
+
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1&sort=-sorted_title")
+
+      view |> element("#letter-r") |> render_click()
+
+      assert_patched(view, "#{@radio}/countries/NZ?find=1&letter=R&sort=-sorted_title")
+    end
+
+    # A letter belongs to the list that a person set it on, as a sort does.
+    test "a level change takes the letter away", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Rock FM"})
+
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1&letter=R")
+
+      view |> element("#crumb-1") |> render_click()
+
+      assert_patched(view, "#{@radio}/countries?find=1")
+    end
+
+    # A row of a facet holds a value of a union, which SQLite keeps as JSON text, so the
+    # bar draws for the items alone.
+    test "a list of facets holds no bar, and a letter in the address narrows nothing", %{
+      conn: conn
+    } do
+      Stations.create(%{country_code: "NZ", title: "RNZ National"})
+
+      {:ok, _view, html} = live(conn, "#{@radio}/countries?find=1")
+
+      refute html =~ ~s(id="letters")
+
+      {:ok, _view, html} = live(conn, "#{@radio}/countries?find=1&letter=Z")
+
+      assert html =~ "NZ"
+    end
+
+    # A letter that this bar does not hold would narrow the list to nothing, and no
+    # control of the page would give it back.
+    test "a letter that the bar does not hold narrows nothing", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Rock FM"})
+
+      {:ok, _view, html} = live(conn, "#{@radio}/countries/NZ?find=1&letter=%25")
+
+      assert html =~ "Rock FM"
+    end
+  end
+
   defp index_of(html, text) do
     [start, _rest] = String.split(html, text, parts: 2)
     String.length(start)
