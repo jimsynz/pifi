@@ -238,7 +238,7 @@ config :my_hi_fi, MyHiFi.Repo,
   database: "/root/my_hi_fi.db",
   busy_timeout: 10_000,
   cache_size: -4_000,
-  pool_size: 4
+  pool_size: 10
 
 # **Two jobs at a time, because a job holds a connection while it runs.** The pool above
 # holds four, and a queue of ten would take every one of them and leave none for the web
