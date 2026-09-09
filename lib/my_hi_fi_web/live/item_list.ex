@@ -258,21 +258,7 @@ defmodule MyHiFiWeb.ItemList do
         aria-current={@status && "true"}
         class="group flex min-w-0 grow items-center gap-3 py-1 text-left"
       >
-        <span class={[
-          "control flex size-8 shrink-0 items-center justify-center rounded-full",
-          if(@status, do: "control-on", else: "group-hover:text-accent")
-        ]}>
-          <span :if={@status == :playing} class="meter" aria-hidden="true">
-            <span /><span /><span />
-          </span>
-          <.icon :if={@status == :paused} name="hero-pause-mini" class="size-4" />
-          <.icon
-            :if={@status == :buffering}
-            name="hero-arrow-path-mini"
-            class="size-4 motion-safe:animate-spin"
-          />
-          <.icon :if={is_nil(@status)} name="hero-play-mini" class="size-4" />
-        </span>
+        <.play_mark status={@status} />
 
         <span :if={@number? and place_text(@row)} class="numerals w-9 shrink-0 text-right text-xs text-ink-faint">
           {place_text(@row)}
@@ -303,6 +289,263 @@ defmodule MyHiFiWeb.ItemList do
       <.played row={@row} />
       <.favourite row={@row} />
     </div>
+    """
+  end
+
+  attr :status, :atom, required: true
+
+  @doc """
+  What the play control shows: a meter, a pause, a spinner, or a play mark.
+
+  `row/1`, `play_cell/1` and `card/1` all draw it, so the three views cannot disagree
+  about what a state looks like.
+  """
+  def play_mark(assigns) do
+    ~H"""
+    <span class={[
+      "control flex size-8 shrink-0 items-center justify-center rounded-full",
+      if(@status, do: "control-on", else: "group-hover:text-accent")
+    ]}>
+      <span :if={@status == :playing} class="meter" aria-hidden="true">
+        <span /><span /><span />
+      </span>
+      <.icon :if={@status == :paused} name="hero-pause-mini" class="size-4" />
+      <.icon
+        :if={@status == :buffering}
+        name="hero-arrow-path-mini"
+        class="size-4 motion-safe:animate-spin"
+      />
+      <.icon :if={is_nil(@status)} name="hero-play-mini" class="size-4" />
+    </span>
+    """
+  end
+
+  attr :row, :any, required: true
+  attr :kind, :atom, required: true
+  attr :playing, :any, required: true
+  attr :source, :any, required: true
+
+  @doc """
+  The control that plays one row, for a cell of a table.
+
+  It is the button that `row/1` draws at the head of a row, and nothing else, so the
+  two views press the same event and read the same state.
+  """
+  def play_cell(%{kind: :facet} = assigns) do
+    ~H"""
+    <span class="flex size-8 items-center justify-center text-ink-faint">
+      <.icon name="hero-folder" class="size-4" />
+    </span>
+    """
+  end
+
+  def play_cell(assigns) do
+    assigns = assign(assigns, :status, status_of(assigns.playing, assigns.source, assigns.row))
+
+    ~H"""
+    <button
+      type="button"
+      id={"play-#{@row.id}"}
+      phx-click="play"
+      phx-value-id={@row.id}
+      aria-current={@status && "true"}
+      aria-label={"Play #{@row.title}"}
+      class="group flex items-center"
+    >
+      <.play_mark status={@status} />
+    </button>
+    """
+  end
+
+  attr :row, :any, required: true
+  attr :kind, :atom, required: true
+  attr :number?, :boolean, required: true
+
+  @doc "The place of one row inside its container, for a cell of a table."
+  def place_cell(%{kind: :facet} = assigns) do
+    ~H"""
+    <span :if={@row} />
+    """
+  end
+
+  def place_cell(assigns) do
+    ~H"""
+    <span :if={@number? and place_text(@row)} class="numerals text-xs text-ink-faint">
+      {place_text(@row)}
+    </span>
+    """
+  end
+
+  attr :row, :any, required: true
+  attr :kind, :atom, required: true
+  attr :facts, :list, required: true
+
+  @doc """
+  The title of one row and the facts under it, for a cell of a table.
+
+  A container is a link into itself, and a track is not: pressing a track plays it, and
+  that control is a cell of its own.
+  """
+  def title_cell(%{kind: :facet} = assigns) do
+    ~H"""
+    <button type="button" id={"open-#{@row.id}"} phx-click="open" phx-value-id={@row.id}>
+      <span class="truncate text-ink hover:text-accent">{to_string(@row.value.value)}</span>
+    </button>
+    """
+  end
+
+  def title_cell(%{row: %Item{kind: :container}} = assigns) do
+    assigns = assign(assigns, :artwork, Artwork.thumbnail_path(Map.get(assigns.row, :artwork)))
+
+    ~H"""
+    <button
+      type="button"
+      id={"open-#{@row.id}"}
+      phx-click="open"
+      phx-value-id={@row.id}
+      class="group flex min-w-0 items-center gap-3 text-left"
+    >
+      <.cover path={@artwork} class="size-8" />
+      <span class="min-w-0">
+        <span class="block truncate text-ink group-hover:text-accent">{@row.title}</span>
+        <.facts :if={@facts != []} row={@row} facts={@facts} />
+      </span>
+      <.count of={@row.child_count} />
+    </button>
+    """
+  end
+
+  def title_cell(assigns) do
+    ~H"""
+    <span class="block min-w-0">
+      <span class="block truncate text-ink">{@row.title}</span>
+      <.facts :if={@facts != []} row={@row} facts={@facts} />
+      <span :if={@facts == [] and @row.subtitle} class="block truncate text-xs text-ink-faint">
+        {@row.subtitle}
+      </span>
+    </span>
+    """
+  end
+
+  attr :row, :any, required: true
+  attr :kind, :atom, required: true
+  attr :playing, :any, required: true
+  attr :source, :any, required: true
+  attr :facts, :list, required: true
+  attr :reading, :map, required: true
+
+  @doc """
+  One row as a card, with the picture above the words.
+
+  **A card is for the picture**, so the cover fills the width of it and the title sits
+  under. A person who reads a shelf of albums recognises a cover before they read a
+  title, which is the reason to offer this view at all.
+
+  Pressing a card does what pressing the row does: it opens a container and it plays a
+  track.
+  """
+  def card(%{kind: :facet} = assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"open-#{@row.id}"}
+      phx-click="open"
+      phx-value-id={@row.id}
+      class="group flex w-full flex-col gap-2 text-left"
+    >
+      <.cover class="aspect-square w-full" icon_class="size-8" />
+      <span class="min-w-0">
+        <span class="block truncate text-sm text-ink group-hover:text-accent">
+          {to_string(@row.value.value)}
+        </span>
+        <.count of={@row.item_count} />
+      </span>
+    </button>
+    """
+  end
+
+  def card(assigns) do
+    assigns =
+      assigns
+      |> assign(:status, status_of(assigns.playing, assigns.source, assigns.row))
+      |> assign(:artwork, Artwork.thumbnail_path(Map.get(assigns.row, :artwork)))
+      |> assign(:container?, assigns.row.kind == :container)
+
+    ~H"""
+    <div class="flex w-full min-w-0 flex-col gap-2">
+      <button
+        type="button"
+        id={"#{if @container?, do: "open", else: "play"}-#{@row.id}"}
+        phx-click={if @container?, do: "open", else: "play"}
+        phx-value-id={@row.id}
+        aria-current={@status && "true"}
+        aria-label={"#{if @container?, do: "Open", else: "Play"} #{@row.title}"}
+        class="group relative flex w-full flex-col gap-2 text-left"
+      >
+        <.cover path={@artwork} class="aspect-square w-full" icon_class="size-8" />
+
+        <span
+          :if={@status}
+          class="absolute left-1 top-1 rounded-full bg-shell/70 p-0.5"
+          aria-hidden="true"
+        >
+          <.play_mark status={@status} />
+        </span>
+
+        <span class="min-w-0">
+          <span class={[
+            "block truncate text-sm",
+            if(@status, do: "font-medium text-accent", else: "text-ink group-hover:text-accent")
+          ]}>
+            {@row.title}
+          </span>
+          <.facts :if={@facts != []} row={@row} facts={@facts} />
+          <span
+            :if={@facts == [] and @row.subtitle}
+            class="block truncate text-xs text-ink-faint"
+          >
+            {@row.subtitle}
+          </span>
+        </span>
+      </button>
+
+      <span class="flex items-center gap-1">
+        <.audio_mark row={@row} reading={@reading} />
+        <span class="grow" />
+        <.add_to_queue row={@row} />
+        <.played row={@row} />
+        <.favourite row={@row} />
+      </span>
+    </div>
+    """
+  end
+
+  attr :row, :any, required: true
+  attr :kind, :atom, required: true
+  attr :reading, :map, required: true
+
+  @doc """
+  What a person can do with one row, for a cell of a table.
+
+  **A facet is a way into a list and not a thing.** A person cannot play a country, mark
+  it, or put it in the queue, so its row holds the count and nothing else.
+  """
+  def controls_cell(%{kind: :facet} = assigns) do
+    ~H"""
+    <span class="flex items-center justify-end">
+      <.count of={@row.item_count} />
+    </span>
+    """
+  end
+
+  def controls_cell(assigns) do
+    ~H"""
+    <span class="flex items-center justify-end gap-1">
+      <.audio_mark row={@row} reading={@reading} />
+      <.add_to_queue row={@row} />
+      <.played row={@row} />
+      <.favourite row={@row} />
+    </span>
     """
   end
 

@@ -57,7 +57,17 @@ defmodule MyHiFiWeb.BrowseLive do
   alias MyHiFi.Source
   alias MyHiFiWeb.ItemList
 
-  import MyHiFiWeb.ItemList, only: [row: 1, count: 1, cover: 1, favourite: 1]
+  import MyHiFiWeb.ItemList,
+    only: [
+      card: 1,
+      controls_cell: 1,
+      count: 1,
+      cover: 1,
+      favourite: 1,
+      place_cell: 1,
+      play_cell: 1,
+      title_cell: 1
+    ]
 
   on_mount(MyHiFiWeb.ItemList)
 
@@ -78,6 +88,7 @@ defmodule MyHiFiWeb.BrowseLive do
      |> assign(:page_title, "Browse")
      |> assign(:finding?, false)
      |> assign(:letter, nil)
+     |> assign(:list_layout, :table)
      |> assign(:root_counts, %{})
      |> assign(:opened, nil)
      |> assign(:tracks_only?, false)
@@ -98,6 +109,7 @@ defmodule MyHiFiWeb.BrowseLive do
        socket
        |> assign(:finding?, params["find"] == "1")
        |> assign(:letter, chosen_letter(params["letter"]))
+       |> assign(:list_layout, chosen_layout(params["view"]))
        |> at(module, params["path"] || [])
        |> then(&Cinder.UrlSync.handle_params(params, uri, &1))}
     else
@@ -107,6 +119,11 @@ defmodule MyHiFiWeb.BrowseLive do
 
   @impl Phoenix.LiveView
   def handle_params(_params, _uri, socket), do: {:noreply, chosen_source(socket)}
+
+  @impl Phoenix.LiveView
+  def handle_event("layout", %{"view" => view}, socket) do
+    {:noreply, push_patch(socket, to: layout_address(socket, chosen_layout(view)))}
+  end
 
   @impl Phoenix.LiveView
   def handle_event("open_root", %{"index" => index}, socket) do
@@ -232,11 +249,14 @@ defmodule MyHiFiWeb.BrowseLive do
 
         <.letters :if={@finding? and item_list?(@here)} letter={@letter} />
 
+        <.layout_choice :if={@here} layout={@list_layout} />
+
         <Cinder.collection
           :if={@here}
           id={@collection_id}
           query={@here.query}
-          layout={:list}
+          layout={@list_layout}
+          grid_columns={[xs: 2, sm: 3, lg: 4]}
           url_state={@url_state}
           page_size={25}
           empty_message="Nothing here."
@@ -248,27 +268,41 @@ defmodule MyHiFiWeb.BrowseLive do
           query_opts={[load: loads(@here.kind)]}
           on_query_change={:list_query}
         >
+          <:col :let={row} label="" class="w-10">
+            <.play_cell row={row} kind={@here.kind} playing={@playing} source={@source} />
+          </:col>
+
           <:col
+            :let={row}
             :if={@here[:order]}
             field={@here[:order] && elem(@here[:order], 1)}
             label={@here[:order] && elem(@here[:order], 0)}
             sort
-          />
+            class="w-14"
+          >
+            <.place_cell row={row} kind={@here.kind} number?={@here[:number?] || false} />
+          </:col>
 
           <:col
+            :let={row}
             field={field(@here.kind)}
             label={label(@path, @here)}
             sort
             filter={filter(@here.kind)}
-          />
+          >
+            <.title_cell row={row} kind={@here.kind} facts={@here[:facts] || []} />
+          </:col>
+
+          <:col :let={row} label="" class="w-32">
+            <.controls_cell row={row} kind={@here.kind} reading={@reading} />
+          </:col>
 
           <:item :let={row}>
-            <.row
+            <.card
               row={row}
               kind={@here.kind}
               playing={@playing}
               source={@source}
-              number?={@here[:number?] || false}
               facts={@here[:facts] || []}
               reading={@reading}
             />
@@ -506,6 +540,39 @@ defmodule MyHiFiWeb.BrowseLive do
       </div>
     </div>
     """
+  end
+
+  attr :layout, :atom, required: true
+
+  # **The table is the view that a person gets when they have chosen nothing**, so the
+  # control says which of the two is on and not what pressing it does.
+  defp layout_choice(assigns) do
+    ~H"""
+    <div id="layout-choice" class="mb-2 flex items-center justify-end gap-1">
+      <button
+        :for={{layout, view, icon, label} <- layouts()}
+        type="button"
+        id={"layout-#{view}"}
+        phx-click="layout"
+        phx-value-view={view}
+        aria-pressed={to_string(@layout == layout)}
+        aria-label={label}
+        class={[
+          "control flex size-8 items-center justify-center rounded-lg",
+          @layout == layout && "control-on text-accent"
+        ]}
+      >
+        <.icon name={icon} class="size-4" />
+      </button>
+    </div>
+    """
+  end
+
+  defp layouts do
+    [
+      {:table, "rows", "hero-bars-3", "Read this as rows"},
+      {:grid, "cards", "hero-squares-2x2", "Read this as cards"}
+    ]
   end
 
   attr :roots, :list, required: true
@@ -750,6 +817,31 @@ defmodule MyHiFiWeb.BrowseLive do
 
   defp put_letter(query, nil), do: Map.delete(query, "letter")
   defp put_letter(query, letter), do: Map.put(query, "letter", letter)
+
+  # **The layout is a parameter of the page, in the way that the letter is.** A reload
+  # and a bookmark therefore keep it, and `Cinder.UrlSync` keeps a parameter that it
+  # does not know. See `letter_address/2`.
+  #
+  # It keeps the cursor of the page. A layout draws the same rows in another shape, so
+  # the row that a person is looking at is still in the list.
+  defp layout_address(socket, layout) do
+    uri = URI.parse(socket.assigns.url_state.uri)
+
+    query =
+      (uri.query || "")
+      |> URI.decode_query()
+      |> put_layout(layout)
+
+    if query == %{}, do: uri.path, else: "#{uri.path}?#{URI.encode_query(query)}"
+  end
+
+  # The table is what a person gets when they have chosen nothing, so it needs no
+  # parameter and the address of it stays short.
+  defp put_layout(query, :table), do: Map.delete(query, "view")
+  defp put_layout(query, :grid), do: Map.put(query, "view", "cards")
+
+  defp chosen_layout("cards"), do: :grid
+  defp chosen_layout(_other), do: :table
 
   defp find_param(true), do: %{find: 1}
   defp find_param(false), do: %{}

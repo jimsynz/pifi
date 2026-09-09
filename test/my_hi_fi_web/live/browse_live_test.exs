@@ -84,6 +84,29 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   defp eventually(_check, _attempts), do: false
 
+  # `render_click` on a control that patches gives the html, and the address is what this
+  # test cares about, so it reads it from the socket.
+  defp assert_patched_to(view, fragment) do
+    ExUnit.Assertions.assert(
+      view |> :sys.get_state() |> get_in([Access.key(:socket), Access.key(:host_uri)]) != nil
+    )
+
+    ExUnit.Assertions.assert(
+      view
+      |> render()
+      |> then(fn _html -> assert_patch_contains(view, fragment) end)
+    )
+  end
+
+  defp assert_patch_contains(view, fragment) do
+    uri =
+      view
+      |> :sys.get_state()
+      |> get_in([Access.key(:socket), Access.key(:assigns), :url_state, :uri])
+
+    String.contains?(uri || "", fragment)
+  end
+
   defp queued_titles do
     Playback.queue!()
     |> Enum.sort_by(& &1.position)
@@ -352,6 +375,70 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       assert html =~ "Favourites"
       assert html =~ "Tags"
+    end
+  end
+
+  # **The layout is a parameter of the page, in the way that the letter is**, so a reload
+  # and a bookmark keep it. See `MyHiFiWeb.BrowseLive`.
+  describe "the choice between rows and cards" do
+    setup do
+      Stations.create(%{country_code: "NZ", title: "RNZ National"})
+
+      :ok
+    end
+
+    test "a list starts as rows, and the address says nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ")
+
+      assert has_element?(view, ~s(#layout-rows[aria-pressed="true"]))
+      assert has_element?(view, ~s(#layout-cards[aria-pressed="false"]))
+    end
+
+    test "a press of cards writes the address, and a press of rows takes it away", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ")
+
+      view |> element("#layout-cards") |> render_click()
+
+      assert assert_patch(view) =~ "view=cards"
+      assert has_element?(view, ~s(#layout-cards[aria-pressed="true"]))
+
+      view |> element("#layout-rows") |> render_click()
+
+      refute assert_patch(view) =~ "view=cards"
+      assert has_element?(view, ~s(#layout-rows[aria-pressed="true"]))
+    end
+
+    # A reload is the point of putting it in the address.
+    test "an address that names cards opens as cards", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?view=cards")
+
+      assert has_element?(view, ~s(#layout-cards[aria-pressed="true"]))
+      assert render(view) =~ "RNZ National"
+    end
+
+    # **The rows sort by their headers and the cards hold no header**, so Cinder draws a
+    # control for the cards instead. Either way a person can sort.
+    test "each view offers a way to sort", %{conn: conn} do
+      {:ok, rows, _html} = live(conn, "#{@radio}/countries/NZ")
+      assert render(rows) =~ "toggle_sort"
+
+      {:ok, cards, _html} = live(conn, "#{@radio}/countries/NZ?view=cards")
+      assert render(cards) =~ "toggle_sort"
+    end
+
+    # A person who chose cards and then walked into another level keeps the choice, in
+    # the way that Cinder keeps a parameter that it does not know.
+    test "a filter keeps the choice", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?view=cards&find=1")
+
+      assert has_element?(view, ~s(#layout-cards[aria-pressed="true"]))
+    end
+
+    # The branches of a source are not a list of items, so there is nothing to lay out.
+    test "the branches of a source hold no such control", %{conn: conn} do
+      {:ok, view, _html} = live(conn, @radio)
+
+      refute has_element?(view, "#layout-choice")
     end
   end
 
@@ -702,8 +789,11 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     end
 
     # A row of the artists branch is a person, and a row of the albums branch is a
-    # record. The word of the sort control and of the filter therefore comes from the
+    # record. The word of the column and of the filter therefore comes from the
     # listing. See `t:MyHiFi.Source.listing/0`.
+    #
+    # **The table sorts by its headers**, so the word sits in one of those. A grid holds
+    # no header and Cinder draws a control for it instead. See `MyHiFiWeb.BrowseLive`.
     test "the sort control shows the word that the listing names", %{conn: conn} do
       jellyfin_album()
 
@@ -713,7 +803,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       assert html =~ "Filter Name..."
 
       assert artists
-             |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+             |> element("[phx-click='toggle_sort'][phx-value-key='sorted_title']")
              |> render() =~ "Name"
 
       {:ok, albums, _html} = live(conn, "#{@jellyfin}/albums?find=1")
@@ -722,7 +812,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       assert html =~ "Filter Title..."
 
       assert albums
-             |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+             |> element("[phx-click='toggle_sort'][phx-value-key='sorted_title']")
              |> render() =~ "Title"
     end
 
@@ -1235,7 +1325,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1")
 
       view
-      |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+      |> element("[phx-click='toggle_sort'][phx-value-key='sorted_title']")
       |> render_click()
 
       # A country list holds two sorts: the popularity that the level asked for, and
@@ -1274,7 +1364,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1")
 
       view
-      |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+      |> element("[phx-click='toggle_sort'][phx-value-key='sorted_title']")
       |> render_click()
 
       view |> element("#crumb-1") |> render_click()

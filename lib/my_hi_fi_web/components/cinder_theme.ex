@@ -14,11 +14,15 @@ defmodule MyHiFiWeb.CinderTheme do
 
   ## What this theme covers
 
-  It covers what the browse page draws: the list layout, the filters, the sort controls,
-  the pagination, and the empty, loading and error states. It leaves the table layout,
-  the grid layout, the selection controls and the bulk actions at the values that Cinder
-  gives, because no page of this firmware draws one of those. A page that starts to draw
-  one needs the keys for it here, or it gets a white card on a dark fascia.
+  It covers what the browse page draws: the table layout, the grid layout, the list
+  layout, the filters, the sort controls, the pagination, and the empty, loading and
+  error states. It leaves the selection controls and the bulk actions at the values that
+  Cinder gives, because no page of this firmware draws one of those. A page that starts
+  to draw one needs the keys for it here, or it gets a white card on a dark fascia.
+
+  **The grid was the white card that this warned about.** `grid_item_class` of Cinder is
+  `p-4 bg-white border border-gray-200 rounded-lg shadow-sm`, and the browse page drew
+  it the moment that a person pressed the control for cards.
 
   ## Tailwind must see this file
 
@@ -98,6 +102,26 @@ defmodule MyHiFiWeb.CinderTheme do
   set :sort_button_active_class, "control-on"
   set :sort_button_inactive_class, ""
   set :sort_indicator_class, "ml-1.5 inline-flex items-center align-baseline"
+
+  # The table. A row of it draws its own cells, so these hold the rules between the rows
+  # and the head of each column, and nothing else. `whitespace-nowrap` of Cinder goes,
+  # because the column of the title holds the longest text on the page and it must wrap.
+  set :table_wrapper_class, "overflow-x-auto"
+  set :table_class, "w-full border-collapse"
+  set :thead_class, "border-b border-edge"
+
+  set :th_class,
+      "px-1 py-2 text-left text-[0.65rem] uppercase tracking-[0.18em] text-ink-faint"
+
+  set :tbody_class, "divide-y divide-edge"
+  set :td_class, "px-1 py-1.5 align-middle text-ink"
+
+  # The grid. **A card is for the picture**, so the card itself holds no frame and no
+  # background: a frame around a cover reads as a second border beside the rounded
+  # corners of the picture. The gap between two cards is what separates them.
+  set :grid_container_class, "grid gap-4"
+  set :grid_item_class, "min-w-0"
+  set :grid_item_clickable_class, "cursor-pointer"
 
   # The list. Each row draws itself, so this holds the line between two rows and nothing
   # else.
