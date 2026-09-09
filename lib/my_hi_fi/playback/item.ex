@@ -219,6 +219,7 @@ defmodule MyHiFi.Playback.Item do
         :rank,
         :published_at,
         :release_year,
+        :added_at,
         :number,
         :disc,
         :url,
@@ -479,6 +480,23 @@ defmodule MyHiFi.Playback.Item do
 
     attribute :release_year, :integer do
       description "The release year of an album."
+      public? true
+    end
+
+    attribute :added_at, :utc_datetime_usec do
+      description """
+      When the service first held this item.
+
+      **It is the date of the service and not of this device.** `inserted_at` says
+      when this device first read the row, and a person who writes a new card gets
+      that date for every album of a library at once. A list of what a person added
+      last month must survive that, so the number comes from the service. Jellyfin
+      names it `DateCreated`. See `MyHiFi.Jellyfin.Server.album/2`.
+
+      It is nil for a source that names no such date, and for a row that a firmware
+      before this column wrote.
+      """
+
       public? true
     end
 

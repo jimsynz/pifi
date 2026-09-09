@@ -116,6 +116,7 @@ defmodule MyHiFi.Jellyfin.Server do
           optional(:byte_size) => pos_integer() | nil,
           optional(:published_at) => DateTime.t() | nil,
           optional(:release_year) => pos_integer() | nil,
+          optional(:added_at) => DateTime.t() | nil,
           optional(:number) => pos_integer() | nil,
           optional(:disc) => pos_integer() | nil,
           optional(:format) => :aac | :flac | :mp3
@@ -436,7 +437,8 @@ defmodule MyHiFi.Jellyfin.Server do
           parent_ref: album_artist_ref(item),
           subtitle: presence(item["AlbumArtist"]),
           published_at: published_at(item),
-          release_year: release_year(item["ProductionYear"])
+          release_year: release_year(item["ProductionYear"]),
+          added_at: added_at(item)
         })
     end
   end
@@ -567,6 +569,13 @@ defmodule MyHiFi.Jellyfin.Server do
   # `MyHiFi.Playback.FavouriteAudio` reads that size before it asks for a track. It
   # makes a page of tracks larger, so no other listing asks for it.
   defp fields(:tracks), do: [{"Fields", "MediaSources"}]
+
+  # **`DateCreated` is absent unless a caller asks for it.** A read of the albums of a
+  # server on 2026-09-09 gave `PremiereDate` and `ProductionYear` with no `Fields` at
+  # all, and `DateCreated` only with `Fields=DateCreated`. The albums are the one
+  # listing that asks, because `Recently added` is a list of albums and a page of
+  # tracks is already the largest page that this source reads.
+  defp fields(:albums), do: [{"Fields", "DateCreated"}]
   defp fields(_kind), do: []
 
   defp parse(items, kind, address) do
@@ -648,6 +657,20 @@ defmodule MyHiFi.Jellyfin.Server do
 
   defp release_year(year) when is_integer(year) and year > 0, do: year
   defp release_year(_year), do: nil
+
+  # **`DateCreated` is when the server first held the album, and it is not the release
+  # date.** `PremiereDate` is the release, and `MyHiFi.Playback.Item` holds that under
+  # `published_at`. A person who wants the record that they added last week needs the
+  # first one, and a record of 1979 that they added last week gives the two 47 years
+  # apart.
+  defp added_at(item) do
+    with date when is_binary(date) <- presence(item["DateCreated"]),
+         {:ok, stamp, _offset} <- DateTime.from_iso8601(date) do
+      stamp
+    else
+      _other -> nil
+    end
+  end
 
   # The pipeline decodes these three as they are. Every other container becomes
   # `:mp3`, and `stream_url/2` then asks the server to convert the file.

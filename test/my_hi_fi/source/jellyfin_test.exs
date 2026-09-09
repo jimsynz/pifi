@@ -171,7 +171,7 @@ defmodule MyHiFi.Source.JellyfinTest do
   end
 
   describe "roots/0" do
-    test "the three branches read the catalogue and reach no server" do
+    test "the four branches read the catalogue and reach no server" do
       Req.Test.stub(Server, fn _conn -> raise "the server must not be asked" end)
 
       Fill.artists([
@@ -191,15 +191,23 @@ defmodule MyHiFi.Source.JellyfinTest do
       one = track()
       {:ok, _item} = Playback.set_favourite(one)
 
-      assert [{"Artists", artists}, {"Albums", albums}, {"Favourites", favourites}] =
-               Jellyfin.roots()
+      assert [
+               {"Artists", artists},
+               {"Albums", albums},
+               {"Recently added", recent},
+               {"Favourites", favourites}
+             ] = Jellyfin.roots()
 
       assert Enum.map(Ash.read!(artists.query), & &1.title) == ["Massive Attack"]
       assert Enum.map(Ash.read!(albums.query), & &1.title) == ["Mezzanine"]
+      assert Enum.map(Ash.read!(recent.query), & &1.title) == ["Mezzanine"]
       assert Enum.map(Ash.read!(favourites.query), & &1.title) == ["Teardrop"]
 
-      assert [artists.kind, albums.kind, favourites.kind] == [:item, :item, :item]
+      assert [artists.kind, albums.kind, recent.kind, favourites.kind] ==
+               [:item, :item, :item, :item]
+
       assert albums.facts == [:subtitle, :release_year]
+      assert recent.facts == [:subtitle, :release_year]
       assert favourites.facts == [:subtitle, :release_year]
       # An artist is the one container of this source with no parent, so the Artists
       # branch needs no facet and no column of its own.
@@ -225,6 +233,70 @@ defmodule MyHiFi.Source.JellyfinTest do
       assert [{"Artists", artists} | _rest] = Jellyfin.roots()
 
       assert Ash.read!(artists.query) == []
+    end
+  end
+
+  describe "the recently added branch" do
+    setup do
+      Req.Test.stub(Server, fn _conn -> raise "the server must not be asked" end)
+
+      Fill.artists([%{ref: "artist-1", title: "An artist", parent_ref: nil, artwork_url: nil}])
+
+      :ok
+    end
+
+    # The newest record of the library is the first row, and a limit of 20 is absent:
+    # the first page holds the last handful and the list holds the rest.
+    test "the album that the server held last comes first" do
+      album("old", ~U[2024-01-01 00:00:00.000000Z])
+      album("new", ~U[2026-09-01 00:00:00.000000Z])
+      album("middle", ~U[2025-06-01 00:00:00.000000Z])
+
+      assert titles() == ["new", "middle", "old"]
+    end
+
+    # A server of an older version names no such date, and a row of a firmware before
+    # this column holds none either. A person who asked for the newest expects those
+    # after every album that names a date.
+    test "an album that holds no date comes last" do
+      album("nameless", nil)
+      album("dated", ~U[2024-01-01 00:00:00.000000Z])
+
+      assert titles() == ["dated", "nameless"]
+    end
+
+    # **The date of the release is not the date that the album arrived.** A person who
+    # buys a record of 1979 this week must read it at the top.
+    test "it reads the date of the service and not the release" do
+      album("old record, new to me", ~U[2026-09-01 00:00:00.000000Z], 1979)
+      album("new record, here a while", ~U[2024-01-01 00:00:00.000000Z], 2024)
+
+      assert titles() == ["old record, new to me", "new record, here a while"]
+    end
+
+    test "an artist is absent, because a person asked for albums" do
+      album("an album", ~U[2026-09-01 00:00:00.000000Z])
+
+      assert titles() == ["an album"]
+    end
+
+    defp album(title, added_at, release_year \\ nil) do
+      Fill.albums([
+        %{
+          ref: "album-#{title}",
+          title: title,
+          parent_ref: "artist-1",
+          artwork_url: nil,
+          added_at: added_at,
+          release_year: release_year
+        }
+      ])
+    end
+
+    defp titles do
+      [_artists, _albums, {"Recently added", recent} | _rest] = Jellyfin.roots()
+
+      Enum.map(Ash.read!(recent.query), & &1.title)
     end
   end
 

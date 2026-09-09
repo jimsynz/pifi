@@ -125,6 +125,7 @@ defmodule MyHiFi.Jellyfin.Fill do
         :last_seen_at,
         :published_at,
         :release_year,
+        :added_at,
         :number,
         :disc,
         :parent_id,
@@ -184,7 +185,8 @@ defmodule MyHiFi.Jellyfin.Fill do
       subtitle: entry[:subtitle],
       artwork_url: entry.artwork_url,
       published_at: entry[:published_at],
-      release_year: entry[:release_year]
+      release_year: entry[:release_year],
+      added_at: entry[:added_at]
     }
   end
 

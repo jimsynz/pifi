@@ -85,6 +85,32 @@ defmodule MyHiFi.Jellyfin.ServerTest do
       assert headers["authorization"] =~ ~s(DeviceId="#{Server.device_id()}")
     end
 
+    # **`DateCreated` is absent unless a caller asks for it.** A read of a real server
+    # on 2026-09-09 gave `PremiereDate` and `ProductionYear` with no `Fields` at all,
+    # and `DateCreated` only with `Fields=DateCreated`. `Recently added` reads that
+    # date, so a page of albums that stopped asking would sort every album alike.
+    test "a page of albums asks the server for the date that it holds" do
+      put_link()
+      stub(%{"Items" => [], "TotalRecordCount" => 0})
+
+      assert {:ok, _page} = Server.page(:albums, 0)
+
+      assert_receive {:request, "GET", "/Items", params, _headers}
+      assert params["Fields"] == "DateCreated"
+    end
+
+    # A page of tracks is the largest page that this source reads, and it needs the
+    # size of each file. The date of an album is not on it.
+    test "a page of tracks asks for the size of a file and no date" do
+      put_link()
+      stub(%{"Items" => [], "TotalRecordCount" => 0})
+
+      assert {:ok, _page} = Server.page(:tracks, 0)
+
+      assert_receive {:request, "GET", "/Items", params, _headers}
+      assert params["Fields"] == "MediaSources"
+    end
+
     # The server lists one device for each identifier that it meets, so an identifier
     # that changed at each boot would fill that list.
     test "the identifier of the device stays the same" do
@@ -402,6 +428,27 @@ defmodule MyHiFi.Jellyfin.ServerTest do
                  %{"Id" => "a", "Name" => "Mezzanine", "ProductionYear" => 1998},
                  @address
                )
+    end
+
+    # `DateCreated` is when the server first held the album, and `PremiereDate` is the
+    # release. A record of 1998 that a person added this year gives the two 28 years
+    # apart, and `Recently added` needs the second one.
+    test "an album holds the date that the server first held it" do
+      item = %{
+        "Id" => "album-1",
+        "Name" => "Mezzanine",
+        "PremiereDate" => "1998-04-20T00:00:00.0000000Z",
+        "DateCreated" => "2026-09-02T23:06:22.0140647Z"
+      }
+
+      assert entry = Server.album(item, @address)
+      assert entry.added_at == ~U[2026-09-02 23:06:22.014064Z]
+      assert entry.published_at == ~U[1998-04-20 00:00:00.000000Z]
+    end
+
+    # A server of an older version names no such date, and a library still reads.
+    test "an album that names no date holds none" do
+      assert %{added_at: nil} = Server.album(%{"Id" => "a", "Name" => "Mezzanine"}, @address)
     end
 
     test "an album whose artist the server does not name holds no parent" do

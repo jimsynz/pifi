@@ -87,6 +87,8 @@ defmodule MyHiFi.Source.Jellyfin do
     [
       {"Artists", %{query: artists_query(), kind: :item, title_label: "Name"}},
       {"Albums", %{query: albums_query(), kind: :item, facts: [:subtitle, :release_year]}},
+      {"Recently added",
+       %{query: recently_added_query(), kind: :item, facts: [:subtitle, :release_year]}},
       {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle, :release_year]}}
     ]
   end
@@ -134,6 +136,25 @@ defmodule MyHiFi.Source.Jellyfin do
     Item
     |> Ash.Query.filter(source == ^@source and kind == :container and not is_nil(parent_id))
     |> Ash.Query.sort(sorted_title: :asc)
+  end
+
+  # **The date comes from the server and not from this device.** `added_at` holds
+  # `DateCreated` of Jellyfin, so a person who writes a new card still reads the record
+  # that they added last week at the top. `inserted_at` would give every album of the
+  # library one date, which is the date of the first read.
+  #
+  # An album that holds no date comes last. SQLite reads a null as the smallest value,
+  # so `:desc` puts it after every album that names one, which is where a person who
+  # asked for the newest expects it.
+  #
+  # **There is no limit of 20 rows.** The newest album is the first row of the first
+  # page, so a person who wants the last handful reads them without one, and a person
+  # who wants the album of three months ago moves down the list and finds it. A number
+  # here would take that away and no measurement would choose the number.
+  defp recently_added_query do
+    Item
+    |> Ash.Query.filter(source == ^@source and kind == :container and not is_nil(parent_id))
+    |> Ash.Query.sort(added_at: :desc)
   end
 
   defp favourites_query do
