@@ -168,29 +168,30 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
     end
   end
 
+  # **A mark that is there at all is the signal**, and the colour says which fault. See
+  # `MyHiFi.Peripheral.NetworkIcon`.
   describe "the network" do
-    # **A network that carries the music draws nothing.** A person whose music plays
-    # needs no mark that says so, and this screen is 240 pixels wide.
-    test "a network that carries the music leaves the corner alone" do
-      assert corner(:internet) == corner(nil)
-      assert {red, green, blue} = corner(:internet)
-      assert red < 40 and green < 40 and blue < 40
+    test "a network that carries the music draws no mark" do
+      assert marks(:internet) == %{amber: 0, rose: 0}
+      assert marks(nil) == %{amber: 0, rose: 0}
     end
 
-    # Rose says that a person must act, which is what the low battery band says with
-    # the same colour.
-    test "a device with no way out of its network draws a band in the corner" do
-      assert {red, green, blue} = corner(:lan)
-      assert red > 90 and green < 60 and blue < 90
+    # Amber is the colour of a device that is working on something. The radio link works
+    # and a person looks at their router.
+    test "a device with no way out of its network draws an amber mark" do
+      assert %{amber: amber, rose: 0} = marks(:lan)
+      assert amber > 0
     end
 
-    test "a device with no network at all draws it as well" do
-      assert corner(:disconnected) == corner(:lan)
+    # Rose is the colour of a fault, and it is the worse colour for the worse state.
+    test "a device with no network at all draws a rose mark" do
+      assert %{amber: 0, rose: rose} = marks(:disconnected)
+      assert rose > 0
     end
 
-    # The battery sits at the other end of the row, so a warning that arrives moves
-    # nothing that a person was already reading.
-    test "the battery does not move when the warning arrives" do
+    # The battery sits at the other end of the row, so a mark that arrives moves nothing
+    # that a person was already reading.
+    test "the battery does not move when the mark arrives" do
       assert battery_corner(:internet) == battery_corner(:lan)
     end
 
@@ -220,13 +221,22 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
       |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
     end
 
-    # Inside the band that the warning draws, at the top left, where the artwork would
-    # otherwise show.
-    defp corner(network) do
+    # The corner that the mark sits in, and the row that the battery shares with it.
+    defp marks(network) do
       {width, _height} = Screen.size()
+      pixels = pixels_of(network)
 
-      pixel(pixels_of(network), width, 14, 18)
+      for y <- 4..34, x <- 0..(width - 1), reduce: %{amber: 0, rose: 0} do
+        counted -> Map.update(counted, shade(pixel(pixels, width, x, y)), 1, &(&1 + 1))
+      end
+      |> Map.take([:amber, :rose])
     end
+
+    # Amber 400 is `fbbf24` and rose 400 is `fb7185`. The green channel is what tells
+    # them apart, and no other pixel of this corner holds a red channel that high.
+    defp shade({red, green, blue}) when red > 220 and green > 160 and blue < 90, do: :amber
+    defp shade({red, green, blue}) when red > 220 and green in 80..150 and blue > 100, do: :rose
+    defp shade(_pixel), do: :other
 
     # The right end of the row, which is where the battery sits.
     defp battery_corner(network) do

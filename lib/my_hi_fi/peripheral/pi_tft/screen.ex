@@ -18,7 +18,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   alias Emerge.UI.{Background, Border, Font}
   alias MyHiFi.Device.Identity
-  alias MyHiFi.Peripheral.{BatteryIcon, Clock, NetworkWarning}
+  alias MyHiFi.Peripheral.{BatteryIcon, Clock, NetworkIcon}
 
   @width 320
   @height 240
@@ -58,7 +58,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
           percent: 0..100,
           position_ms: non_neg_integer(),
           duration_ms: pos_integer() | nil,
-          network: NetworkWarning.connection() | nil,
+          network: NetworkIcon.connection() | nil,
           volume_percent: 0..100 | nil
         }
 
@@ -213,27 +213,13 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   end
 
   # **A network that carries the music draws nothing.** A person whose music plays needs
-  # no mark that says so. See `MyHiFi.Peripheral.NetworkWarning`.
+  # no mark that says so. `MyHiFi.Peripheral.NetworkIcon` gives nothing for that state,
+  # so this needs no test of its own.
   #
-  # It reads as a pill, in the way that the state of the player does, and rose is what
-  # this screen already gives a fault.
+  # It sits beside the battery, because both say what the hardware is doing and a person
+  # looks in one place for that.
   defp network(view) do
-    case NetworkWarning.text(view.network) do
-      nil ->
-        none()
-
-      words ->
-        el(
-          [
-            padding_xy(8, 3),
-            Border.rounded(999),
-            Background.color(color(:rose, 400)),
-            Font.size(13),
-            Font.color(color(:slate, 950))
-          ],
-          text(words)
-        )
-    end
+    el([center_y()], NetworkIcon.render(view.network))
   end
 
   # **A device on the mains draws no battery at all.** It holds no gauge, so it publishes

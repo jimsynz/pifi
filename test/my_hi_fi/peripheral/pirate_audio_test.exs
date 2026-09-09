@@ -465,7 +465,7 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
     end
 
     # A device that reaches its router and nothing past it plays nothing, and a person
-    # reads that state as working. See `MyHiFi.Peripheral.NetworkWarning`.
+    # reads that state as working. See `MyHiFi.Peripheral.NetworkIcon`.
     test "a device with no way out of its network says so", %{state: state} do
       {:ok, state} =
         PirateAudio.handle_event(

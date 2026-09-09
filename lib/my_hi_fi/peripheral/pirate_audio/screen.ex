@@ -49,7 +49,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
 
   alias Emerge.UI.{Background, Border, Font}
   alias MyHiFi.Device.Identity
-  alias MyHiFi.Peripheral.{BatteryIcon, Clock, NetworkWarning}
+  alias MyHiFi.Peripheral.{BatteryIcon, Clock, NetworkIcon}
 
   @width 240
   @height 240
@@ -76,7 +76,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   bar.
 
   `network` is what the interfaces of the device are doing, and the screen says nothing
-  about a network that carries the music. See `MyHiFi.Peripheral.NetworkWarning`.
+  about a network that carries the music. See `MyHiFi.Peripheral.NetworkIcon`.
 
   `volume_percent` is the level that a person is setting now, and it is `nil` at every
   other moment. A level that stayed on the glass would take the room of the subtitle
@@ -95,7 +95,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
           safe_to_switch_off?: boolean(),
           position_ms: non_neg_integer(),
           duration_ms: pos_integer() | nil,
-          network: NetworkWarning.connection() | nil,
+          network: NetworkIcon.connection() | nil,
           volume_percent: 0..100 | nil
         }
 
@@ -218,29 +218,20 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   end
 
   # **A network that carries the music draws nothing.** A person whose music plays needs
-  # no mark that says so, and this corner is 240 pixels wide. See
-  # `MyHiFi.Peripheral.NetworkWarning`.
+  # no mark that says so, and this corner is 240 pixels wide.
+  # `MyHiFi.Peripheral.NetworkIcon` gives nothing for that state, so this needs no test
+  # of its own.
   #
-  # Rose says that a person must act, which is what the low battery band says with the
-  # same colour. The band holds more of it than the battery band holds of black, because
-  # words over artwork need more than a picture of a cell does.
-  defp network(view) do
-    case NetworkWarning.text(view.network) do
-      nil ->
-        none()
+  # The band behind it is the one that the battery holds, because the mark sits over the
+  # artwork and a bright picture would take it away.
+  defp network(%{network: :internet}), do: none()
+  defp network(%{network: nil}), do: none()
 
-      words ->
-        el(
-          [
-            padding_xy(5, 3),
-            Border.rounded(6),
-            Background.color(color_rgba(136, 19, 55, 0.88)),
-            Font.size(11),
-            Font.color(color(:slate, 50))
-          ],
-          text(words)
-        )
-    end
+  defp network(view) do
+    el(
+      [padding_xy(5, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
+      NetworkIcon.render(view.network)
+    )
   end
 
   # One flat band, and not a gradient that fades into the picture. **A gradient cannot

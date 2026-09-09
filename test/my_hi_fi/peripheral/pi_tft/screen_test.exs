@@ -123,22 +123,25 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
     end
   end
 
+  # **A mark that is there at all is the signal**, and the colour says which fault. See
+  # `MyHiFi.Peripheral.NetworkIcon`.
   describe "the network" do
-    # **A network that carries the music draws nothing.** A person whose music plays
-    # needs no mark that says so, and the status row holds the state of the player.
-    test "a network that carries the music draws no pill" do
-      assert rose_pixels(:internet) == 0
-      assert rose_pixels(nil) == 0
+    test "a network that carries the music draws no mark" do
+      assert marks(:internet) == %{amber: 0, rose: 0}
+      assert marks(nil) == %{amber: 0, rose: 0}
     end
 
-    # Rose is what this screen already gives a fault, and a person reads the colour
-    # before they read the words.
-    test "a device with no way out of its network draws a rose pill" do
-      assert rose_pixels(:lan) > 20
+    # Amber is the colour of a device that is working on something. The radio link works
+    # and a person looks at their router.
+    test "a device with no way out of its network draws an amber mark" do
+      assert %{amber: amber, rose: 0} = marks(:lan)
+      assert amber > 0
     end
 
-    test "a device with no network at all draws one as well" do
-      assert rose_pixels(:disconnected) > 20
+    # Rose is the colour of a fault, and it is the worse colour for the worse state.
+    test "a device with no network at all draws a rose mark" do
+      assert %{amber: 0, rose: rose} = marks(:disconnected)
+      assert rose > 0
     end
 
     # A stop clears the track. What the hardware says is not the track.
@@ -151,7 +154,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
     # **The idle layout holds no status row**, so it draws its own corner. A device on
     # the mains holds no gauge and it can still hold a router that is off, so that row
     # must draw for one.
-    test "the idle screen of a device with no gauge still says that the network is down" do
+    test "the idle screen of a device with no gauge still draws the mark" do
       context = splash_file(%{})
 
       view = %{
@@ -162,10 +165,11 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
           network: :disconnected
       }
 
-      assert count_rose(render_pixels(view, context.assets), 22) > 20
+      assert %{rose: rose} = count(render_pixels(view, context.assets))
+      assert rose > 0
     end
 
-    defp rose_pixels(network) do
+    defp marks(network) do
       view = %{
         Screen.new()
         | state: :playing,
@@ -174,7 +178,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
           network: network
       }
 
-      count_rose(render_pixels(view), 25)
+      count(render_pixels(view))
     end
 
     defp render_pixels(view, assets \\ []) do
@@ -190,17 +194,23 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
       )
     end
 
-    # The pill is the one rose thing on this row, so a count of its pixels says whether
-    # the screen drew it.
-    defp count_rose(pixels, y) do
+    # **The mark is the one amber or rose thing at the top of the screen.** A state of
+    # `:playing` draws an emerald pill, and a buffering one draws an amber pill, so
+    # every view here plays.
+    defp count(pixels) do
       {width, _height} = Screen.size()
 
-      Enum.count(0..(width - 1), fn x ->
-        {red, green, blue} = pixel(pixels, width, x, y)
-
-        red > 200 and green < 140 and blue > 120 and blue < 190
-      end)
+      for y <- 8..40, x <- 0..(width - 1), reduce: %{amber: 0, rose: 0} do
+        counted -> Map.update(counted, shade(pixel(pixels, width, x, y)), 1, &(&1 + 1))
+      end
+      |> Map.take([:amber, :rose])
     end
+
+    # Amber 400 is `fbbf24` and rose 400 is `fb7185`. The green channel is what tells
+    # them apart, and no other pixel of this strip holds a red channel that high.
+    defp shade({red, green, blue}) when red > 220 and green > 160 and blue < 90, do: :amber
+    defp shade({red, green, blue}) when red > 220 and green in 80..150 and blue > 100, do: :rose
+    defp shade(_pixel), do: :other
   end
 
   describe "render/1" do
