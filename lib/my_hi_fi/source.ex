@@ -21,7 +21,7 @@ defmodule MyHiFi.Source do
   @default_inside %{
     facts: [:published_at],
     order: {"Date", "published_at"},
-    sort: [published_at: :asc, title: :asc]
+    sort: [published_at: :asc, sorted_title: :asc]
   }
 
   # The list under a facet, which no container holds. A facet of this firmware names a
@@ -30,7 +30,7 @@ defmodule MyHiFi.Source do
   @default_under_facet %{
     facts: [:subtitle],
     order: {"Popularity", "rank"},
-    sort: [rank: :desc, title: :asc]
+    sort: [rank: :desc, sorted_title: :asc]
   }
 
   @typedoc """

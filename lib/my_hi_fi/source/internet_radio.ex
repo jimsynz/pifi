@@ -68,7 +68,7 @@ defmodule MyHiFi.Source.InternetRadio do
   defp favourites_query do
     Item
     |> Ash.Query.filter(source == ^@source and favourite? == true)
-    |> Ash.Query.sort(title: :asc)
+    |> Ash.Query.sort(sorted_title: :asc)
   end
 
   defp facet_query(key) do
@@ -82,7 +82,7 @@ defmodule MyHiFi.Source.InternetRadio do
   def search(_text) do
     Item
     |> Ash.Query.filter(source == ^@source)
-    |> Ash.Query.sort(rank: :desc, title: :asc)
+    |> Ash.Query.sort(rank: :desc, sorted_title: :asc)
   end
 
   @impl MyHiFi.Source

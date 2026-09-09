@@ -91,6 +91,43 @@ defmodule MyHiFiWeb.ItemList do
     {:cont, socket}
   end
 
+  @doc """
+  The rows whose title holds the text of a person, in any case.
+
+  Cinder gives the columns that hold `search` and the text that a person typed. This
+  is the `fn` of the `search` of `Cinder.collection`, and `filter_title/2` is the one
+  of the text filter of a column. Both read the same expression, so a person who finds
+  a station on the search page finds it under a filter as well.
+
+  ## Why the matching is ours and not the one that Cinder gives
+
+  Cinder wraps the text in an `Ash.CiString` and asks for `contains`. On AshSqlite that
+  compiles to `instr(title, ? COLLATE NOCASE)`, and `instr` of SQLite reads no
+  collation, so it matches the case. A person who types `rnz` would find no
+  `RNZ National`. This puts both sides in lower case instead.
+
+  `instr` is right and `like` is wrong here. `like` reads `%` and `_` in the text of
+  the person as wildcards.
+  """
+  @spec search_title(Ash.Query.t(), [term()], String.t()) :: Ash.Query.t()
+  def search_title(query, _columns, text), do: matching(query, text)
+
+  @doc """
+  The rows of a text filter of Cinder, which holds the text and the way to match it.
+
+  Cinder holds one filter for each column, and it gives the whole filter here.
+  `contains` is the operator that a column of this firmware asks for, and it is the
+  one that this reads: a column that asked for another one would need another
+  expression, and this raises rather than match the wrong rows. See `search_title/3`
+  for why the expression is ours.
+  """
+  @spec filter_title(Ash.Query.t(), map()) :: Ash.Query.t()
+  def filter_title(query, %{operator: :contains, value: text}), do: matching(query, text)
+
+  defp matching(query, text) do
+    Ash.Query.filter(query, fragment("instr(lower(?), lower(?)) > 0", title, ^text))
+  end
+
   attr :path, :string, default: nil
   attr :class, :string, default: "size-8"
   attr :icon_class, :string, default: "size-4"

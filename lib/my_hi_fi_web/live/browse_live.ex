@@ -49,6 +49,7 @@ defmodule MyHiFiWeb.BrowseLive do
   alias MyHiFi.Playback.Facet
   alias MyHiFi.Playback.Item
   alias MyHiFi.Source
+  alias MyHiFiWeb.ItemList
 
   import MyHiFiWeb.ItemList, only: [row: 1, count: 1, cover: 1, favourite: 1]
 
@@ -228,7 +229,12 @@ defmodule MyHiFiWeb.BrowseLive do
             sort
           />
 
-          <:col field={field(@here.kind)} label={label(@path, @here.kind)} sort filter />
+          <:col
+            field={field(@here.kind)}
+            label={label(@path, @here.kind)}
+            sort
+            filter={filter(@here.kind)}
+          />
 
           <:item :let={row}>
             <.row
@@ -518,9 +524,18 @@ defmodule MyHiFiWeb.BrowseLive do
   # gets an identifier of its own, and a new list starts with no sort and no filter.
   defp collection_id(segments), do: Enum.map_join([@collection | segments], "-", &slug/1)
 
-  # A facet is named by its value, and an item by its title.
+  # A facet is named by its value, and an item by its title. `sorted_title` is the
+  # title in the order of the letters, and `title` holds the order of the bytes. See
+  # `MyHiFi.Playback.Item`.
   defp field(:facet), do: "value"
-  defp field(:item), do: "title"
+  defp field(:item), do: "sorted_title"
+
+  # **The text filter of Cinder matches the case on AshSqlite**, so a person who typed
+  # `rock` found no `Rock`. `MyHiFiWeb.ItemList.filter_title/2` holds the expression
+  # that the search page reads as well, and it says why. A facet holds a value of a
+  # union and not a title, so it keeps the filter that Cinder gives.
+  defp filter(:facet), do: true
+  defp filter(:item), do: [type: :text, fn: &ItemList.filter_title/2]
 
   # Each level counts what its rows hold. Cinder keeps what `query_opts` names, and Ash
   # gives the whole page to the calculation in one call.

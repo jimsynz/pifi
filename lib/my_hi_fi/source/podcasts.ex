@@ -97,7 +97,7 @@ defmodule MyHiFi.Source.Podcasts do
   defp subscriptions_query do
     Item
     |> Ash.Query.filter(source == ^@source and kind == :container and favourite? == true)
-    |> Ash.Query.sort(title: :asc)
+    |> Ash.Query.sort(sorted_title: :asc)
   end
 
   @doc """
@@ -115,7 +115,7 @@ defmodule MyHiFi.Source.Podcasts do
   """
   @impl MyHiFi.Source
   def listing(nil),
-    do: %{facts: [:subtitle], sort: [rank: :desc, title: :asc], order: Trending.order()}
+    do: %{facts: [:subtitle], sort: [rank: :desc, sorted_title: :asc], order: Trending.order()}
 
   def listing(_item) do
     %{
@@ -163,7 +163,7 @@ defmodule MyHiFi.Source.Podcasts do
 
     Item
     |> Ash.Query.filter(source == ^@source)
-    |> Ash.Query.sort(title: :asc)
+    |> Ash.Query.sort(sorted_title: :asc)
   end
 
   # A device with no key, and an index that does not answer, both leave the catalogue as

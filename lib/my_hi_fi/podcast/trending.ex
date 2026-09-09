@@ -85,7 +85,7 @@ defmodule MyHiFi.Podcast.Trending do
   def query do
     Item
     |> Ash.Query.filter(exists(facets, key == ^@key))
-    |> Ash.Query.sort(rank: :desc, title: :asc)
+    |> Ash.Query.sort(rank: :desc, sorted_title: :asc)
   end
 
   @doc """

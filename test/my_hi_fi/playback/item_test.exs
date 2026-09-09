@@ -189,6 +189,47 @@ defmodule MyHiFi.Playback.ItemTest do
     end
   end
 
+  describe "the order that a list reads in" do
+    # SQLite compares text byte by byte, so every capital letter comes in front of
+    # every small one and a person who looked under A found the albums of a band with
+    # a small first letter at the end of Z.
+    test "a sort of sorted_title reads the letters and not the bytes" do
+      for title <- ["Zabriskie Point", "alt-J", "Antics"] do
+        item(%{source_ref: title, title: title})
+      end
+
+      titles =
+        Item
+        |> Ash.Query.for_read(:read)
+        |> Ash.Query.sort(sorted_title: :asc)
+        |> Ash.read!()
+        |> Enum.map(& &1.title)
+
+      assert titles == ["alt-J", "Antics", "Zabriskie Point"]
+    end
+
+    # `MyHiFi.Player.Queue` holds the place of the track that plays as a keyset, and a
+    # keyset of a calculation holds the value that the calculation gave.
+    test "a keyset of that order holds the place of a row" do
+      for title <- ["Zabriskie Point", "alt-J", "Antics"] do
+        item(%{source_ref: title, title: title})
+      end
+
+      query =
+        Item
+        |> Ash.Query.for_read(:read)
+        |> Ash.Query.sort(sorted_title: :asc)
+
+      assert [%{title: "alt-J"} = first] = Ash.read!(Ash.Query.page(query, limit: 1)).results
+
+      assert [%{title: "Antics"}] =
+               query
+               |> Ash.Query.page(after: first.__metadata__.keyset, limit: 1)
+               |> Ash.read!()
+               |> Map.fetch!(:results)
+    end
+  end
+
   describe "reading a list" do
     test "it lists the items of one source" do
       item(%{source: "internet-radio", source_ref: "a"})

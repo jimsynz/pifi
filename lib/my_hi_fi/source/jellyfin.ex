@@ -114,7 +114,7 @@ defmodule MyHiFi.Source.Jellyfin do
     %{
       number?: true,
       facts: listing_facts(item),
-      sort: [place: :asc, title: :asc],
+      sort: [place: :asc, sorted_title: :asc],
       order: {"Track", "place"}
     }
   end
@@ -127,19 +127,19 @@ defmodule MyHiFi.Source.Jellyfin do
   defp artists_query do
     Item
     |> Ash.Query.filter(source == ^@source and kind == :container and is_nil(parent_id))
-    |> Ash.Query.sort(title: :asc)
+    |> Ash.Query.sort(sorted_title: :asc)
   end
 
   defp albums_query do
     Item
     |> Ash.Query.filter(source == ^@source and kind == :container and not is_nil(parent_id))
-    |> Ash.Query.sort(title: :asc)
+    |> Ash.Query.sort(sorted_title: :asc)
   end
 
   defp favourites_query do
     Item
     |> Ash.Query.filter(source == ^@source and favourite? == true)
-    |> Ash.Query.sort(title: :asc)
+    |> Ash.Query.sort(sorted_title: :asc)
   end
 
   @impl MyHiFi.Source

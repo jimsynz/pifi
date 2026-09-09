@@ -643,6 +643,32 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       refute html =~ ~s(id="find")
     end
+
+    # Cinder asks for `contains` with an `Ash.CiString`, and that compiles to
+    # `instr(title, ? COLLATE NOCASE)`. `instr` of SQLite reads no collation, so a
+    # person who typed `rnz` found no `RNZ National`. See
+    # `MyHiFiWeb.ItemList.filter_title/2`.
+    test "the case of the filter does not matter", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "RNZ National"})
+
+      for text <- ["rnz", "RNZ", "Rnz", "national"] do
+        {:ok, _view, html} = live(conn, "#{@radio}/countries/NZ?sorted_title=#{text}")
+
+        assert html =~ "RNZ National", "#{text} found nothing"
+      end
+    end
+
+    # SQLite compares text byte by byte, so every capital letter comes in front of
+    # every small one. A station whose name begins with a small letter therefore read
+    # after every Z. See `MyHiFi.Playback.Item`.
+    test "a sort of the title reads the letters and not the bytes", %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Zulu FM"})
+      Stations.create(%{country_code: "NZ", title: "alt-J Radio"})
+
+      {:ok, _view, html} = live(conn, "#{@radio}/countries/NZ?sort=sorted_title")
+
+      assert index_of(html, "alt-J Radio") < index_of(html, "Zulu FM")
+    end
   end
 
   defp index_of(html, text) do
@@ -763,7 +789,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       Stations.create(%{country_code: "NZ", title: "Alpha"})
       Stations.create(%{country_code: "NZ", title: "Bravo"})
 
-      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1&title=Alpha")
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1&sorted_title=Alpha")
       [alpha, _bravo] = Playback.items_of_source!("internet-radio")
 
       view |> element("#play-#{alpha.id}") |> render_click()
@@ -962,13 +988,15 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1")
 
-      view |> element("button[phx-click='toggle_sort'][phx-value-key='title']") |> render_click()
+      view
+      |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+      |> render_click()
 
       # A country list holds two sorts: the popularity that the level asked for, and
       # the title that a person pressed.
-      assert assert_patch(view) == "#{@radio}/countries/NZ?find=1&sort=-rank%2C-title"
+      assert assert_patch(view) == "#{@radio}/countries/NZ?find=1&sort=-rank%2C-sorted_title"
 
-      {:ok, _reloaded, html} = live(conn, "#{@radio}/countries/NZ?sort=-title")
+      {:ok, _reloaded, html} = live(conn, "#{@radio}/countries/NZ?sort=-sorted_title")
 
       assert index_of(html, "Zulu FM") < index_of(html, "Alpha FM")
     end
@@ -982,12 +1010,13 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1")
 
       view
-      |> form("#browse-countries-nz-filter-form", filters: %{title: "Zulu"})
+      |> form("#browse-countries-nz-filter-form", filters: %{sorted_title: "Zulu"})
       |> render_change()
 
-      assert assert_patch(view) == "#{@radio}/countries/NZ?find=1&sort=-rank%2Ctitle&title=Zulu"
+      assert assert_patch(view) ==
+               "#{@radio}/countries/NZ?find=1&sort=-rank%2Csorted_title&sorted_title=Zulu"
 
-      {:ok, _reloaded, html} = live(conn, "#{@radio}/countries/NZ?title=Zulu")
+      {:ok, _reloaded, html} = live(conn, "#{@radio}/countries/NZ?sorted_title=Zulu")
 
       assert html =~ "Zulu FM"
       refute html =~ "Alpha FM"
@@ -997,7 +1026,10 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       Stations.create(%{country_code: "NZ", title: "Alpha FM"})
 
       {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1")
-      view |> element("button[phx-click='toggle_sort'][phx-value-key='title']") |> render_click()
+
+      view
+      |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+      |> render_click()
 
       view |> element("#crumb-1") |> render_click()
 

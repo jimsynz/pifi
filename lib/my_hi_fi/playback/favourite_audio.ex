@@ -237,7 +237,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
       parent_id == ^item.id and kind == :track and transport == :download and
         keeps_place? == false
     )
-    |> Ash.Query.sort(place: :asc, title: :asc)
+    |> Ash.Query.sort(place: :asc, sorted_title: :asc)
     |> Ash.read!()
   end
 
@@ -253,7 +253,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
         parent_id == ^item.id and kind == :track and transport == :download and
           keeps_place? == true and played? == false
       )
-      |> Ash.Query.sort(published_at: :desc, title: :asc)
+      |> Ash.Query.sort(published_at: :desc, sorted_title: :asc)
 
     case hold_limit(item) do
       :all -> Ash.read!(query)
@@ -281,7 +281,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   defp containers_of(item) do
     Item
     |> Ash.Query.filter(parent_id == ^item.id and kind == :container)
-    |> Ash.Query.sort(published_at: :asc, title: :asc)
+    |> Ash.Query.sort(published_at: :asc, sorted_title: :asc)
     |> Ash.read!()
   end
 

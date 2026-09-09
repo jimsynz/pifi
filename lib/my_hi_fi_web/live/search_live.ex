@@ -19,22 +19,16 @@ defmodule MyHiFiWeb.SearchLive do
   episodes, so a person narrows the list to one or the other. Internet radio holds
   stations and nothing else, and it therefore gets no such control.
 
-  ## Why the matching is ours and not the one that Cinder gives
+  ## The matching is ours and not the one that Cinder gives
 
-  Cinder wraps the text in an `Ash.CiString` and asks for `contains`. On AshSqlite that
-  compiles to `instr(title, ? COLLATE NOCASE)`, and `instr` of SQLite reads no
-  collation, so it matches the case. A person who types `rnz` would find no
-  `RNZ National`. `match/3` puts both sides in lower case instead.
-
-  `instr` is right and `like` is wrong here. `like` reads `%` and `_` in the text of the
-  person as wildcards.
+  `MyHiFiWeb.ItemList.search_title/3` holds the expression, and it says why. The browse
+  page reads the same one.
   """
 
   use MyHiFiWeb, :live_view
 
-  require Ash.Query
-
   alias MyHiFi.Source
+  alias MyHiFiWeb.ItemList
 
   import MyHiFiWeb.ItemList, only: [row: 1]
 
@@ -142,11 +136,13 @@ defmodule MyHiFiWeb.SearchLive do
         filters_label="Find"
         sort_label="Sort"
         show_filters={true}
-        search={[label: "Name", placeholder: "Search #{@source.title()}…", fn: &match/3]}
+        search={
+          [label: "Name", placeholder: "Search #{@source.title()}…", fn: &ItemList.search_title/3]
+        }
         query_opts={[load: [:child_count, :artwork, :audio_held?]]}
         on_query_change={:list_query}
       >
-        <:col field="title" label="Title" search sort />
+        <:col field="sorted_title" label="Title" search sort />
 
         <:col
           :if={length(@kinds) > 1}
@@ -162,12 +158,5 @@ defmodule MyHiFiWeb.SearchLive do
       </Cinder.collection>
     </div>
     """
-  end
-
-  @doc false
-  # Cinder gives the columns that hold `search`, and the text of the person. Both sides
-  # go to lower case, because `instr` of SQLite matches the case.
-  def match(query, _columns, text) do
-    Ash.Query.filter(query, fragment("instr(lower(?), lower(?)) > 0", title, ^text))
   end
 end

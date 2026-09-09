@@ -57,21 +57,37 @@ defmodule MyHiFi.Playback.Item do
     # SQLite reads the whole table for each row of a page.
     custom_indexes do
       index [:parent_id]
+    end
 
-      # **The order is part of the index, and that is the point.** Every branch of a
-      # source reads the items of one source of one kind, in the order of the title.
-      # With an index of the source alone, SQLite reads each row of that source, keeps
-      # the ones that match, and then builds a temporary tree to put 4377 albums in
-      # order, for each page of 100 that a person reads.
-      #
-      # A measurement on a library of 53,105 items showed that: `SEARCH USING INDEX
-      # playback_items_source_ref_index (source=?)` and `USE TEMP B-TREE FOR ORDER BY`,
-      # 612 ms, and 20 MB for one page. The device holds 363.9 MB and serves each page
-      # from one of ten connections, so each one held a part of the table and the board
-      # ran out of memory. With this index the same plan reads
-      # `SEARCH USING INDEX playback_items_source_kind_title_index (source=? AND
-      # kind=?)`, it sorts nothing, and it stops at the hundredth row.
-      index [:source, :kind, :title]
+    # **The order is part of the index, and that is the point.** Every branch of a
+    # source reads the items of one source of one kind, in the order of the title.
+    # With an index of the source alone, SQLite reads each row of that source, keeps
+    # the ones that match, and then builds a temporary tree to put 4377 albums in
+    # order, for each page of 100 that a person reads.
+    #
+    # A measurement on a library of 53,105 items showed that: `SEARCH USING INDEX
+    # playback_items_source_ref_index (source=?)` and `USE TEMP B-TREE FOR ORDER BY`,
+    # 612 ms, and 20 MB for one page. The device holds 363.9 MB and serves each page
+    # from one of ten connections, so each one held a part of the table and the board
+    # ran out of memory. With this index the same plan reads `SEARCH USING INDEX
+    # playback_items_source_kind_title_nocase_index (source=? AND kind=?)`, it sorts
+    # nothing, and it stops at the hundredth row.
+    #
+    # **`custom_indexes` cannot write this one**, because the last column needs a
+    # collation and that section takes a name alone. A list of items reads in the
+    # order of `sorted_title`, which is `title COLLATE NOCASE`, and an index of
+    # `title` alone holds the other order. A measurement of this table with 68,273
+    # rows gave `USE TEMP B-TREE FOR ORDER BY` for the plain index and
+    # `SEARCH USING INDEX` for this one.
+    custom_statements do
+      statement :source_kind_title_nocase do
+        up """
+        CREATE INDEX playback_items_source_kind_title_nocase_index
+        ON playback_items (source, kind, title COLLATE NOCASE)
+        """
+
+        down "DROP INDEX playback_items_source_kind_title_nocase_index"
+      end
     end
   end
 
@@ -132,7 +148,7 @@ defmodule MyHiFi.Playback.Item do
       description "List the items that a person marked."
 
       filter expr(favourite? == true)
-      prepare build(sort: [title: :asc])
+      prepare build(sort: [sorted_title: :asc])
       pagination keyset?: true, required?: false
     end
 
@@ -685,6 +701,25 @@ defmodule MyHiFi.Playback.Item do
 
       `MyHiFiWeb.ItemList.place_text/1` draws the same fact for a person to read, as
       `1-01`.
+      """
+
+      public? true
+    end
+
+    calculate :sorted_title, Ash.Type.CiString, expr(title) do
+      description """
+      The title of this item, in the order that a person reads a list in.
+
+      **SQLite compares text byte by byte, so `title` puts every capital letter in
+      front of every small one.** A library of albums therefore listed `Wolfmother`
+      before `alt-J`, and a person who looked under A found nothing. `Ash.Type.CiString`
+      is what removes that: AshSqlite writes `title COLLATE NOCASE` for a term of that
+      type, and SQLite then compares the letters and not the bytes.
+
+      **Sort by this and never by `title`.** A sort of the attribute holds the order of
+      the bytes, and this is the one column that holds the order of the letters, in the
+      way that `place` is the one column that holds the order of a set. The custom
+      statement above holds the index that serves it.
       """
 
       public? true
