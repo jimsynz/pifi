@@ -85,7 +85,7 @@ defmodule MyHiFi.Source.Jellyfin do
   @impl MyHiFi.Source
   def roots do
     [
-      {"Artists", %{query: artists_query(), kind: :item}},
+      {"Artists", %{query: artists_query(), kind: :item, title_label: "Name"}},
       {"Albums", %{query: albums_query(), kind: :item, facts: [:subtitle, :release_year]}},
       {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle, :release_year]}}
     ]

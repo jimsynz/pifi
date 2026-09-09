@@ -231,7 +231,7 @@ defmodule MyHiFiWeb.BrowseLive do
 
           <:col
             field={field(@here.kind)}
-            label={label(@path, @here.kind)}
+            label={label(@path, @here)}
             sort
             filter={filter(@here.kind)}
           />
@@ -555,9 +555,11 @@ defmodule MyHiFiWeb.BrowseLive do
   defp loads(:item), do: [counts(:item), :artwork, :remaining_ms, :audio_held?]
 
   # The filter and the sort name what a person looks at. `Value` is the field of the
-  # facet, and it says nothing to somebody who opened Countries.
-  defp label(path, :facet), do: List.last(path).title
-  defp label(_path, :item), do: "Title"
+  # facet, and it says nothing to somebody who opened Countries. A list of artists holds
+  # names and not titles, so a listing names the word for its own rows. See
+  # `t:MyHiFi.Source.listing/0`.
+  defp label(path, %{kind: :facet}), do: List.last(path).title
+  defp label(_path, listing), do: listing[:title_label] || "Title"
 
   # A facet is named by its value, which reads far better in an address than an
   # identifier does.

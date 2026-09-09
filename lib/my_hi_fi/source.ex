@@ -264,13 +264,21 @@ defmodule MyHiFi.Source do
   such as `{"Popularity", "rank"}`, and the page draws a sort control for it. Cinder
   then keeps that sort, and a person can change it. A listing that sorts by the title
   and nothing else leaves `order` out.
+
+  ## `title_label`, and the word for a row
+
+  The title of an item is one field, and a person reads a different word for it in each
+  list. A list of albums holds titles, and a list of artists holds names. `title_label`
+  is the word that the sort control and the filter of that column show, and a listing
+  that leaves it out gets "Title".
   """
   @type listing :: %{
           required(:query) => Ash.Query.t(),
           required(:kind) => :item | :facet,
           optional(:order) => {String.t(), String.t()},
           optional(:number?) => boolean(),
-          optional(:facts) => [fact()]
+          optional(:facts) => [fact()],
+          optional(:title_label) => String.t()
         }
 
   @typedoc """

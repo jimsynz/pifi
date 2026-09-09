@@ -611,6 +611,31 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       assert html =~ "RNZ National"
     end
 
+    # A row of the artists branch is a person, and a row of the albums branch is a
+    # record. The word of the sort control and of the filter therefore comes from the
+    # listing. See `t:MyHiFi.Source.listing/0`.
+    test "the sort control shows the word that the listing names", %{conn: conn} do
+      jellyfin_album()
+
+      {:ok, artists, _html} = live(conn, "#{@jellyfin}/artists?find=1")
+      html = render_async(artists, @async_wait)
+
+      assert html =~ "Filter Name..."
+
+      assert artists
+             |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+             |> render() =~ "Name"
+
+      {:ok, albums, _html} = live(conn, "#{@jellyfin}/albums?find=1")
+      html = render_async(albums, @async_wait)
+
+      assert html =~ "Filter Title..."
+
+      assert albums
+             |> element("button[phx-click='toggle_sort'][phx-value-key='sorted_title']")
+             |> render() =~ "Title"
+    end
+
     test "the control brings them, and it takes them away", %{conn: conn} do
       Stations.create(%{country_code: "NZ", title: "RNZ National"})
 
