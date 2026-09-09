@@ -152,6 +152,28 @@ defmodule MyHiFi.Event.Player do
     def message(reason), do: "The player stopped: #{inspect(reason)}"
   end
 
+  defmodule VolumeChanged do
+    @moduledoc """
+    The level moved, or a person turned the control on or off.
+
+    `percent` is what a person chose, and it is not a read of the card: a card holds a
+    number of steps that no percentage lands on, so a read would fight the control that
+    a person is moving. See `MyHiFi.Output.Volume`.
+
+    `enabled?` says whether this firmware sets the level at all, and `supported?` says
+    whether the card in use holds one to set. A person with a DAC of a fixed output
+    reads `false` for the second one whatever they chose.
+    """
+
+    @type t :: %__MODULE__{
+            percent: 0..100,
+            enabled?: boolean(),
+            supported?: boolean()
+          }
+
+    defstruct percent: 100, enabled?: false, supported?: false
+  end
+
   defmodule Standby do
     @moduledoc "The device entered standby, or it left standby."
 

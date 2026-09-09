@@ -62,6 +62,7 @@ defmodule MyHiFiWeb.PlayerLive do
       |> assign(:expanded?, false)
       |> assign(:reason, nil)
       |> assign(:battery, Battery.last_reading())
+      |> assign(:volume, Playback.volume!())
       |> accent(state.artwork_path)
 
     # `MyHiFiWeb.Shell` subscribes each LiveView to the `:player` topic, and the battery
@@ -154,6 +155,11 @@ defmodule MyHiFiWeb.PlayerLive do
   # not this LiveView alone. This closes the large view, which fills the screen and
   # would cover the one control that standby leaves alive.
   @impl Phoenix.LiveView
+  # A person at another page, or at a button of the board, moves the level as well.
+  def handle_info(%Events.VolumeChanged{} = event, socket) do
+    {:noreply, assign(socket, :volume, Map.take(event, [:percent, :enabled?, :supported?]))}
+  end
+
   def handle_info(%Events.Standby{entered?: true}, socket) do
     {:noreply, assign(socket, :expanded?, false)}
   end
@@ -169,6 +175,23 @@ defmodule MyHiFiWeb.PlayerLive do
   @impl Phoenix.LiveView
   def handle_event("expand", _params, socket) do
     {:noreply, assign(socket, :expanded?, true)}
+  end
+
+  # **The slider is the source of truth and the event does not move it back.** A person
+  # dragging one sends an event for each step, and a re-render that set the value from
+  # the state would fight the hand that is moving it. `MyHiFi.Output.Volume` holds the
+  # number, so the assign follows the person and the event of another page corrects it.
+  @impl Phoenix.LiveView
+  def handle_event("set_volume", %{"percent" => percent}, socket) do
+    case Integer.parse(percent) do
+      {percent, ""} ->
+        _result = Playback.set_volume(percent)
+
+        {:noreply, assign(socket, :volume, %{socket.assigns.volume | percent: percent})}
+
+      _other ->
+        {:noreply, socket}
+    end
   end
 
   @impl Phoenix.LiveView
@@ -380,6 +403,31 @@ defmodule MyHiFiWeb.PlayerLive do
               label="The track after"
               disabled={is_nil(@track)}
             />
+          </div>
+
+          <div
+            :if={@volume.enabled? and @volume.supported?}
+            id="volume"
+            class="mt-6 flex items-center gap-3"
+          >
+            <.icon name="hero-speaker-x-mark" class="size-4 shrink-0 text-ink-faint" />
+            <form phx-change="set_volume" class="grow">
+              <input
+                type="range"
+                id="volume-level"
+                name="percent"
+                min="0"
+                max="100"
+                step="1"
+                value={@volume.percent}
+                aria-label="The level of the output"
+                class="w-full accent-[var(--color-accent)]"
+              />
+            </form>
+            <.icon name="hero-speaker-wave" class="size-4 shrink-0 text-ink-faint" />
+            <span class="numerals w-10 shrink-0 text-right text-sm text-ink-dim">
+              {@volume.percent}
+            </span>
           </div>
 
           <div class="mt-4 flex items-center justify-center gap-3">

@@ -242,6 +242,15 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("toggle_volume", _params, socket) do
+    enabled? = not socket.assigns.volume.enabled?
+
+    {:ok, _result} = MyHiFi.Playback.enable_volume(enabled?)
+
+    {:noreply, socket |> put_flash(:info, volume_flash(enabled?)) |> refresh()}
+  end
+
+  @impl Phoenix.LiveView
   def handle_event("toggle_switch_off", _params, socket) do
     :ok = SwitchOff.enable(not socket.assigns.switch_off?)
 
@@ -415,6 +424,45 @@ defmodule MyHiFiWeb.SettingsLive do
           />
         </li>
       </ul>
+
+      <div id="volume-control" class="mt-4 border-t border-edge pt-4">
+        <button
+          type="button"
+          id="toggle-volume"
+          phx-click="toggle_volume"
+          disabled={not @volume.supported?}
+          aria-pressed={to_string(@volume.enabled?)}
+          class={[
+            "flex w-full items-center gap-3 text-left",
+            @volume.enabled? && "text-accent",
+            not @volume.supported? && "opacity-50"
+          ]}
+        >
+          <span class={[
+            "flex size-5 shrink-0 items-center justify-center rounded-full",
+            if(@volume.enabled?,
+              do: "bg-accent/15 shadow-[inset_0_0_0_1px_var(--color-accent)]",
+              else: "shadow-[inset_0_0_0_1px_var(--color-edge)]"
+            )
+          ]}>
+            <span :if={@volume.enabled?} class="size-2 rounded-full bg-accent" />
+          </span>
+
+          <span class="min-w-0 grow">Set the level on this device</span>
+        </button>
+
+        <p :if={@volume.supported?} class="mt-1 text-sm text-ink-dim">
+          A stereo has its level on the amplifier, and a card that attenuates does it
+          by throwing bits away. Leave this off for a device that feeds an amplifier,
+          and turn it on for headphones or for powered speakers, which have nowhere
+          else to set it. Turning it off puts the card back to its loudest.
+        </p>
+
+        <p :if={not @volume.supported?} id="no-volume-control" class="mt-1 text-sm text-ink-dim">
+          This card holds no level that the device can set. Many a DAC of a stereo gives
+          a fixed output on purpose. Set the level on your amplifier.
+        </p>
+      </div>
 
       <.link
         navigate={~p"/settings/output/hardware"}
@@ -1045,6 +1093,7 @@ defmodule MyHiFiWeb.SettingsLive do
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, MyHiFi.Playback.standby_minutes!())
     |> assign(:switch_off?, SwitchOff.enabled?())
+    |> assign(:volume, MyHiFi.Playback.volume!())
     |> assign_usage()
   end
 
@@ -1111,6 +1160,11 @@ defmodule MyHiFiWeb.SettingsLive do
     do: "The device stops its work in standby, and it says when a hand can reach the switch."
 
   defp switch_off_flash(false), do: "The device keeps its work going in standby."
+
+  defp volume_flash(true), do: "This device sets the level of the card."
+
+  defp volume_flash(false),
+    do: "The card plays at its loudest. Set the level on your amplifier."
 
   defp standby_flash("0"), do: "The device stays awake."
   defp standby_flash(minutes), do: "The device enters standby after #{minutes} minutes of quiet."

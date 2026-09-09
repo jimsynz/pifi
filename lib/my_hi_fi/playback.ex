@@ -74,6 +74,9 @@ defmodule MyHiFi.Playback do
       define :enable_source, action: :enable_source, args: [:source, :enabled?]
       define :output, action: :output
       define :select_output, action: :select_output, args: [:id]
+      define :volume, action: :volume
+      define :set_volume, action: :set_volume, args: [:percent]
+      define :enable_volume, action: :enable_volume, args: [:enabled?]
     end
   end
 end

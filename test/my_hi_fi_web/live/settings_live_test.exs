@@ -6,6 +6,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   alias MyHiFi.Device.Identity
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: Events
+  alias MyHiFi.Output.Volume
   alias MyHiFi.Peripheral
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Radio.Sync.FromRemote
@@ -542,6 +543,57 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/storage")
 
       refute has_element?(view, "#usage-jellyfin")
+    end
+  end
+
+  # **A person turns this on, and a card that holds no level cannot be turned on.**
+  # See `MyHiFi.Output.Volume`.
+  describe "the volume control" do
+    setup do
+      TwoCardOutput.use_it()
+      :ok = MyHiFi.Player.select_output("rate48:CARD=first,DEV=0")
+      start_supervised!(Volume)
+      Volume.state()
+
+      :ok
+    end
+
+    test "a card that holds a level offers the control", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/output")
+
+      assert has_element?(view, "#toggle-volume")
+      refute has_element?(view, "#no-volume-control")
+    end
+
+    test "a person turns it on, and the page says what changed", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/output")
+
+      html = view |> element("#toggle-volume") |> render_click()
+
+      assert html =~ "This device sets the level of the card"
+      assert %{enabled?: true} = MyHiFi.Playback.volume!()
+    end
+
+    test "a person turns it off again", %{conn: conn} do
+      :ok = Volume.enable(true)
+
+      {:ok, view, _html} = live(conn, ~p"/settings/output")
+
+      html = view |> element("#toggle-volume") |> render_click()
+
+      assert html =~ "Set the level on your amplifier"
+      assert %{enabled?: false} = MyHiFi.Playback.volume!()
+    end
+
+    # **A DAC of a fixed output is normal.** A person with one reads why, rather than a
+    # control that does nothing.
+    test "a card that holds no level says so instead", %{conn: conn} do
+      :ok = MyHiFi.Player.select_output("rate48:CARD=second,DEV=0")
+
+      {:ok, view, _html} = live(conn, ~p"/settings/output")
+
+      assert has_element?(view, "#no-volume-control")
+      assert render(view) =~ "holds no level that the device can set"
     end
   end
 

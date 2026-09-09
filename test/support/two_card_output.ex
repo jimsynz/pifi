@@ -28,6 +28,49 @@ defmodule MyHiFi.Test.TwoCardOutput do
     raise "MyHiFi.Test.TwoCardOutput makes no sound, and #{device_id} cannot play."
   end
 
+  @doc """
+  The first card holds a level and the second holds none.
+
+  **A DAC of a fixed output is normal**, and the PCM5102A of a Pirate Audio board is
+  one, so a test of the volume needs both answers. See `MyHiFi.Output.Volume`.
+  """
+  @impl MyHiFi.Output
+  def volume?(device_id), do: device_id == "rate48:CARD=first,DEV=0"
+
+  @doc """
+  Note the level that a caller wrote.
+
+  A card that holds no level refuses one, in the way that `amixer` gives a status
+  other than 0 for a control that is not there.
+  """
+  @impl MyHiFi.Output
+  def put_volume(device_id, percent) do
+    if volume?(device_id) do
+      note(device_id, percent)
+    else
+      {:error, :no_volume_control}
+    end
+  end
+
+  @doc """
+  Read the level writes that this output took, newest last.
+
+  A test asks for these rather than reading the hardware, because there is none.
+  """
+  @spec writes() :: [{String.t(), 0..100}]
+  def writes do
+    Enum.reverse(:persistent_term.get({__MODULE__, :writes}, []))
+  end
+
+  # `:persistent_term` and not a message, because the process that writes the level is
+  # `MyHiFi.Output.Volume` and not the process of the test.
+  defp note(device_id, percent) do
+    :persistent_term.put(
+      {__MODULE__, :writes},
+      [{device_id, percent} | :persistent_term.get({__MODULE__, :writes}, [])]
+    )
+  end
+
   @doc "The cards that this output reports."
   @spec devices!() :: [map()]
   def devices!, do: @devices
@@ -35,7 +78,12 @@ defmodule MyHiFi.Test.TwoCardOutput do
   @doc "Make this the output of the firmware for one test."
   @spec use_it() :: :ok
   def use_it do
+    :persistent_term.erase({__MODULE__, :writes})
     Application.put_env(:my_hi_fi, :output, __MODULE__)
-    ExUnit.Callbacks.on_exit(fn -> Application.delete_env(:my_hi_fi, :output) end)
+
+    ExUnit.Callbacks.on_exit(fn ->
+      Application.delete_env(:my_hi_fi, :output)
+      :persistent_term.erase({__MODULE__, :writes})
+    end)
   end
 end

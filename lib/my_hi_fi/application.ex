@@ -76,9 +76,16 @@ defmodule MyHiFi.Application do
   if Mix.env() == :test do
     defp listening_children, do: []
   else
-    # `MyHiFi.AutoStandby` reads the player, so it comes after it.
+    # `MyHiFi.AutoStandby` and `MyHiFi.Output.Volume` both read the player, so they come
+    # after it.
     defp listening_children,
-      do: [MyHiFi.AutoStandby, MyHiFi.Cache.Touches, MyHiFi.DeviceUi, MyHiFi.SwitchOff]
+      do: [
+        MyHiFi.AutoStandby,
+        MyHiFi.Cache.Touches,
+        MyHiFi.DeviceUi,
+        MyHiFi.Output.Volume,
+        MyHiFi.SwitchOff
+      ]
   end
 
   # See https://elixir.hexdocs.pm/Supervisor.html

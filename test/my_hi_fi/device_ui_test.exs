@@ -7,7 +7,10 @@ defmodule MyHiFi.DeviceUiTest do
   alias MyHiFi.Event
   alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player
+  alias MyHiFi.Output.Volume
+  alias MyHiFi.Peripheral.PiTft
   alias MyHiFi.Playback
+  alias MyHiFi.Test.TwoCardOutput
 
   setup do
     # `MyHiFi.Application` starts none of these in the test environment, so each test
@@ -21,7 +24,17 @@ defmodule MyHiFi.DeviceUiTest do
     :ok
   end
 
-  defp press(button, peripheral \\ MyHiFi.Peripheral.PiTft, hold \\ :short) do
+  # Take every message that is waiting, so a test reads what it caused and nothing that
+  # its own setup caused.
+  defp flush do
+    receive do
+      _message -> flush()
+    after
+      0 -> :ok
+    end
+  end
+
+  defp press(button, peripheral \\ PiTft, hold \\ :short) do
     Event.publish(:input, %Input.ButtonPressed{
       peripheral: peripheral,
       button: button,
@@ -77,6 +90,68 @@ defmodule MyHiFi.DeviceUiTest do
 
   # A row of four and a pad of two cannot share one mapping, so the event carries the
   # board and this module reads it. See `MyHiFi.Peripheral.PirateAudio`.
+  # **A hold of the track buttons moves the level.** A row of four holds every control
+  # on a short press already, and a hold of one of them held none, so the level costs
+  # no control that a person had. See `MyHiFi.Output.Volume`.
+  describe "a hold of the track buttons of the PiTFT" do
+    setup do
+      TwoCardOutput.use_it()
+      :ok = MyHiFi.Player.select_output("rate48:CARD=first,DEV=0")
+      start_supervised!(Volume)
+      :ok = Volume.enable(true)
+      :ok = Volume.set_percent(50)
+
+      # The setup publishes on the topic that this test reads, so a test that refuses a
+      # message would refuse one of these.
+      flush()
+
+      :ok
+    end
+
+    test "a hold of the forward button raises the level" do
+      press(4, PiTft, :long)
+
+      assert_receive %Player.VolumeChanged{percent: 55}, 5000
+    end
+
+    test "a hold of the back button lowers it" do
+      press(2, PiTft, :long)
+
+      assert_receive %Player.VolumeChanged{percent: 45}, 5000
+    end
+
+    # A level cannot leave the range, and a person holding a button at either end must
+    # not see it wrap around.
+    test "the level stops at the loudest and at silence" do
+      :ok = Volume.set_percent(98)
+      flush()
+      press(4, PiTft, :long)
+      assert_receive %Player.VolumeChanged{percent: 100}, 5000
+
+      :ok = Volume.set_percent(2)
+      flush()
+      press(2, PiTft, :long)
+      assert_receive %Player.VolumeChanged{percent: 0}, 5000
+    end
+
+    # A hold of the standby button means nothing on a stereo, and the Pirate Audio uses
+    # it for standby itself.
+    test "a hold of the standby button moves nothing" do
+      press(1, PiTft, :long)
+
+      refute_receive %Player.VolumeChanged{}, 200
+    end
+
+    test "a hold moves nothing while the control is off" do
+      :ok = Volume.enable(false)
+      flush()
+
+      press(4, PiTft, :long)
+
+      refute_receive %Player.VolumeChanged{percent: 55}, 200
+    end
+  end
+
   describe "the buttons of the Pirate Audio" do
     # The first button of the PiTFT is standby, and of this board it is play. A press of
     # one must never do what the other one does.
@@ -120,7 +195,7 @@ defmodule MyHiFi.DeviceUiTest do
 
     # A board of four holds a button for standby and reads no hold at all.
     test "a hold of a button of the row of four does nothing" do
-      press(1, MyHiFi.Peripheral.PiTft, :long)
+      press(1, PiTft, :long)
       Process.sleep(100)
 
       refute_receive %Player.Standby{}, 200

@@ -58,7 +58,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
           percent: 0..100,
           position_ms: non_neg_integer(),
           duration_ms: pos_integer() | nil,
-          network: NetworkWarning.connection() | nil
+          network: NetworkWarning.connection() | nil,
+          volume_percent: 0..100 | nil
         }
 
   @doc "The size that this screen draws at."
@@ -83,7 +84,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       percent: 0,
       position_ms: 0,
       duration_ms: nil,
-      network: nil
+      network: nil,
+      volume_percent: nil
     }
   end
 
@@ -101,7 +103,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
         low_battery?: view.low_battery?,
         device_name: view.device_name,
         splash_path: view.splash_path,
-        network: view.network
+        network: view.network,
+        volume_percent: view.volume_percent
     }
   end
 
@@ -282,6 +285,34 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
     ])
   end
 
+  # **The level takes the place of the progress bar while a person sets it.** A person
+  # holding a button is looking for the number, and a second bar would ask them which
+  # one moved. The progress comes back when the level goes.
+  #
+  # Amber, and not the accent of the artwork, so a person reads at a glance that this
+  # bar is not the place of the track.
+  defp progress(%{volume_percent: percent}) when is_integer(percent) do
+    column([width(fill()), spacing(4)], [
+      row([width(fill())], [
+        el([Font.size(13), Font.color(color(:slate, 400))], text("VOLUME")),
+        el([width(fill())], none()),
+        el([Font.size(13), Font.color(color(:slate, 400))], text("#{percent}%"))
+      ]),
+      el(
+        [width(fill()), height(px(6)), Border.rounded(3), Background.color(color(:slate, 800))],
+        el(
+          [
+            width(px(level_width(percent))),
+            height(px(6)),
+            Border.rounded(3),
+            Background.color(color(:amber, 400))
+          ],
+          none()
+        )
+      )
+    ])
+  end
+
   defp progress(%{duration_ms: nil}), do: none()
 
   defp progress(view) do
@@ -304,6 +335,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   #
   # A bar of zero width draws nothing, and a track that just began still needs to
   # show that it began.
+  defp level_width(percent), do: Kernel.max(round((@width - 32) * percent / 100), 2)
+
   defp played_width(view) do
     played = Kernel.min(view.position_ms, view.duration_ms)
     Kernel.max(round((@width - 32) * played / view.duration_ms), 2)

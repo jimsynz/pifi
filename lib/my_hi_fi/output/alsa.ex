@@ -193,4 +193,126 @@ defmodule MyHiFi.Output.Alsa do
   defp title(%{title: card_title}, %{name: name}) do
     if String.contains?(card_title, name), do: card_title, else: "#{card_title}, #{name}"
   end
+
+  @doc """
+  Whether one card holds a level that this firmware can set.
+
+  **A DAC of a stereo often holds none.** A measurement on 2026-09-09 gave no mixer
+  control at all for the PCM5102A of a Pirate Audio board, and one control named `PCM`
+  for the HiFimeDIY SA9023 USB DAC of the other board. The first chip gives a fixed
+  output on purpose, and a person with one sets the level on their amplifier.
+  """
+  @impl MyHiFi.Output
+  def volume?(device_id), do: control(device_id) != nil
+
+  @doc """
+  Set the level of one card.
+
+  **`-M` and not a raw number.** Without it `amixer` reads a percentage as a share of
+  the range of the register, and the ear does not hear that way. With it the number is
+  a share of the loudness, which is what a person moving a control means.
+
+  **A read of the card cannot hold the number that a person chose.** A measurement on
+  2026-09-09 set 60 percent on the USB DAC and read 59 back, because the range of that
+  card holds 111 steps and no step lands on every percentage.
+  `MyHiFi.Output.Volume` therefore holds what the person chose and this only writes it.
+  """
+  @impl MyHiFi.Output
+  def put_volume(device_id, percent) when percent in 0..100 do
+    with {:ok, card, name, index} <- mixer(device_id) do
+      case System.cmd("amixer", ["-c", card, "-M", "sset", "#{name},#{index}", "#{percent}%"],
+             stderr_to_stdout: true
+           ) do
+        {_output, 0} -> :ok
+        {output, status} -> {:error, {:amixer, status, String.trim(output)}}
+      end
+    end
+  rescue
+    error in ErlangError -> {:error, {:amixer, error}}
+  end
+
+  @doc """
+  Read the controls from the text of `amixer scontents`.
+
+  One call names every control of a card and the capabilities of each one, so this
+  needs no second call for each control.
+
+      `Simple mixer control 'PCM',0`
+      `  Capabilities: pvolume pswitch pswitch-joined`
+
+  **`pvolume` is the capability that matters**, and it says that the control holds a
+  playback level. A control of a capture level holds `cvolume`, and one that only mutes
+  holds `pswitch` alone.
+  """
+  @spec parse_scontents(String.t()) :: [%{name: String.t(), index: integer()}]
+  def parse_scontents(contents) do
+    ~r/^Simple mixer control '(?<name>[^']+)',(?<index>\d+)\n(?<body>(?:[ \t].*\n?)*)/m
+    |> Regex.scan(contents, capture: :all_names)
+    |> Enum.filter(fn [body, _index, _name] -> playback_volume?(body) end)
+    |> Enum.map(fn [_body, index, name] ->
+      %{name: name, index: String.to_integer(index)}
+    end)
+  end
+
+  defp playback_volume?(body) do
+    case Regex.run(~r/^\s*Capabilities:\s*(?<caps>.*)$/m, body, capture: :all_names) do
+      [caps] -> "pvolume" in String.split(caps)
+      nil -> false
+    end
+  end
+
+  # **The order is the one that a person means by "the volume".** A card that holds
+  # `Master` holds the level of the whole card there, and `PCM` is the level of the
+  # stream. A card that holds one of the two holds it under one of these names, and the
+  # USB DAC of the measurement holds `PCM` and no `Master`.
+  #
+  # A card that names none of them still holds a level, so the first control with a
+  # playback level is better than nothing.
+  @preferred ~w[Master PCM Speaker Headphone]
+
+  defp control(device_id) do
+    case mixer(device_id) do
+      {:ok, _card, name, index} -> %{name: name, index: index}
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp mixer(device_id) do
+    with {:ok, card} <- card_name(device_id),
+         {:ok, controls} <- scontents(card),
+         %{name: name, index: index} <- preferred(controls) do
+      {:ok, card, name, index}
+    else
+      nil -> {:error, :no_volume_control}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp preferred([]), do: nil
+
+  defp preferred(controls) do
+    Enum.find(@preferred, &Enum.find(controls, fn control -> control.name == &1 end))
+    |> case do
+      nil -> hd(controls)
+      name -> Enum.find(controls, &(&1.name == name))
+    end
+  end
+
+  # `amixer` takes the identifier of a card as well as its number, so the name that the
+  # settings hold needs no lookup of the number.
+  defp card_name(device_id) do
+    case Regex.run(~r/CARD=([^,]+)/, device_id) do
+      [_whole, name] -> {:ok, name}
+      nil -> {:error, :not_a_card}
+    end
+  end
+
+  defp scontents(card) do
+    case System.cmd("amixer", ["-c", card, "scontents"], stderr_to_stdout: true) do
+      {output, 0} -> {:ok, parse_scontents(output)}
+      {_output, _status} -> {:error, :no_such_card}
+    end
+  rescue
+    error in ErlangError -> {:error, {:amixer, error}}
+  end
 end

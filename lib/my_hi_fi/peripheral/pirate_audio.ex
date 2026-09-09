@@ -106,6 +106,11 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # they are about to stop using.
   @show_ms :timer.seconds(20)
 
+  # How long the level stays on the glass after a person stops moving it. Long enough
+  # to read the number, and short enough that the track comes back before they look
+  # for it.
+  @volume_ms :timer.seconds(3)
+
   @doc "The name that the settings page draws."
   @impl MyHiFi.Peripheral
   def title, do: "Pirate Audio 1.3 inch screen"
@@ -128,6 +133,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
         screen: screen,
         buttons: buttons,
         show_ms: Keyword.get(opts, :show_ms, @show_ms),
+        volume_ms: Keyword.get(opts, :volume_ms, @volume_ms),
         view: Screen.new() |> with_battery() |> with_identity() |> with_network(),
         awake?: true
       })
@@ -198,6 +204,20 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # for.** A person who pressed standby is holding the device and waiting to know that
   # the card is at rest, so the screen shows them and then sleeps again. See
   # `MyHiFi.SwitchOff`.
+  # **A person holding a button needs to see the number that they are setting.** The
+  # level goes on the glass, and it goes away by itself, because a level that stayed
+  # would hold the room of the subtitle for a number that no person is reading.
+  #
+  # A level that the card cannot set, and a control that a person has not turned on,
+  # both draw nothing: there is nothing for the person to move.
+  def handle_event(%Player.VolumeChanged{enabled?: true, supported?: true} = event, state) do
+    Process.send_after(self(), :clear_volume, state.volume_ms)
+
+    draw(%{state | view: %{state.view | volume_percent: event.percent}})
+  end
+
+  def handle_event(%Player.VolumeChanged{}, state), do: {:ok, state}
+
   def handle_event(%DeviceEvents.SafeToSwitchOff{safe?: true}, state) do
     Process.send_after(self(), :sleep_again, state.show_ms)
 
@@ -220,6 +240,15 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   @impl MyHiFi.Peripheral
   def handle_info(:sleep_again, state) do
     if state.view.safe_to_switch_off?, do: doze(state), else: {:ok, state}
+  end
+
+  # **A person who is still moving the level scheduled a later message than this one.**
+  # Each event schedules its own, so the last one decides when the level goes, and this
+  # clause draws nothing for a view that already holds no level.
+  def handle_info(:clear_volume, %{view: %{volume_percent: nil}} = state), do: {:ok, state}
+
+  def handle_info(:clear_volume, state) do
+    draw(%{state | view: %{state.view | volume_percent: nil}})
   end
 
   def handle_info(message, state) do

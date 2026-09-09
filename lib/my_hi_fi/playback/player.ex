@@ -25,6 +25,8 @@ defmodule MyHiFi.Playback.Player do
 
   require Logger
 
+  alias MyHiFi.Output.Volume
+
   # A generic action does not cast what it returns. These fields therefore describe
   # the shape for a reader and for an API extension, and they enforce nothing.
   @state_fields [
@@ -236,6 +238,60 @@ defmodule MyHiFi.Playback.Player do
                   ]
 
       run fn _input, _context -> {:ok, MyHiFi.Player.output()} end
+    end
+
+    action :volume, :map do
+      description """
+      The level of the output, whether the control is on, and whether the card holds
+      one.
+
+      A caller reads all three together, because each one alone says nothing that a
+      person can act on: a level of 30 means nothing on a card that this firmware
+      cannot set. See `MyHiFi.Output.Volume`.
+      """
+
+      constraints fields: [
+                    percent: [type: :integer, allow_nil?: false],
+                    enabled?: [type: :boolean, allow_nil?: false],
+                    supported?: [type: :boolean, allow_nil?: false]
+                  ]
+
+      run fn _input, _context -> {:ok, Volume.state()} end
+    end
+
+    action :set_volume, :atom do
+      description """
+      Set the level of the output.
+
+      The level stays after a restart, and the hardware is told it again at each boot.
+      A control that a person has not turned on takes the number and writes no card.
+      """
+
+      argument :percent, :integer, allow_nil?: false
+
+      run fn input, _context ->
+        case Volume.set_percent(input.arguments.percent) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
+    action :enable_volume, :atom do
+      description """
+      Turn the volume control on, or off.
+
+      Off returns the card to 0 dB, so a person never leaves a card that plays quietly
+      with nothing that can raise it. See `MyHiFi.Output.Volume`.
+      """
+
+      argument :enabled?, :boolean, allow_nil?: false
+
+      run fn input, _context ->
+        :ok = Volume.enable(input.arguments.enabled?)
+
+        {:ok, :ok}
+      end
     end
 
     action :select_output, :atom do

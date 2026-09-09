@@ -389,6 +389,61 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
 
   defp sent, do: Enum.map(RecordingScreen.commands(), fn {command, _payload} -> command end)
 
+  # **A person holding a button needs to see the number that they are setting**, and the
+  # level goes away by itself so that the track comes back. See `MyHiFi.Output.Volume`.
+  describe "the level of the output" do
+    test "a level that moves goes on the glass and then goes away", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(started(), state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_event(volume(40), state)
+
+      assert state.view.volume_percent == 40
+      assert frames() == 1
+
+      {:ok, state} = PirateAudio.handle_info(:clear_volume, state)
+
+      assert state.view.volume_percent == nil
+      assert frames() == 2
+    end
+
+    # **A person who is still moving the level scheduled a later message.** Each event
+    # schedules its own, so a message that arrives for a view that holds no level draws
+    # nothing.
+    test "a message that arrives twice draws one frame", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(volume(40), state)
+      {:ok, state} = PirateAudio.handle_info(:clear_volume, state)
+      RecordingScreen.forget()
+
+      {:ok, ^state} = PirateAudio.handle_info(:clear_volume, state)
+
+      assert frames() == 0
+    end
+
+    # A card that holds no level, and a control that a person has not turned on, both
+    # leave nothing for the person to move.
+    test "a level that nothing can set draws nothing", %{state: state} do
+      RecordingScreen.forget()
+
+      {:ok, ^state} =
+        PirateAudio.handle_event(
+          %Player.VolumeChanged{percent: 40, enabled?: true, supported?: false},
+          state
+        )
+
+      {:ok, ^state} =
+        PirateAudio.handle_event(
+          %Player.VolumeChanged{percent: 40, enabled?: false, supported?: true},
+          state
+        )
+
+      assert frames() == 0
+    end
+
+    defp volume(percent),
+      do: %Player.VolumeChanged{percent: percent, enabled?: true, supported?: true}
+  end
+
   # A router that goes off is the reason that the music stopped, and a person reading a
   # screen that said nothing would look at the device instead.
   describe "the network" do

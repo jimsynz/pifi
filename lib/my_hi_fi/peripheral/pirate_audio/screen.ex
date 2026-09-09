@@ -77,6 +77,10 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
 
   `network` is what the interfaces of the device are doing, and the screen says nothing
   about a network that carries the music. See `MyHiFi.Peripheral.NetworkWarning`.
+
+  `volume_percent` is the level that a person is setting now, and it is `nil` at every
+  other moment. A level that stayed on the glass would take the room of the subtitle
+  for a number that no person is reading. See `MyHiFi.Peripheral.PirateAudio`.
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
@@ -91,7 +95,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
           safe_to_switch_off?: boolean(),
           position_ms: non_neg_integer(),
           duration_ms: pos_integer() | nil,
-          network: NetworkWarning.connection() | nil
+          network: NetworkWarning.connection() | nil,
+          volume_percent: 0..100 | nil
         }
 
   @doc "The size that this screen draws at."
@@ -114,7 +119,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
       safe_to_switch_off?: false,
       position_ms: 0,
       duration_ms: nil,
-      network: nil
+      network: nil,
+      volume_percent: nil
     }
   end
 
@@ -132,7 +138,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
         low_battery?: view.low_battery?,
         device_name: view.device_name,
         splash_path: view.splash_path,
-        network: view.network
+        network: view.network,
+        volume_percent: view.volume_percent
     }
   end
 
@@ -299,6 +306,13 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # **A warning takes the place of the track**, so a flat cell and a hand on the switch
   # both take the time away with the subtitle. A device that plays nothing has no time
   # to show, and a fault has none that means anything.
+  # **The level takes the place of the timeline while a person sets it.** A person
+  # holding a button is looking for the number, and the two cannot both sit in a band
+  # that holds 240 pixels. The timeline comes back when the level goes.
+  defp timeline(%{volume_percent: percent}) when is_integer(percent) do
+    column([width(fill()), spacing(5)], [volume_words(percent), volume_bar(percent)])
+  end
+
   defp timeline(%{low_battery?: true}), do: none()
   defp timeline(%{safe_to_switch_off?: true}), do: none()
   defp timeline(%{state: :stopped}), do: none()
@@ -318,6 +332,40 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   end
 
   defp time_style, do: [Font.size(12), Font.color(color(:slate, 300))]
+
+  defp volume_words(percent) do
+    row([width(fill())], [
+      el(time_style(), text("VOLUME")),
+      el([width(fill())], none()),
+      el(time_style(), text("#{percent}%"))
+    ])
+  end
+
+  # The accent of the product, and not the white of the timeline, so a person reads at
+  # a glance that this bar is not the place of the track.
+  defp volume_bar(percent) do
+    el(
+      [
+        width(fill()),
+        height(px(@bar_height)),
+        Border.rounded(2),
+        Background.color(color_rgba(255, 255, 255, 0.28))
+      ],
+      el(
+        [
+          width(px(bar_width(percent))),
+          height(px(@bar_height)),
+          Border.rounded(2),
+          Background.color(color(:amber, 400))
+        ],
+        none()
+      )
+    )
+  end
+
+  defp bar_width(percent) do
+    Kernel.max(round((@width - 2 * @scrim_padding) * percent / 100), 2)
+  end
 
   defp bar(%{duration_ms: nil}), do: none()
 

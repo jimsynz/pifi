@@ -72,6 +72,11 @@ defmodule MyHiFi.Peripheral.PiTft do
   alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen, Stmpe610}
   alias MyHiFi.Playback
 
+  # How long the level stays on the glass after a person stops moving it. Long enough
+  # to read the number, and short enough that the track comes back before they look
+  # for it.
+  @volume_ms :timer.seconds(3)
+
   @doc "The name that the settings page draws."
   @impl MyHiFi.Peripheral
   def title, do: "PiTFT 2.8 inch screen"
@@ -92,6 +97,7 @@ defmodule MyHiFi.Peripheral.PiTft do
         screen: screen,
         stmpe: stmpe,
         buttons: buttons,
+        volume_ms: Keyword.get(opts, :volume_ms, @volume_ms),
         view: Screen.new() |> with_battery() |> with_identity() |> with_network(),
         awake?: true
       })
@@ -158,7 +164,17 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   def handle_event(%Player.Standby{entered?: false}, state), do: wake(state)
 
-  def handle_event(event, %{view: current} = state) do
+  # The level goes away by itself, so this schedules the message that takes it away.
+  # A person who is still moving it schedules a later one, and the last one decides.
+  def handle_event(%Player.VolumeChanged{enabled?: true, supported?: true} = event, state) do
+    Process.send_after(self(), :clear_volume, state.volume_ms)
+
+    handle_event(event, state, :drawing)
+  end
+
+  def handle_event(event, state), do: handle_event(event, state, :drawing)
+
+  defp handle_event(event, %{view: current} = state, :drawing) do
     case view(event, current) do
       ^current -> {:ok, state}
       view -> draw(%{state | view: view})
@@ -173,6 +189,12 @@ defmodule MyHiFi.Peripheral.PiTft do
   not what the button does.** `MyHiFi.DeviceUi` holds that.
   """
   @impl MyHiFi.Peripheral
+  def handle_info(:clear_volume, %{view: %{volume_percent: nil}} = state), do: {:ok, state}
+
+  def handle_info(:clear_volume, state) do
+    draw(%{state | view: %{state.view | volume_percent: nil}})
+  end
+
   def handle_info(message, state) do
     case Buttons.press(state.buttons, message) do
       {:ok, button, hold, buttons} ->
@@ -263,6 +285,14 @@ defmodule MyHiFi.Peripheral.PiTft do
   # `MyHiFi.Peripheral.NetworkWarning`.
   defp view(%DeviceEvents.NetworkChanged{interfaces: interfaces}, view),
     do: %{view | network: NetworkWarning.connection(interfaces)}
+
+  # **A person holding a button needs to see the number that they are setting.** A level
+  # that the card cannot set, and a control that a person has not turned on, both draw
+  # nothing: there is nothing for the person to move.
+  defp view(%Player.VolumeChanged{enabled?: true, supported?: true} = event, view),
+    do: %{view | volume_percent: event.percent}
+
+  defp view(%Player.VolumeChanged{}, view), do: view
 
   defp view(%Player.Buffering{} = event, view),
     do: %{view | state: :buffering, percent: event.percent}
