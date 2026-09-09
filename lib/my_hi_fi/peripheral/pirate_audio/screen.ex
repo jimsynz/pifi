@@ -49,7 +49,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
 
   alias Emerge.UI.{Background, Border, Font}
   alias MyHiFi.Device.Identity
-  alias MyHiFi.Peripheral.{BatteryIcon, Clock}
+  alias MyHiFi.Peripheral.{BatteryIcon, Clock, NetworkWarning}
 
   @width 240
   @height 240
@@ -74,6 +74,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   `position_ms` is where the track is now, and `duration_ms` is how long it runs. A
   live stream holds `nil` for the second one, and the screen then draws the time and no
   bar.
+
+  `network` is what the interfaces of the device are doing, and the screen says nothing
+  about a network that carries the music. See `MyHiFi.Peripheral.NetworkWarning`.
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
@@ -87,7 +90,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
           battery_percent: 0..100 | nil,
           safe_to_switch_off?: boolean(),
           position_ms: non_neg_integer(),
-          duration_ms: pos_integer() | nil
+          duration_ms: pos_integer() | nil,
+          network: NetworkWarning.connection() | nil
         }
 
   @doc "The size that this screen draws at."
@@ -109,7 +113,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
       battery_percent: nil,
       safe_to_switch_off?: false,
       position_ms: 0,
-      duration_ms: nil
+      duration_ms: nil,
+      network: nil
     }
   end
 
@@ -126,7 +131,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
       | battery_percent: view.battery_percent,
         low_battery?: view.low_battery?,
         device_name: view.device_name,
-        splash_path: view.splash_path
+        splash_path: view.splash_path,
+        network: view.network
     }
   end
 
@@ -135,7 +141,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   def render(view) do
     el(
       [width(px(@width)), height(px(@height)), field(view)],
-      column([width(fill()), height(fill())], [battery_row(view), spacer(), scrim(view)])
+      column([width(fill()), height(fill())], [top_row(view), spacer(), scrim(view)])
     )
   end
 
@@ -179,22 +185,55 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # The picture takes every row that the words leave.
   defp spacer, do: el([width(fill()), height(fill())], none())
 
+  # The top row holds what the hardware says, over the artwork, because the foot of the
+  # screen belongs to the words. The network sits on the left and the battery on the
+  # right, so neither one moves when the other goes.
+  #
+  # The band behind each one is what keeps it readable over a bright picture, in the way
+  # that the scrim keeps the words readable.
+  defp top_row(view) do
+    row([width(fill()), padding_xy(10, 8)], [
+      network(view),
+      el([width(fill())], none()),
+      battery(view)
+    ])
+  end
+
   # **A device on the mains draws no battery at all.** It holds no gauge, so it publishes
   # no charge, and a battery at 0 would be a lie. See `MyHiFi.Peripheral.Battery`.
-  #
-  # It sits at the top corner, over the artwork, because the foot of the screen belongs
-  # to the words. The band behind it is what keeps it readable over a bright picture, in
-  # the way that the scrim keeps the words readable.
-  defp battery_row(%{battery_percent: nil}), do: none()
+  defp battery(%{battery_percent: nil}), do: none()
 
-  defp battery_row(view) do
-    row([width(fill()), padding_xy(10, 8)], [
-      el([width(fill())], none()),
-      el(
-        [padding_xy(5, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
-        BatteryIcon.render(view.battery_percent, view.low_battery?)
-      )
-    ])
+  defp battery(view) do
+    el(
+      [padding_xy(5, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
+      BatteryIcon.render(view.battery_percent, view.low_battery?)
+    )
+  end
+
+  # **A network that carries the music draws nothing.** A person whose music plays needs
+  # no mark that says so, and this corner is 240 pixels wide. See
+  # `MyHiFi.Peripheral.NetworkWarning`.
+  #
+  # Rose says that a person must act, which is what the low battery band says with the
+  # same colour. The band holds more of it than the battery band holds of black, because
+  # words over artwork need more than a picture of a cell does.
+  defp network(view) do
+    case NetworkWarning.text(view.network) do
+      nil ->
+        none()
+
+      words ->
+        el(
+          [
+            padding_xy(5, 3),
+            Border.rounded(6),
+            Background.color(color_rgba(136, 19, 55, 0.88)),
+            Font.size(11),
+            Font.color(color(:slate, 50))
+          ],
+          text(words)
+        )
+    end
   end
 
   # One flat band, and not a gradient that fades into the picture. **A gradient cannot

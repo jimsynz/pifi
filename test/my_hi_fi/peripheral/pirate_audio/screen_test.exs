@@ -168,6 +168,74 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
     end
   end
 
+  describe "the network" do
+    # **A network that carries the music draws nothing.** A person whose music plays
+    # needs no mark that says so, and this screen is 240 pixels wide.
+    test "a network that carries the music leaves the corner alone" do
+      assert corner(:internet) == corner(nil)
+      assert {red, green, blue} = corner(:internet)
+      assert red < 40 and green < 40 and blue < 40
+    end
+
+    # Rose says that a person must act, which is what the low battery band says with
+    # the same colour.
+    test "a device with no way out of its network draws a band in the corner" do
+      assert {red, green, blue} = corner(:lan)
+      assert red > 90 and green < 60 and blue < 90
+    end
+
+    test "a device with no network at all draws it as well" do
+      assert corner(:disconnected) == corner(:lan)
+    end
+
+    # The battery sits at the other end of the row, so a warning that arrives moves
+    # nothing that a person was already reading.
+    test "the battery does not move when the warning arrives" do
+      assert battery_corner(:internet) == battery_corner(:lan)
+    end
+
+    # A stop clears the track. What the hardware says is not the track.
+    test "a stop keeps what the network says" do
+      stopped = Screen.stopped(%{Screen.new() | state: :playing, network: :lan})
+
+      assert stopped.network == :lan
+    end
+
+    defp view_with(network) do
+      %{
+        Screen.new()
+        | state: :playing,
+          title: "Tiny Ruins",
+          battery_percent: 94,
+          network: network
+      }
+    end
+
+    defp pixels_of(network) do
+      {width, height} = Screen.size()
+
+      network
+      |> view_with()
+      |> Screen.render()
+      |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+    end
+
+    # Inside the band that the warning draws, at the top left, where the artwork would
+    # otherwise show.
+    defp corner(network) do
+      {width, _height} = Screen.size()
+
+      pixel(pixels_of(network), width, 14, 18)
+    end
+
+    # The right end of the row, which is where the battery sits.
+    defp battery_corner(network) do
+      {width, _height} = Screen.size()
+
+      pixel(pixels_of(network), width, width - 14, 18)
+    end
+  end
+
   describe "render/1" do
     test "draws every state at the size of the screen" do
       {width, height} = Screen.size()
@@ -265,7 +333,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
         | state: :playing,
           title: "A Title That Is Long Enough To Wrap Onto More Than One Line",
           subtitle: "RNZ National"
-      }
+      },
+      %{Screen.new() | state: :playing, title: "Tiny Ruins", network: :disconnected},
+      %{Screen.new() | state: :playing, title: "Tiny Ruins", network: :lan, battery_percent: 4}
     ]
   end
 end

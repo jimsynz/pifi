@@ -18,7 +18,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   alias Emerge.UI.{Background, Border, Font}
   alias MyHiFi.Device.Identity
-  alias MyHiFi.Peripheral.{BatteryIcon, Clock}
+  alias MyHiFi.Peripheral.{BatteryIcon, Clock, NetworkWarning}
 
   @width 320
   @height 240
@@ -57,7 +57,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
           low_battery?: boolean(),
           percent: 0..100,
           position_ms: non_neg_integer(),
-          duration_ms: pos_integer() | nil
+          duration_ms: pos_integer() | nil,
+          network: NetworkWarning.connection() | nil
         }
 
   @doc "The size that this screen draws at."
@@ -81,7 +82,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       low_battery?: false,
       percent: 0,
       position_ms: 0,
-      duration_ms: nil
+      duration_ms: nil,
+      network: nil
     }
   end
 
@@ -98,7 +100,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       | battery_percent: view.battery_percent,
         low_battery?: view.low_battery?,
         device_name: view.device_name,
-        splash_path: view.splash_path
+        splash_path: view.splash_path,
+        network: view.network
     }
   end
 
@@ -154,18 +157,24 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
     )
   end
 
-  # The status row is absent from this layout, so the battery of a device that holds one
-  # sits over the picture, on a band that keeps it readable.
-  defp splash_battery(%{battery_percent: nil}), do: none()
-
+  # The status row is absent from this layout, so what the hardware says sits over the
+  # picture, on a band that keeps it readable. **The row draws for a device on the mains
+  # as well**, because a device that holds no gauge can still hold a router that is off.
   defp splash_battery(view) do
     row([width(fill()), padding_xy(12, 10)], [
+      network(view),
       el([width(fill())], none()),
-      el(
-        [padding_xy(6, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
-        BatteryIcon.render(view.battery_percent, view.low_battery?)
-      )
+      splash_gauge(view)
     ])
+  end
+
+  defp splash_gauge(%{battery_percent: nil}), do: none()
+
+  defp splash_gauge(view) do
+    el(
+      [padding_xy(6, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
+      BatteryIcon.render(view.battery_percent, view.low_battery?)
+    )
   end
 
   defp splash_name(view) do
@@ -194,9 +203,34 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       # child that fills the space instead pushes everything after it to the corner,
       # which is where a person looks for a battery.
       el([width(fill())], none()),
+      network(view),
       el([Font.size(13), Font.color(color(:slate, 500))], text(elapsed(view))),
       battery(view)
     ])
+  end
+
+  # **A network that carries the music draws nothing.** A person whose music plays needs
+  # no mark that says so. See `MyHiFi.Peripheral.NetworkWarning`.
+  #
+  # It reads as a pill, in the way that the state of the player does, and rose is what
+  # this screen already gives a fault.
+  defp network(view) do
+    case NetworkWarning.text(view.network) do
+      nil ->
+        none()
+
+      words ->
+        el(
+          [
+            padding_xy(8, 3),
+            Border.rounded(999),
+            Background.color(color(:rose, 400)),
+            Font.size(13),
+            Font.color(color(:slate, 950))
+          ],
+          text(words)
+        )
+    end
   end
 
   # **A device on the mains draws no battery at all.** It holds no gauge, so it publishes

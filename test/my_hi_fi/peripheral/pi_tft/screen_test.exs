@@ -123,6 +123,86 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
     end
   end
 
+  describe "the network" do
+    # **A network that carries the music draws nothing.** A person whose music plays
+    # needs no mark that says so, and the status row holds the state of the player.
+    test "a network that carries the music draws no pill" do
+      assert rose_pixels(:internet) == 0
+      assert rose_pixels(nil) == 0
+    end
+
+    # Rose is what this screen already gives a fault, and a person reads the colour
+    # before they read the words.
+    test "a device with no way out of its network draws a rose pill" do
+      assert rose_pixels(:lan) > 20
+    end
+
+    test "a device with no network at all draws one as well" do
+      assert rose_pixels(:disconnected) > 20
+    end
+
+    # A stop clears the track. What the hardware says is not the track.
+    test "a stop keeps what the network says" do
+      stopped = Screen.stopped(%{Screen.new() | state: :playing, network: :lan})
+
+      assert stopped.network == :lan
+    end
+
+    # **The idle layout holds no status row**, so it draws its own corner. A device on
+    # the mains holds no gauge and it can still hold a router that is off, so that row
+    # must draw for one.
+    test "the idle screen of a device with no gauge still says that the network is down" do
+      context = splash_file(%{})
+
+      view = %{
+        Screen.new()
+        | device_name: "Kitchen",
+          splash_path: context.path,
+          battery_percent: nil,
+          network: :disconnected
+      }
+
+      assert count_rose(render_pixels(view, context.assets), 22) > 20
+    end
+
+    defp rose_pixels(network) do
+      view = %{
+        Screen.new()
+        | state: :playing,
+          title: "Tiny Ruins",
+          battery_percent: 94,
+          network: network
+      }
+
+      count_rose(render_pixels(view), 25)
+    end
+
+    defp render_pixels(view, assets \\ []) do
+      {width, height} = Screen.size()
+
+      view
+      |> Screen.render()
+      |> EmergeSkia.render_to_pixels(
+        otp_app: :my_hi_fi,
+        width: width,
+        height: height,
+        assets: assets
+      )
+    end
+
+    # The pill is the one rose thing on this row, so a count of its pixels says whether
+    # the screen drew it.
+    defp count_rose(pixels, y) do
+      {width, _height} = Screen.size()
+
+      Enum.count(0..(width - 1), fn x ->
+        {red, green, blue} = pixel(pixels, width, x, y)
+
+        red > 200 and green < 140 and blue > 120 and blue < 190
+      end)
+    end
+  end
+
   describe "render/1" do
     test "draws every state at the size of the screen" do
       {width, height} = Screen.size()

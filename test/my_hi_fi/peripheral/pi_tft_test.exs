@@ -368,6 +368,58 @@ defmodule MyHiFi.Peripheral.PiTftTest do
     )
   end
 
+  # A router that goes off is the reason that the music stopped, and a person reading a
+  # screen that said nothing would look at the device instead.
+  describe "the network" do
+    test "a router that goes off reaches the screen", %{state: state} do
+      {:ok, state} = PiTft.handle_event(started(), state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PiTft.handle_event(net_down(), state)
+
+      assert state.view.network == :disconnected
+      assert frames() == 1
+    end
+
+    test "a network that comes back takes the warning away", %{state: state} do
+      {:ok, state} = PiTft.handle_event(net_down(), state)
+      {:ok, state} = PiTft.handle_event(net_up(), state)
+
+      assert state.view.network == :internet
+    end
+
+    # A device that reaches its router and nothing past it plays nothing, and a person
+    # reads that state as working. See `MyHiFi.Peripheral.NetworkWarning`.
+    test "a device with no way out of its network says so", %{state: state} do
+      {:ok, state} =
+        PiTft.handle_event(%DeviceEvents.NetworkChanged{interfaces: [%{connection: :lan}]}, state)
+
+      assert state.view.network == :lan
+    end
+
+    # A stop clears the track, and the network belongs to the hardware.
+    test "a stop keeps what the network says", %{state: state} do
+      {:ok, state} = PiTft.handle_event(net_down(), state)
+      {:ok, state} = PiTft.handle_event(%Player.Stopped{reason: :requested}, state)
+
+      assert state.view.network == :disconnected
+    end
+
+    # VintageNet publishes for each address that an interface takes, and a second event
+    # that says the same thing must not cost a frame.
+    test "an event that changes nothing draws nothing", %{state: state} do
+      {:ok, state} = PiTft.handle_event(net_down(), state)
+      RecordingScreen.forget()
+
+      {:ok, ^state} = PiTft.handle_event(net_down(), state)
+
+      assert frames() == 0
+    end
+
+    defp net_down, do: %DeviceEvents.NetworkChanged{interfaces: [%{connection: :disconnected}]}
+    defp net_up, do: %DeviceEvents.NetworkChanged{interfaces: [%{connection: :internet}]}
+  end
+
   defp started do
     %Player.Started{
       source: MyHiFi.Source.Podcasts,

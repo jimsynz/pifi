@@ -79,6 +79,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   @behaviour MyHiFi.Peripheral
 
   alias MyHiFi.Artwork
+  alias MyHiFi.Device
   alias MyHiFi.Device.Identity
   alias MyHiFi.Event
   alias MyHiFi.Event.Device, as: DeviceEvents
@@ -86,6 +87,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.Battery
   alias MyHiFi.Peripheral.Buttons
+  alias MyHiFi.Peripheral.NetworkWarning
   alias MyHiFi.Peripheral.PirateAudio.{Screen, St7789}
   alias MyHiFi.Playback
 
@@ -126,7 +128,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
         screen: screen,
         buttons: buttons,
         show_ms: Keyword.get(opts, :show_ms, @show_ms),
-        view: Screen.new() |> with_battery() |> with_identity(),
+        view: Screen.new() |> with_battery() |> with_identity() |> with_network(),
         awake?: true
       })
     end
@@ -147,6 +149,13 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # `MyHiFi.Device.Identity`.
   defp with_identity(view) do
     %{view | device_name: Identity.name(), splash_path: splash(Identity.splash_path())}
+  end
+
+  # **`MyHiFi.Device.Monitor` publishes when an interface moves, and a screen may start
+  # long after the last one moved.** A screen that waited for an event would say nothing
+  # about a router that went off before the board booted.
+  defp with_network(view) do
+    %{view | network: NetworkWarning.connection(Device.network!())}
   end
 
   # **A device that a person gave no picture draws the one that the firmware ships.**
@@ -292,6 +301,12 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   defp view(%DeviceEvents.IdentityChanged{} = event, view),
     do: %{view | device_name: event.name, splash_path: splash(event.splash_path)}
+
+  # A router that goes off is the reason that the music stopped, and a person reading a
+  # screen that said nothing would look at the device instead. See
+  # `MyHiFi.Peripheral.NetworkWarning`.
+  defp view(%DeviceEvents.NetworkChanged{interfaces: interfaces}, view),
+    do: %{view | network: NetworkWarning.connection(interfaces)}
 
   defp view(%Player.Buffering{}, view), do: %{view | state: :buffering}
 
