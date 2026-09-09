@@ -113,7 +113,10 @@ defmodule MyHiFi.MixProject do
       # author says that the API iterates, so this names a reference and pins it in
       # the way that `vintage_net_wizard` is pinned. A new reference therefore needs a
       # read of what changed.
-      {:ash_storage, github: "ash-project/ash_storage", ref: "aa5766a4594ebdc4a5dd6fd41993e6707ffd4db2", override: true},
+      {:ash_storage,
+       github: "ash-project/ash_storage",
+       ref: "aa5766a4594ebdc4a5dd6fd41993e6707ffd4db2",
+       override: true},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
       # The browse page gives Cinder a query, and Cinder holds the loading state, the
