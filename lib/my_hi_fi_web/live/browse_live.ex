@@ -485,6 +485,17 @@ defmodule MyHiFiWeb.BrowseLive do
         <button
           :if={@playable?}
           type="button"
+          id="queue-collection"
+          phx-click="queue_collection"
+          aria-label={"Add #{@item.title} to the queue"}
+          class="control flex size-9 shrink-0 items-center justify-center rounded-full hover:text-accent"
+        >
+          <.icon name="hero-plus-mini" class="size-4" />
+        </button>
+
+        <button
+          :if={@playable?}
+          type="button"
           id="play-collection"
           phx-click="play_collection"
           aria-label={"Play #{@item.title}"}

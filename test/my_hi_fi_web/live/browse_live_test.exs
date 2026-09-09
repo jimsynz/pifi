@@ -84,6 +84,12 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   defp eventually(_check, _attempts), do: false
 
+  defp queued_titles do
+    Playback.queue!()
+    |> Enum.sort_by(& &1.position)
+    |> Enum.map(&Playback.get_item!(&1.item_id).title)
+  end
+
   defp show(overrides \\ %{}) do
     PodcastFill.show(
       Map.merge(%{feed_url: "https://example.test/rss", title: "Road Work"}, overrides)
@@ -346,6 +352,90 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       assert html =~ "Favourites"
       assert html =~ "Tags"
+    end
+  end
+
+  # **Adding to the queue plays nothing and changes nothing that is playing.** A person
+  # who presses this wants the track after what is on now. See `MyHiFiWeb.ItemList`.
+  describe "adding to the play queue" do
+    setup do
+      Playback.clear_queue!()
+      on_exit(fn -> Playback.clear_queue!() end)
+
+      :ok
+    end
+
+    test "a track goes on the end of the queue", %{conn: conn} do
+      station = Stations.create(%{country_code: "NZ", title: "RNZ National"})
+
+      {:ok, view, _html} = live(conn, @radio)
+      open(view, "Countries")
+      view |> element("button", "NZ") |> render_click()
+
+      html = view |> element("#queue-#{station.id}") |> render_click()
+
+      assert html =~ "RNZ National is next in the queue"
+      assert queued_titles() == ["RNZ National"]
+    end
+
+    # A person who presses it twice means it twice, and the queue holds a row for each.
+    test "the queue holds the order that a person pressed", %{conn: conn} do
+      first = Stations.create(%{country_code: "NZ", title: "Alpha FM"})
+      second = Stations.create(%{country_code: "NZ", title: "Bravo FM"})
+
+      {:ok, view, _html} = live(conn, @radio)
+      open(view, "Countries")
+      view |> element("button", "NZ") |> render_click()
+
+      view |> element("#queue-#{second.id}") |> render_click()
+      view |> element("#queue-#{first.id}") |> render_click()
+
+      assert queued_titles() == ["Bravo FM", "Alpha FM"]
+    end
+
+    # **Nothing starts playing.** The player is what a person is listening to, and this
+    # control is about what comes after it.
+    test "it starts no audio", %{conn: conn} do
+      station = Stations.create(%{country_code: "NZ", title: "RNZ National"})
+
+      {:ok, view, _html} = live(conn, @radio)
+      open(view, "Countries")
+      view |> element("button", "NZ") |> render_click()
+
+      view |> element("#queue-#{station.id}") |> render_click()
+
+      refute Playback.state!().playing?
+      assert Playback.queue_playing!() == nil
+    end
+
+    # A queue that a person filled by pressing a track keeps its mark, and the rows that
+    # they add go after it.
+    test "a track that a person adds goes after the one that plays", %{conn: conn} do
+      PlayingPipeline.use_it()
+      playing = Stations.create(%{country_code: "NZ", title: "Playing FM"})
+      added = Stations.create(%{country_code: "NZ", title: "Added FM"})
+
+      {:ok, view, _html} = live(conn, @radio)
+      open(view, "Countries")
+      view |> element("button", "NZ") |> render_click()
+
+      view |> element("#play-#{playing.id}") |> render_click()
+      view |> element("#queue-#{added.id}") |> render_click()
+
+      assert List.last(queued_titles()) == "Added FM"
+      assert Playback.get_item!(Playback.queue_playing!().item_id).title == "Playing FM"
+    end
+
+    # A container holds no audio of its own, so a person adds an album by the control at
+    # the head of it.
+    test "a container offers no control of its own", %{conn: conn} do
+      created = show()
+      {:ok, _created} = Playback.set_favourite(created)
+
+      {:ok, view, _html} = live(conn, @podcasts)
+      open(view, "Subscriptions")
+
+      refute has_element?(view, "#queue-#{created.id}")
     end
   end
 
@@ -1367,6 +1457,32 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
 
       assert has_element?(view, "#play-collection")
+      assert has_element?(view, "#queue-collection")
+    end
+
+    # The list that a person sees is what goes on the end, in the order that they see
+    # it, which is the rule that the play control follows. See `MyHiFiWeb.ItemList`.
+    test "a collection goes on the end of the queue and plays nothing", %{conn: conn} do
+      {_artist, album} = collection_tree()
+      with_tracks(album, 2)
+      Playback.clear_queue!()
+      on_exit(fn -> Playback.clear_queue!() end)
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      html = view |> element("#queue-collection") |> render_click()
+
+      assert html =~ "2 tracks are in the queue"
+      assert length(Playback.queue!()) == 2
+      refute Playback.state!().playing?
+    end
+
+    test "a collection that holds collections offers neither control", %{conn: conn} do
+      {artist, _album} = collection_tree()
+
+      {:ok, view, _html} = live(conn, "#{@podcasts}/subscriptions/#{artist.id}")
+
+      refute has_element?(view, "#queue-collection")
     end
 
     # A press would mean "play every track of every album of this artist", and a person

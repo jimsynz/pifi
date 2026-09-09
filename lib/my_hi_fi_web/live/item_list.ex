@@ -299,9 +299,30 @@ defmodule MyHiFiWeb.ItemList do
 
         <.audio_mark row={@row} reading={@reading} />
       </button>
+      <.add_to_queue row={@row} />
       <.played row={@row} />
       <.favourite row={@row} />
     </div>
+    """
+  end
+
+  attr :row, :any, required: true
+
+  # **A container holds no audio, so it goes in no queue.** A person adds an album by
+  # the control at the head of it, which takes every track that the list holds.
+  defp add_to_queue(assigns) do
+    ~H"""
+    <button
+      :if={@row.kind != :container}
+      type="button"
+      id={"queue-#{@row.id}"}
+      phx-click="queue"
+      phx-value-id={@row.id}
+      aria-label={"Add #{@row.title} to the queue"}
+      class="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-faint hover:text-ink"
+    >
+      <.icon name="hero-plus" class="size-5" />
+    </button>
     """
   end
 
@@ -611,6 +632,39 @@ defmodule MyHiFiWeb.ItemList do
 
       ids ->
         play_all(socket, ids)
+    end
+  end
+
+  # **Adding to the queue plays nothing and changes nothing that is playing.** A person
+  # who presses this wants to hear the track after what is on now, so the row goes on
+  # the end of the queue and the player carries on. It takes the one row that they
+  # pressed, and not the list around it: they chose a track, not a list.
+  defp event("queue", %{"id" => id}, socket) do
+    with {:ok, item} <- Playback.get_item(id),
+         {:ok, _rows} <- Playback.append_to_queue([id]) do
+      {:halt, put_flash(socket, :info, "#{item.title} is next in the queue.")}
+    else
+      {:error, reason} ->
+        {:halt, put_flash(socket, :error, "Could not add that to the queue: #{inspect(reason)}")}
+    end
+  end
+
+  # The list that a person sees is what goes on the end, in the order that they see it,
+  # which is the rule that `play_collection` follows.
+  defp event("queue_collection", _params, socket) do
+    case queue_ids(socket, nil) do
+      [] ->
+        {:halt, put_flash(socket, :error, "There is nothing here to add.")}
+
+      ids ->
+        case Playback.append_to_queue(ids) do
+          {:ok, _rows} ->
+            {:halt, put_flash(socket, :info, "#{length(ids)} tracks are in the queue.")}
+
+          {:error, reason} ->
+            {:halt,
+             put_flash(socket, :error, "Could not add those to the queue: #{inspect(reason)}")}
+        end
     end
   end
 
