@@ -239,6 +239,15 @@ defmodule MyHiFi.Artwork do
   def directory, do: Path.join(Cache.directory(), @namespace)
 
   @doc """
+  The namespace that the cache holds a picture under.
+
+  `MyHiFi.Device.Storage.Usage` reads it, so the storage report names the same
+  namespace that this module writes. See `MyHiFi.Player.Download.namespace/0`.
+  """
+  @spec namespace() :: String.t()
+  def namespace, do: @namespace
+
+  @doc """
   The path of one entry.
 
   Nothing outside this module builds a path, because the cache names the file.

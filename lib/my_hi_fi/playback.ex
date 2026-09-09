@@ -37,6 +37,7 @@ defmodule MyHiFi.Playback do
       define :items_of_source, action: :by_source, args: [:source]
       define :favourite_items, action: :favourites
       define :items_marked_for_audio, action: :marked_for_audio, args: [:source]
+      define :items_holding_audio, action: :holding_audio
       define :upsert_item, action: :upsert
       define :set_favourite, action: :set_favourite
       define :clear_favourite, action: :clear_favourite

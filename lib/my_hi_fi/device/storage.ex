@@ -7,6 +7,11 @@ defmodule MyHiFi.Device.Storage do
   later.
 
   The resource holds no data of its own, so it needs no data layer.
+
+  `report` gives the numbers of the whole partition, and `usage` says which kind of
+  media holds the room. The two are separate actions because `report` runs at each
+  settle of `MyHiFi.Device.Monitor` and `usage` reads the cache and the items, which
+  is work that only the storage page needs.
   """
 
   use Ash.Resource, otp_app: :my_hi_fi, domain: MyHiFi.Device
@@ -37,6 +42,30 @@ defmodule MyHiFi.Device.Storage do
                   ]
 
       run MyHiFi.Device.Storage.Report
+    end
+
+    action :usage, {:array, :map} do
+      description """
+      Report what uses the room of the partition, one kind of media at a time.
+
+      A person who reads "3.6 GB used" learns nothing that they can act on. This
+      names the kinds, so they know whether to remove the downloads of one source or
+      to clear the artwork.
+
+      The kinds sum to `used_bytes` of `report`, because `other` holds the rest: the
+      firmware, the logs and what a file system needs for 10000 small files. The
+      largest kind comes first, and a kind that holds no byte is absent.
+      """
+
+      constraints items: [
+                    fields: [
+                      key: [type: :string, allow_nil?: false],
+                      label: [type: :string, allow_nil?: false],
+                      bytes: [type: :integer, allow_nil?: false]
+                    ]
+                  ]
+
+      run MyHiFi.Device.Storage.Usage
     end
   end
 end

@@ -523,6 +523,26 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       assert has_element?(view, "#database-size")
       assert render(view) =~ MyHiFi.Device.storage!().path
     end
+
+    # A person who reads "3.6 GB used" learns nothing that they can act on, so the page
+    # names the kinds. See `MyHiFi.Device.Storage.Usage`.
+    test "it draws a bar of the kinds of media, and a row for each one", %{conn: conn} do
+      MyHiFi.Cache.put!("artwork", "cover", %{bytes: String.duplicate("c", 700)})
+
+      {:ok, view, _html} = live(conn, ~p"/settings/storage")
+
+      assert has_element?(view, "#storage-usage")
+      assert has_element?(view, "#usage-artwork", "Artwork")
+      assert has_element?(view, "#usage-other", "Other")
+    end
+
+    # The colour says which kind, and the row says it in words as well, so a reader who
+    # cannot tell two colours apart still reads the page.
+    test "a kind that holds no byte draws no row", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/storage")
+
+      refute has_element?(view, "#usage-jellyfin")
+    end
   end
 
   # The page asks for no report on an interval. `MyHiFi.Device.Monitor` owns the three

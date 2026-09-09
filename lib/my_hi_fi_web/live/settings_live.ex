@@ -126,7 +126,7 @@ defmodule MyHiFiWeb.SettingsLive do
   def handle_info(%Events.StorageChanged{} = event, socket) do
     fields = [:path, :total_bytes, :free_bytes, :used_bytes, :database_bytes, :full?]
 
-    {:noreply, assign(socket, :storage, Map.take(event, fields))}
+    {:noreply, socket |> assign(:storage, Map.take(event, fields)) |> assign_usage()}
   end
 
   # The player publishes on this topic as well, and no report of this page changes with
@@ -757,6 +757,8 @@ defmodule MyHiFiWeb.SettingsLive do
   def render(%{live_action: :storage} = assigns) do
     ~H"""
     <.section id="settings-storage" title="Storage" back={~p"/settings"}>
+      <.usage_bar usage={@usage} used_bytes={@storage.used_bytes} />
+
       <dl class="text-sm">
         <div class="flex justify-between gap-4 border-b border-edge py-2 first:pt-0">
           <dt class="text-ink-faint">Partition</dt>
@@ -780,6 +782,83 @@ defmodule MyHiFiWeb.SettingsLive do
     </.section>
     """
   end
+
+  attr(:usage, :list, required: true)
+  attr(:used_bytes, :integer, required: true)
+
+  # One bar of the space in use, and one row for each kind of media in it.
+  #
+  # **The bar spans what is in use and not the whole partition.** A card of 30.9 GB
+  # with 3.6 GB in use draws a bar that is 88 percent empty, and the share of each kind
+  # is then too small to read. The `Free` row below says how full the card is, which is
+  # the other question and a number rather than a shape.
+  #
+  # The rows under the bar carry the numbers, because a kind of 1 percent is a few
+  # pixels wide and no person can measure that.
+  #
+  # A kind holds a colour and a row, so identity never rests on the colour alone. The
+  # segments hold a gap of 2 pixels in the colour of the surface, which is what
+  # separates two of them: a border around each one would draw six lines on a bar 12
+  # pixels tall.
+  defp usage_bar(assigns) do
+    ~H"""
+    <div :if={@used_bytes > 0} id="storage-usage" class="mb-4">
+      <div class="recess flex h-3 gap-0.5 overflow-hidden rounded-full" aria-hidden="true">
+        <div
+          :for={kind <- @usage}
+          class="min-w-[3px]"
+          style={"width: #{share(kind.bytes, @used_bytes)}%; background: #{colour(kind.key)}"}
+        >
+        </div>
+      </div>
+
+      <ul class="mt-3 space-y-1 text-sm">
+        <li :for={kind <- @usage} id={"usage-#{kind.key}"} class="flex items-center gap-2">
+          <span class="size-2.5 shrink-0 rounded-sm" style={"background: #{colour(kind.key)}"}>
+          </span>
+          <span class="text-ink-dim">{kind.label}</span>
+          <span class="numerals ml-auto text-ink-faint">{size(kind.bytes)}</span>
+        </li>
+      </ul>
+    </div>
+    """
+  end
+
+  # **A colour follows the kind, and never the size of it.** A person who removed the
+  # episodes of one source must not find that every other colour moved.
+  # `MyHiFi.Device.Storage.Usage` gives the kinds in a fixed order, and this map holds
+  # one colour for each key of it.
+  #
+  # The four chromatic values are slots 1, 2, 3 and 4 of the categorical palette that
+  # the `dataviz` skill documents, stepped for a dark surface. A measurement against
+  # this surface, which is `#0f1114`, passes every gate in this order: the worst pair
+  # of two that touch stands at 8.4 for a reader who cannot tell red from green, where
+  # 8 is the target, and at 19.8 for a reader who can, where 15 is the floor.
+  #
+  # **`other` is grey on purpose.** It is the fold of everything that no kind names, so
+  # it must not read as a kind of its own, and the measurement marks it as below the
+  # floor for chroma for that reason.
+  #
+  # **A source that this map does not name takes the grey.** The label of the row still
+  # says which source it is, so nothing is lost but the colour. A person who adds a
+  # source gives it a value here and measures the order again: no fifth colour passes
+  # beside orange, and an invented one would put two that a reader cannot tell apart
+  # side by side.
+  @colours %{
+    "podcasts" => "#3987e5",
+    "jellyfin" => "#d95926",
+    "artwork" => "#199e70",
+    "database" => "#c98500",
+    "other" => "#60636a"
+  }
+
+  @unnamed_colour "#60636a"
+
+  defp colour(key), do: Map.get(@colours, key, @unnamed_colour)
+
+  # A kind of a few bytes still holds a row, and the bar gives it 3 pixels so a person
+  # sees that it is there. The number in the row is what says how much it is.
+  defp share(bytes, used), do: Float.round(bytes * 100 / used, 3)
 
   attr(:id, :string, required: true)
   attr(:title, :string, required: true)
@@ -966,7 +1045,16 @@ defmodule MyHiFiWeb.SettingsLive do
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, MyHiFi.Playback.standby_minutes!())
     |> assign(:switch_off?, SwitchOff.enabled?())
+    |> assign_usage()
   end
+
+  # **The storage page reads this, and no other page does.** It sums the cache and it
+  # reads every item that holds audio, where `MyHiFi.Device.storage!/0` runs `df` and
+  # nothing else, so a page that draws no bar must not pay for one.
+  defp assign_usage(%{assigns: %{live_action: :storage}} = socket),
+    do: assign(socket, :usage, Device.storage_usage!())
+
+  defp assign_usage(socket), do: socket
 
   # The periods that a person can pick. A free number would need a check of its own on
   # this page, and no person of a stereo wants 37 minutes.

@@ -20,6 +20,7 @@ defmodule MyHiFi.Device do
 
     resource MyHiFi.Device.Storage do
       define :storage, action: :report
+      define :storage_usage, action: :usage
     end
   end
 end

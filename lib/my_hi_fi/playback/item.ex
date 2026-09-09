@@ -172,6 +172,23 @@ defmodule MyHiFi.Playback.Item do
       prepare build(sort: [favourited_at: :desc])
     end
 
+    read :holding_audio do
+      description """
+      Every item whose audio this device holds on the card.
+
+      The storage report reads it, so a person sees which source uses the room. It
+      names the item that holds a file and not the container above it, because the
+      card holds a track and never an album.
+
+      **The size is a field of the cache entry and not of the item**, so this loads
+      `audio_file`. `byte_size` of an item is what a service said the file would be,
+      and the two differ.
+      """
+
+      filter expr(not is_nil(audio_file.id))
+      prepare build(load: [:audio_file])
+    end
+
     create :upsert do
       description """
       Write an item from its source.
