@@ -10,7 +10,7 @@ on:
 jobs:
   ci:
     uses: https://harton.dev/james/workflows/.forgejo/workflows/nerves-app.yml@main
-    runs-on: docker
+    runs-on: 16gb
     with:
       targets: "myhifi_rpi0_2"
       assets_deploy_enabled: true
