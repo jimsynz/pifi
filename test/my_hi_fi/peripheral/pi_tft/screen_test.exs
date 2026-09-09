@@ -9,20 +9,6 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
              "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGO4o6GBFTEMLQkAe3tLAfuiUfAAAAAASUVORK5CYII="
            )
 
-  describe "clock/1" do
-    test "gives minutes and seconds under an hour" do
-      assert Screen.clock(0) == "0:00"
-      assert Screen.clock(9_000) == "0:09"
-      assert Screen.clock(69_000) == "1:09"
-      assert Screen.clock(3_599_000) == "59:59"
-    end
-
-    test "gives hours as well, because an episode runs that long" do
-      assert Screen.clock(3_600_000) == "1:00:00"
-      assert Screen.clock(5_832_000) == "1:37:12"
-    end
-  end
-
   describe "status_text/1" do
     test "a device that plays nothing names itself, so a person knows it is awake" do
       assert Screen.status_text(%{Screen.new() | device_name: "Kitchen"}) == "Kitchen"

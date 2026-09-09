@@ -104,6 +104,70 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
     end
   end
 
+  describe "the timeline" do
+    # The bar and the numbers are the same fact twice, and a person needs both: the bar
+    # at a glance, and the numbers when they want to know how long is left.
+    test "a track draws the point, the end and a bar between them" do
+      view = %{
+        Screen.new()
+        | state: :playing,
+          title: "Tiny Ruins",
+          position_ms: 812_000,
+          duration_ms: 4_275_000
+      }
+
+      # 812 of 4275 seconds is 19 percent, and the bar spans the width of the scrim.
+      assert_in_delta bar_width(view), 0.19 * 212, 3
+    end
+
+    # A position past the end of a track is what a decoder gives when a file is longer
+    # than its own tag says, and a bar that ran off the glass would be the only sign.
+    test "a position past the end fills the bar and no more" do
+      view = %{
+        Screen.new()
+        | state: :playing,
+          title: "Tiny Ruins",
+          position_ms: 9_000_000,
+          duration_ms: 4_275_000
+      }
+
+      assert_in_delta bar_width(view), 212, 3
+    end
+
+    # A bar of no width draws nothing, and a track that just began still needs to show
+    # that it began.
+    test "a track that just began draws a bar that a person can see" do
+      view = %{Screen.new() | state: :playing, title: "Tiny Ruins", duration_ms: 4_275_000}
+
+      assert bar_width(view) >= 2
+    end
+
+    # A live stream has no end, so a bar would draw a lie.
+    test "a live stream draws no bar" do
+      view = %{Screen.new() | state: :playing, title: "RNZ National", position_ms: 95_000}
+
+      assert bar_width(view) == 0
+    end
+
+    test "a device that plays nothing draws no bar" do
+      assert bar_width(Screen.new()) == 0
+    end
+
+    # A person who must charge the device reads that and nothing else.
+    test "a flat cell takes the bar away with the subtitle" do
+      view = %{
+        Screen.new()
+        | state: :playing,
+          title: "Tiny Ruins",
+          position_ms: 812_000,
+          duration_ms: 4_275_000,
+          low_battery?: true
+      }
+
+      assert bar_width(view) == 0
+    end
+  end
+
   describe "render/1" do
     test "draws every state at the size of the screen" do
       {width, height} = Screen.size()
@@ -162,6 +226,24 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
       height: height,
       assets: context.assets
     )
+  end
+
+  # The bar is the one bright row at the foot of the screen, and the words above it hold
+  # no row of their own. A count of the light pixels of that row therefore measures the
+  # bar, and 0 says that the screen drew none.
+  defp bar_width(view) do
+    {width, height} = Screen.size()
+
+    pixels =
+      view
+      |> Screen.render()
+      |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+
+    Enum.count(0..(width - 1), fn x ->
+      {red, green, blue} = pixel(pixels, width, x, height - 14)
+
+      red > 200 and green > 200 and blue > 200
+    end)
   end
 
   defp pixel(pixels, width, x, y) do

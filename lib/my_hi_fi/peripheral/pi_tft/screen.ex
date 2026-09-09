@@ -18,7 +18,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   alias Emerge.UI.{Background, Border, Font}
   alias MyHiFi.Device.Identity
-  alias MyHiFi.Peripheral.BatteryIcon
+  alias MyHiFi.Peripheral.{BatteryIcon, Clock}
 
   @width 320
   @height 240
@@ -132,23 +132,6 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   def status_text(%{state: :paused}), do: "Paused"
   def status_text(%{live?: true}), do: "Live"
   def status_text(_view), do: "Playing"
-
-  @doc """
-  The time of a track, as minutes and seconds.
-
-  An hour or more takes a third part, because a podcast episode runs that long and
-  a person reading "97:12" has to do the arithmetic.
-  """
-  @spec clock(non_neg_integer()) :: String.t()
-  def clock(milliseconds) do
-    seconds = div(milliseconds, 1000)
-    minutes = div(seconds, 60)
-
-    case div(minutes, 60) do
-      0 -> "#{minutes}:#{pad(rem(seconds, 60))}"
-      hours -> "#{hours}:#{pad(rem(minutes, 60))}:#{pad(rem(seconds, 60))}"
-    end
-  end
 
   # **The picture fills the screen, and a band at the foot holds the name.** That is the
   # layout of `MyHiFi.Peripheral.PirateAudio.Screen`, and the reason is the same one: no
@@ -293,8 +276,9 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   end
 
   defp elapsed(%{state: :stopped}), do: ""
-  defp elapsed(%{duration_ms: nil} = view), do: clock(view.position_ms)
-  defp elapsed(view), do: "#{clock(view.position_ms)} / #{clock(view.duration_ms)}"
+  defp elapsed(%{duration_ms: nil} = view), do: Clock.text(view.position_ms)
+
+  defp elapsed(view), do: "#{Clock.text(view.position_ms)} / #{Clock.text(view.duration_ms)}"
 
   # **The pill says which state the player is in, so a colour of the artwork takes the
   # place of one state alone.** Buffering is amber and a fault is rose on every track,
@@ -308,6 +292,4 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   # so each place that draws one names what it draws instead.
   defp accent(%{accent: {red, green, blue}}, _instead), do: color_rgb(red, green, blue)
   defp accent(_view, instead), do: instead
-
-  defp pad(seconds), do: String.pad_leading(to_string(seconds), 2, "0")
 end

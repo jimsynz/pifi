@@ -9,7 +9,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
 
   **The artwork fills the screen, and the words sit on top of it.** That is the whole
   design. The screen is square and small, and a person reads it from a chair, so one
-  picture and two lines of text say more than a row of pills and a bar.
+  picture, two lines of text and one thin bar say more than a row of pills.
 
   ## How the words stay readable
 
@@ -31,22 +31,34 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   `shadow/1` and `glow/2`, and those draw around the frame of an element and not around
   a letter.
 
-  ## No progress bar
+  ## The bar, and what it costs
 
-  A bar would mean a draw for each `MyHiFi.Event.Player.Progress` event, which is one
-  each second, and each draw of this screen decodes a JPEG and scales it to cover 240 by
-  240. This screen therefore draws when the track changes and not when it moves, and
-  `MyHiFi.Peripheral.PirateAudio` ignores that event.
+  A bar means a draw for each `MyHiFi.Event.Player.Progress` event, which is one each
+  second, and each draw of this screen decodes a JPEG and scales it to cover 240 by 240.
+  An earlier version of this module drew no bar for that reason and named no measurement.
+
+  A measurement on the board on 2026-09-09 gives 26 ms to render a frame that holds a
+  cover, and 35 ms to write it over SPI. One draw each second is therefore 6 percent of
+  one of the four cores, and the screen holds the bar.
+
+  **A live stream draws no bar**, because it has no end. It shows the time from the
+  start of the stream, which is what `MyHiFi.Event.Player.Progress` gives it.
   """
 
   use Emerge.UI
 
   alias Emerge.UI.{Background, Border, Font}
   alias MyHiFi.Device.Identity
-  alias MyHiFi.Peripheral.BatteryIcon
+  alias MyHiFi.Peripheral.{BatteryIcon, Clock}
 
   @width 240
   @height 240
+
+  # The scrim pads its words from the edge of the glass by this much on each side, and
+  # the bar inside it is that much narrower than the screen. See `played_width/1`.
+  @scrim_padding 14
+
+  @bar_height 4
 
   @typedoc """
   What the screen draws.
@@ -59,8 +71,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   moment, and it fills the field in the place of the dark one. See
   `MyHiFi.Device.Identity`.
 
-  There is no `position_ms` and no `duration_ms`, because this screen draws no bar. See
-  the moduledoc.
+  `position_ms` is where the track is now, and `duration_ms` is how long it runs. A
+  live stream holds `nil` for the second one, and the screen then draws the time and no
+  bar.
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
@@ -72,7 +85,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
           artwork_path: String.t() | nil,
           low_battery?: boolean(),
           battery_percent: 0..100 | nil,
-          safe_to_switch_off?: boolean()
+          safe_to_switch_off?: boolean(),
+          position_ms: non_neg_integer(),
+          duration_ms: pos_integer() | nil
         }
 
   @doc "The size that this screen draws at."
@@ -92,7 +107,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
       artwork_path: nil,
       low_battery?: false,
       battery_percent: nil,
-      safe_to_switch_off?: false
+      safe_to_switch_off?: false,
+      position_ms: 0,
+      duration_ms: nil
     }
   end
 
@@ -200,11 +217,11 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
     column(
       [
         width(fill()),
-        padding_xy(14, 12),
+        padding_xy(@scrim_padding, 12),
         spacing(3),
         Background.color(band(view))
       ],
-      [title(view), subtitle(view)]
+      [title(view), subtitle(view), timeline(view)]
     )
   end
 
@@ -234,5 +251,66 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
     paragraph([width(fill()), Font.size(14), Font.color(color(:slate, 300))], [
       text(view.subtitle)
     ])
+  end
+
+  # The time and the bar say the same thing in two ways, and a person needs both: the
+  # bar says how much of the track is left at a glance, and the numbers say how much
+  # that is. They sit together under the subtitle, in the band that keeps them readable.
+  #
+  # **A warning takes the place of the track**, so a flat cell and a hand on the switch
+  # both take the time away with the subtitle. A device that plays nothing has no time
+  # to show, and a fault has none that means anything.
+  defp timeline(%{low_battery?: true}), do: none()
+  defp timeline(%{safe_to_switch_off?: true}), do: none()
+  defp timeline(%{state: :stopped}), do: none()
+  defp timeline(%{state: :failed}), do: none()
+
+  defp timeline(view), do: column([width(fill()), spacing(5)], [times(view), bar(view)])
+
+  # A live stream shows the time from the start of it, and it has no end to show.
+  defp times(%{duration_ms: nil} = view), do: el(time_style(), text(Clock.text(view.position_ms)))
+
+  defp times(view) do
+    row([width(fill())], [
+      el(time_style(), text(Clock.text(view.position_ms))),
+      el([width(fill())], none()),
+      el(time_style(), text(Clock.text(view.duration_ms)))
+    ])
+  end
+
+  defp time_style, do: [Font.size(12), Font.color(color(:slate, 300))]
+
+  defp bar(%{duration_ms: nil}), do: none()
+
+  defp bar(view) do
+    el(
+      [
+        width(fill()),
+        height(px(@bar_height)),
+        Border.rounded(2),
+        Background.color(color_rgba(255, 255, 255, 0.28))
+      ],
+      el(
+        [
+          width(px(played_width(view))),
+          height(px(@bar_height)),
+          Border.rounded(2),
+          Background.color(color(:slate, 50))
+        ],
+        none()
+      )
+    )
+  end
+
+  # The bar sits inside the padding of the scrim, so it is that much narrower than the
+  # glass.
+  #
+  # `use Emerge.UI` brings its own `min/2` and `max/2`, which build layout constraints
+  # and not numbers, so this names the `Kernel` ones. A bar of no width draws nothing,
+  # and a track that just began still needs to show that it began.
+  defp played_width(view) do
+    played = Kernel.min(view.position_ms, view.duration_ms)
+
+    Kernel.max(round((@width - 2 * @scrim_padding) * played / view.duration_ms), 2)
   end
 end

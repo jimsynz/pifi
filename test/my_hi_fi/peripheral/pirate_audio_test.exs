@@ -83,21 +83,55 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
       assert state.view.state == :playing
       assert state.view.title == "The Detail"
       assert state.view.subtitle == "RNZ"
+      assert state.view.position_ms == 30_000
+      assert state.view.duration_ms == 1_284_000
       assert frames() == 1
     end
 
-    # This screen draws no bar, so a draw for progress would decode a JPEG and scale it
-    # for a picture that did not change. See `MyHiFi.Peripheral.PirateAudio`.
-    test "progress changes nothing and draws nothing", %{state: state} do
+    # The screen holds a bar and a clock, so each second of a track is a frame. See
+    # `MyHiFi.Peripheral.PirateAudio`.
+    test "progress moves the bar and draws a frame", %{state: state} do
       {:ok, state} = PirateAudio.handle_event(started(), state)
       RecordingScreen.forget()
 
-      {:ok, ^state} =
+      {:ok, state} =
         PirateAudio.handle_event(
           %Player.Progress{position_ms: 31_000, duration_ms: 1_284_000},
           state
         )
 
+      assert state.view.position_ms == 31_000
+      assert state.view.duration_ms == 1_284_000
+      assert frames() == 1
+    end
+
+    # A second event that says the same thing draws nothing, because the view did not
+    # move. A frame each second is what the bar needs, and two are waste.
+    test "progress that repeats draws no second frame", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(started(), state)
+      progress = %Player.Progress{position_ms: 31_000, duration_ms: 1_284_000}
+      {:ok, state} = PirateAudio.handle_event(progress, state)
+      RecordingScreen.forget()
+
+      {:ok, ^state} = PirateAudio.handle_event(progress, state)
+
+      assert frames() == 0
+    end
+
+    # A screen that sleeps writes no byte to the bus, so a track that plays behind a
+    # dark screen costs no frame at all.
+    test "progress in standby draws nothing", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(started(), state)
+      {:ok, state} = PirateAudio.handle_event(%Player.Standby{entered?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} =
+        PirateAudio.handle_event(
+          %Player.Progress{position_ms: 31_000, duration_ms: 1_284_000},
+          state
+        )
+
+      assert state.view.position_ms == 31_000
       assert frames() == 0
     end
 
