@@ -74,7 +74,7 @@ defmodule MyHiFi.Source.Jellyfin do
   # reads MP3 frames as well, and this source gives FLAC and AAC, so a skip would
   # work for one track of a library and not for the next.
   #
-  # A search is absent because the catalogue holds the whole library already, and
+  # A search is absent because the catalogue has the whole library already, and
   # `MyHiFiWeb.SearchLive` needs a source to say so. That comes later.
   @impl MyHiFi.Source
   def capabilities, do: []
@@ -94,22 +94,22 @@ defmodule MyHiFi.Source.Jellyfin do
   end
 
   @doc """
-  An album holds its tracks in the order that the record holds them.
+  An album reads its tracks in the order that the record plays them.
 
   **The number decides, and not the date.** `PremiereDate` of a track is the date of
   the album, so every track of one carries the same value, and a list that sorted on it
   fell through to the alphabet: a person opening *The Bones of What You Believe* read
   "By The Throat" first and "Broken Bones" third from last.
 
-  **The order is one column and not two.** `place` of the item holds the disc and the
+  **The order is one column and not two.** `place` of the item carries the disc and the
   number as one number, because `Cinder.QueryBuilder` unsets the sort of a query when a
   person presses a sort control and applies the one column that they pressed: a sort of
   `[disc: :asc, number: :asc]` became `number` alone, and a set of two discs read 1-01,
   2-01, 1-02, 2-02. A server that names neither number leaves `place` absent, SQLite
   reads that as the smallest value, and the title then decides.
 
-  An artist holds albums, and an album row shows its artist and its release year. An
-  album holds tracks, and a track row shows its artist and its duration.
+  An artist contains albums, and an album row shows its artist and its release year. An
+  album contains tracks, and a track row shows its artist and its duration.
   """
   @impl MyHiFi.Source
   def listing(item) do
@@ -138,12 +138,12 @@ defmodule MyHiFi.Source.Jellyfin do
     |> Ash.Query.sort(sorted_title: :asc)
   end
 
-  # **The date comes from the server and not from this device.** `added_at` holds
+  # **The date comes from the server and not from this device.** `added_at` carries
   # `DateCreated` of Jellyfin, so a person who writes a new card still reads the record
   # that they added last week at the top. `inserted_at` would give every album of the
   # library one date, which is the date of the first read.
   #
-  # An album that holds no date comes last. SQLite reads a null as the smallest value,
+  # An album with no date comes last. SQLite reads a null as the smallest value,
   # so `:desc` puts it after every album that names one, which is where a person who
   # asked for the newest expects it.
   #
@@ -181,7 +181,7 @@ defmodule MyHiFi.Source.Jellyfin do
 
   def resolve(item, _link), do: {:error, {:not_a_track, item.id}}
 
-  # A device that holds no link reaches nothing, so `MyHiFi.AutoSync` writes no job
+  # A device with no link reaches nothing, so `MyHiFi.AutoSync` writes no job
   # that can only fail.
   @impl MyHiFi.Source
   def ready?, do: Server.configured?()
@@ -291,10 +291,10 @@ defmodule MyHiFi.Source.Jellyfin do
   def run_settings_action("remove_link") do
     Server.forget()
 
-    {:ok, "The device holds no link. Your music stays in the list until the next read."}
+    {:ok, "This device is not linked now. Your music stays in the list until the next read."}
   end
 
-  def run_settings_action(_name), do: {:error, "Jellyfin holds no such control."}
+  def run_settings_action(_name), do: {:error, "Jellyfin has no such control."}
 
   defp link do
     %{
@@ -360,7 +360,7 @@ defmodule MyHiFi.Source.Jellyfin do
     end
   end
 
-  # A code lives for a few minutes, and a server that no longer holds the secret has
+  # A code lives for a few minutes, and a server that no longer keeps the secret has
   # forgotten this one. A person then starts again, and no stale code stays on the
   # page.
   defp forget_code do

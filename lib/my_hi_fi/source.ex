@@ -2,8 +2,8 @@ defmodule MyHiFi.Source do
   @moduledoc """
   Where the music comes from.
 
-  A source shows a tree. A container holds more entries, and a track plays. The
-  player and each user interface walk that tree, so neither one holds knowledge of
+  A source shows a tree. A container contains more entries, and a track plays. The
+  player and each user interface move through that tree, so neither one needs knowledge of
   any particular service.
 
   `MyHiFi.Source.InternetRadio`, `MyHiFi.Source.Podcasts` and
@@ -24,7 +24,7 @@ defmodule MyHiFi.Source do
     sort: [published_at: :asc, sorted_title: :asc]
   }
 
-  # The list under a facet, which no container holds. A facet of this firmware names a
+  # The list under a facet, which no container is above. A facet of this firmware names a
   # country, a tag or a category, and the rows of one are the popular ones first: the
   # sync of Radio Browser writes the click count of a station into `rank`.
   @default_under_facet %{
@@ -34,7 +34,7 @@ defmodule MyHiFi.Source do
   }
 
   @typedoc """
-  What a source holds, beyond the tree that every source holds.
+  What a source offers, beyond the tree that every source shows.
 
   See `c:capabilities/0`.
   """
@@ -44,12 +44,12 @@ defmodule MyHiFi.Source do
   One value of a source that a person can change.
 
   `key` names the field to `put_settings/1`, and it is also the name of the control
-  on a page. `type` decides the control: `:text` shows what it holds, `:password`
+  on a page. `type` decides the control: `:text` shows the value, `:password`
   hides it, and `:number` takes a whole number. Each one is a type that
   `MyHiFiWeb.CoreComponents.input/1` draws, and the settings page passes it through
   with no rule of its own.
 
-  `value` is what the source holds now, and it is nil for a field with
+  `value` is what the source reports now, and it is nil for a field with
   `write_only?` set. A page then shows an empty control, and it never sends the
   value of that field to a browser.
 
@@ -93,15 +93,15 @@ defmodule MyHiFi.Source do
   @type ref :: term()
 
   @typedoc """
-  An entry that holds more entries.
+  An entry that contains more entries.
 
   `favourite?` works in the same way as it does on a track, and it is `nil` for a
   container that a person cannot mark.
 
-  Both kinds carry the mark, because each service holds it on a different kind of
+  Both kinds carry the mark, because each service puts it on a different kind of
   thing. Internet radio marks a station, and a station is a track. Podcasts mark a
   show, and a show is a container. A later source marks an album or a playlist. A
-  user interface therefore draws one control for both kinds, and it holds no
+  user interface therefore draws one control for both kinds, and it needs no
   knowledge of which source it shows.
   """
   @type container :: %{
@@ -116,7 +116,7 @@ defmodule MyHiFi.Source do
 
   `duration_ms` is `nil` for a live stream, because a live stream has no length.
 
-  `favourite?` is `nil` for a source that holds no favourites. A user interface
+  `favourite?` is `nil` for a source with no favourites. A user interface
   shows the control only for `true` and for `false`, so it needs no knowledge of
   which source it shows.
   """
@@ -155,7 +155,7 @@ defmodule MyHiFi.Source do
   - `transport` is how the bytes arrive. `:http` is one continuous answer, `:hls` is
     a playlist of segments that the player reads again and again, and `:download`
     is a file that `MyHiFi.Player.Download` writes while the player reads it.
-  - `container` is what holds the audio. `:mpeg_ts` needs a demultiplexer, `:ogg`
+  - `container` is what carries the audio. `:mpeg_ts` needs a demultiplexer, `:ogg`
     names a container that the decoder reads itself, and `:none` gives the audio as
     it is.
   - `format` is the codec.
@@ -174,10 +174,10 @@ defmodule MyHiFi.Source do
   request.
 
   `key` and `position_bytes` belong to `:download` alone. `key` is what the cache
-  holds the file under, and `position_bytes` is the byte to begin at. A transport
+  keeps the file under, and `position_bytes` is the byte to begin at. A transport
   that reads no file leaves both absent.
 
-  **A `:download` source needs no bitrate.** It gives `position_ms` for the count
+  **A `:download` source needs no bitrate.** It returns `position_ms` for the count
   that a person reads, and `position_bytes` for the place in the file, and the two
   come from one stop. See `MyHiFi.Player.FileSource`.
   """
@@ -201,7 +201,7 @@ defmodule MyHiFi.Source do
 
   A source names its own icon, and each user interface draws that name in its own
   way. The web interface draws a heroicon, and the device screen draws a shape of
-  its own. Neither one holds a list of the sources.
+  its own. Neither one keeps a list of the sources.
 
   The interfaces draw `:radio`, `:library`, `:podcast`, `:cloud` and `:jellyfin`
   today. Any other name gives the default icon, so a new source works before an
@@ -216,9 +216,9 @@ defmodule MyHiFi.Source do
   @callback icon() :: atom()
 
   @doc """
-  What this source holds, so a user interface knows which controls to draw.
+  What this source offers, so a user interface knows which controls to draw.
 
-  A radio station holds no place, so nothing moves through it and a skip control must
+  A radio station has no place, so nothing moves through it and a skip control must
   be dead. A user interface cannot work that out, and it must not hold a list of the
   sources, so the source says it.
 
@@ -226,14 +226,14 @@ defmodule MyHiFi.Source do
   - `:search` names `search/1`.
   - `:skip` names a track that a person can move inside.
 
-  Next and previous are not in this list. `MyHiFi.Playback.Queue` holds the order, so
-  every track that plays holds them and no source takes part.
+  Next and previous are not in this list. `MyHiFi.Playback.Queue` decides the order, so
+  every track that plays has them and no source takes part.
 
   `MyHiFi.Player` reads this list as well. A skip of a source with no `:skip` gives
   `{:error, :cannot_skip}` and it reaches no pipeline, so the list is one fact and not
   a copy in each interface.
 
-  This names what the source holds, and not what one track holds. A source of `:skip`
+  This names what the source offers, and not what one track offers. A source of `:skip`
   can still hold a track that a person cannot move inside, and the player refuses that
   skip when it sees the track.
 
@@ -246,7 +246,7 @@ defmodule MyHiFi.Source do
   A read that a user interface runs, pages through and draws.
 
   `query` is over `MyHiFi.Playback.Item` or over `MyHiFi.Playback.Facet`, and `kind`
-  says which. A page gives it to `Cinder`, which holds the loading state, the sort, the
+  says which. A page gives it to `Cinder`, which owns the loading state, the sort, the
   filters and the page controls.
 
   Below the roots the tree needs no source at all. A row of `Facet` opens into the
@@ -260,7 +260,7 @@ defmodule MyHiFi.Source do
   the rank, because the page draws a column of the title alone, and a list of the most
   popular stations comes back in the order of the alphabet.
 
-  `order` is how a listing says that it holds a second order. It is a name and a field,
+  `order` is how a listing says that it has a second order. It is a name and a field,
   such as `{"Popularity", "rank"}`, and the page draws a sort control for it. Cinder
   then keeps that sort, and a person can change it. A listing that sorts by the title
   and nothing else leaves `order` out.
@@ -268,7 +268,7 @@ defmodule MyHiFi.Source do
   ## `title_label`, and the word for a row
 
   The title of an item is one field, and a person reads a different word for it in each
-  list. A list of albums holds titles, and a list of artists holds names. `title_label`
+  list. A list of albums shows titles, and a list of artists shows names. `title_label`
   is the word that the sort control and the filter of that column show, and a listing
   that leaves it out gets "Title".
   """
@@ -285,13 +285,13 @@ defmodule MyHiFi.Source do
   One thing that a row of a list says about an item, beside its title.
 
   **A source names the facts, and each surface draws them.** A page of the web
-  interface holds a row across a browser and `MyHiFi.DeviceUi` holds one on a screen of
+  interface draws a row across a browser and `MyHiFi.DeviceUi` draws one on a screen of
   240 pixels, so "44m left" and "44 min" are one fact drawn two ways. A source that
   gave text for a row would also be in the render path, because the time left of an
   episode moves while it plays.
 
   Each name is a field of `MyHiFi.Playback.Item`, and `{:text, "…"}` is the way to say
-  something that no field holds. A surface that meets a fact it does not know draws
+  something that no field carries. A surface that meets a fact it does not know draws
   nothing for it, so a new fact reaches a screen when that screen learns it and never
   as an error.
   """
@@ -329,25 +329,25 @@ defmodule MyHiFi.Source do
   @doc """
   How the items inside one container read, and in what order.
 
-  An album holds its tracks by number, and a show holds its episodes by date with the
+  An album reads its tracks by number, and a show reads its episodes by date with the
   newest first. **Neither of those is a rule that a page can hold**, because a page
-  holds no knowledge of any source: it sorted every container by date and labelled the
+  needs no knowledge of any source: it sorted every container by date and labelled the
   control "Date", so every album of a Jellyfin library listed alphabetically.
 
-  **`nil` is the list under a facet**, which no container holds: a country of Radio
+  **`nil` is the list under a facet**, which no container is above: a country of Radio
   Browser, or a category of the Podcast Index. A source that implements none gets the
   default of `inside/2` for either case.
   """
   @callback listing(MyHiFi.Playback.Item.t() | nil) :: inside()
 
   @doc """
-  How many items of a marked container this device holds on the card, newest first.
+  How many items of a marked container this device keeps on the card, newest first.
 
-  **A show holds hundreds of episodes and a person wants the newest few.** A source
+  **A show has hundreds of episodes and a person wants the newest few.** A source
   whose items keep their place therefore names a number, and `MyHiFi.Source.Podcasts`
   reads it from a setting that a person changes.
 
-  `:all` is every item that the container holds, and an album of songs is that: a
+  `:all` is every item that the container contains, and an album of songs is that: a
   person who marks one wants the record and not three tracks of it.
 
   A source that implements none gets `:all`. See `MyHiFi.Playback.FavouriteAudio`.
@@ -360,7 +360,7 @@ defmodule MyHiFi.Source do
   A source that must reach a service when that happens implements this.
   `MyHiFi.Source.Podcasts` reads the feed of a show whose local copy is old.
 
-  It runs for its effect, and a page draws what the catalogue holds whether it answers
+  It runs for its effect, and a page draws what the catalogue has whether it answers
   or not.
   """
   @callback opened(MyHiFi.Playback.Item.t()) :: :ok
@@ -376,19 +376,19 @@ defmodule MyHiFi.Source do
   read publishes `MyHiFi.Event.Source.Changed`, and a page that shows that container
   reads it again.
 
-  `capabilities/0` names `:refresh` for a source that holds this.
+  `capabilities/0` names `:refresh` for a source that offers this.
   """
   @callback refresh(MyHiFi.Playback.Item.t()) :: :ok | {:error, term()}
 
   @doc """
-  What a person calls the items of this source, for each kind that it holds.
+  What a person calls the items of this source, for each kind that it has.
 
-  `:container` names an item that holds other items, and `:track` names one that plays.
-  A source that holds no container leaves that kind out: internet radio gives
+  `:container` names an item that contains other items, and `:track` names one that
+  plays. A source with no container leaves that kind out: internet radio gives
   `[track: "Stations"]`, and podcasts gives `[container: "Shows", track: "Episodes"]`.
 
   A user interface reads the name of a kind, and it draws no control at all for a source
-  that holds one kind. There is nothing to choose between.
+  with one kind. There is nothing to choose between.
 
   The words are plural, because each one names a list and not one row.
   """
@@ -397,16 +397,16 @@ defmodule MyHiFi.Source do
   @doc """
   The items that a search reads.
 
-  It gives a query in the way that `c:roots/0` gives one, and `MyHiFiWeb.SearchLive`
+  It returns a query in the way that `c:roots/0` returns one, and `MyHiFiWeb.SearchLive`
   matches the text of the person against it. The query therefore names the items of the
-  source, and it holds no text of its own.
+  source, and it keeps no text of its own.
 
-  **A source may reach a service before it answers.** The catalogue holds what a device
-  has read, and a service holds more than that. `MyHiFi.Source.Podcasts` asks the
+  **A source may reach a service before it answers.** The catalogue has what a device
+  has read, and a service has more than that. `MyHiFi.Source.Podcasts` asks the
   Podcast Index, and it writes what the index names, so the query then finds it. This is
   why the callback gets the text.
 
-  `capabilities/0` names `:search` for a source that holds this.
+  `capabilities/0` names `:search` for a source that offers this.
   """
   @callback search(String.t()) :: Ash.Query.t()
 
@@ -414,7 +414,7 @@ defmodule MyHiFi.Source do
   Turn an item into something that the player can play.
 
   This is the one thing that only a source can do. A station gives the address of a
-  stream, and an episode gives the file that the cache holds, so the shape of the
+  stream, and an episode gives the file that the cache keeps, so the shape of the
   answer is the same and the way to it is not. See `t:playable/0`.
   """
   @callback resolve(MyHiFi.Playback.Item.t()) :: {:ok, playable()} | {:error, term()}
@@ -422,7 +422,7 @@ defmodule MyHiFi.Source do
   @doc """
   The values that a person can change for this source.
 
-  A settings page draws one control for each field, and it holds no knowledge of
+  A settings page draws one control for each field, and it needs no knowledge of
   which source it shows. The countries of the station list and the key of the
   Podcast Index are both fields of this kind.
 
@@ -437,12 +437,12 @@ defmodule MyHiFi.Source do
   @doc """
   Write the values that a person typed.
 
-  The map holds the `key` of each field of `settings/0`, and the text of it. The
+  The map carries the `key` of each field of `settings/0`, and the text of it. The
   source checks the values, writes what it accepts, and gives one sentence for a
   person to read.
 
   The check belongs here and not in a page. "Name at least one country" and "the
-  index refused that key" are both facts of one service, and a settings page holds
+  index refused that key" are both facts of one service, and a settings page needs
   no knowledge of any service.
   """
   @callback put_settings(%{String.t() => String.t()}) ::
@@ -466,10 +466,10 @@ defmodule MyHiFi.Source do
   @callback run_settings_action(String.t()) :: {:ok, String.t()} | {:error, String.t()}
 
   @doc """
-  Whether this source holds what it needs to reach its service.
+  Whether this source has what it needs to reach its service.
 
   **This is not `enabled?/1`.** A person answers that one, and this one is a fact about
-  the source: podcasts need a key of the Podcast Index, and a device that holds none can
+  the source: podcasts need a key of the Podcast Index, and a device with none can
   reach nothing. `MyHiFi.AutoSync` asks both before it runs the work of a source, so a
   device with no key asks the index nothing and writes no job that can only fail.
 
@@ -491,7 +491,7 @@ defmodule MyHiFi.Source do
                       run_settings_action: 1
 
   @doc """
-  Every source that this firmware holds.
+  Every source that this firmware knows.
 
   A new source joins this list, and the web interface and the device interface then
   show it without a change. A test sets `:sources` to give a source of its own.
@@ -544,9 +544,9 @@ defmodule MyHiFi.Source do
   @doc """
   The source that a person chose last.
 
-  It gives the first source in use when the choice names a source that this firmware
-  no longer holds, or one that a person took out of use. A selector lands on the first
-  input in the same way when the socket behind it is empty. It gives `nil` when no
+  It returns the first source in use when the choice names a source that this firmware
+  no longer knows, or one that a person took out of use. A selector lands on the first
+  input in the same way when the socket behind it is empty. It returns `nil` when no
   source is in use at all.
   """
   @spec chosen() :: module() | nil
@@ -561,7 +561,7 @@ defmodule MyHiFi.Source do
   end
 
   @doc """
-  The settings key that holds the source that a person chose last.
+  The settings key of the source that a person chose last.
 
       iex> MyHiFi.Source.chosen_key()
       "source.chosen"
@@ -586,7 +586,7 @@ defmodule MyHiFi.Source do
   @doc """
   Every source that a person has left in use.
 
-  A user interface shows these, and `all/0` holds the rest as well. The two lists
+  A user interface shows these, and `all/0` names the rest as well. The two lists
   are different because a name in the settings must still name a source that a
   person has taken out of use, and because a settings page must be able to put one
   back in use.
@@ -609,7 +609,7 @@ defmodule MyHiFi.Source do
   end
 
   @doc """
-  Whether a source holds what it needs to reach its service.
+  Whether a source has what it needs to reach its service.
 
   A source that names no `c:ready?/0` needs nothing, so this gives `true` for it. See
   that callback for the difference between this and `enabled?/1`.
@@ -645,7 +645,7 @@ defmodule MyHiFi.Source do
   @doc """
   Write the values that a person typed for one source.
 
-  See `c:put_settings/1`. A source that holds no settings gives an error, so a page
+  See `c:put_settings/1`. A source with no settings returns an error, so a page
   that draws no control also writes none.
   """
   @spec put_settings(module(), %{String.t() => String.t()}) ::
@@ -654,7 +654,7 @@ defmodule MyHiFi.Source do
     if implements?(module, :put_settings, 1) do
       module.put_settings(values)
     else
-      {:error, "#{module.title()} holds nothing to change."}
+      {:error, "#{module.title()} has nothing to change."}
     end
   end
 
@@ -683,14 +683,14 @@ defmodule MyHiFi.Source do
     if implements?(module, :run_settings_action, 1) do
       module.run_settings_action(name)
     else
-      {:error, "#{module.title()} holds no such control."}
+      {:error, "#{module.title()} has no such control."}
     end
   end
 
   @doc """
-  How many items of a marked container of this source the card holds.
+  How many items of a marked container of this source the card keeps.
 
-  See `c:hold_limit/0`. A source that names none holds every one.
+  See `c:hold_limit/0`. A source that names none keeps every one.
 
       iex> MyHiFi.Source.hold_limit(MyHiFi.Source.InternetRadio)
       :all
@@ -749,14 +749,14 @@ defmodule MyHiFi.Source do
   @doc """
   Ask for one scheduled action of a source, and say whether it went into the queue.
 
-  It gives `:queued` for a job that this call put in, and `:running` for one that was
+  It returns `:queued` for a job that this call put in, and `:running` for one that was
   there already. **A caller must read the answer and tell the person which it was.**
   `AshOban.schedule/2` gives the job that it finds when a job is already there, and it
   raises nothing, so a control that ignores the answer says that it read a library
   whether it did or not.
 
   A scheduled action is unique, and `executing` counts. A device that stopped in the
-  middle of a read therefore holds a job that no process runs, and every later ask
+  middle of a read therefore leaves a job that no process runs, and every later ask
   finds that one. `Oban.Lifeline` moves such a job back, and until it does this is what
   keeps a settings page truthful. See `config/config.exs`.
   """
@@ -768,7 +768,7 @@ defmodule MyHiFi.Source do
   @doc """
   The name of a source in an address.
 
-  The web interface holds one address for each source, and a person can keep that
+  The web interface gives one address to each source, and a person can keep that
   address. The name comes from the module, so a new source needs no registration.
 
       iex> MyHiFi.Source.slug(MyHiFi.Source.InternetRadio)
@@ -790,7 +790,7 @@ defmodule MyHiFi.Source do
     end
   end
 
-  # `settings/0` and the three beside it are optional, so a source that holds
+  # `settings/0` and the three beside it are optional, so a source that needs
   # nothing to change writes nothing. `function_exported?/3` alone answers false
   # for a module that no call has loaded yet.
   defp implements?(module, function, arity) do

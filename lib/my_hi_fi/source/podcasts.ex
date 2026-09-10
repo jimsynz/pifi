@@ -15,20 +15,20 @@ defmodule MyHiFi.Source.Podcasts do
 
   ## The two services
 
-  The index finds a show, and it gives no episode. The feed of the publisher gives
+  The index finds a show, and it returns no episode. The feed of the publisher gives
   the episodes. `MyHiFi.Podcast.Feed` reads it, and a private feed therefore works
   even though the index does not hold it.
 
   A branch that needs the index gives `{:error, :no_api_key}` for a device that
-  holds no key. `Subscriptions` needs no key, so a person who subscribed keeps
+  has no key. `Subscriptions` needs no key, so a person who subscribed keeps
   every show without one.
 
   ## What a search writes
 
   A search and the trending list write a `MyHiFi.Podcast.Show` for each answer, so
   a `ref` is `{:show, id}` in every branch, in the same way that internet radio
-  names `{:station, id}`. A row also holds the title and the artwork of a show that
-  a person looked at once, and it holds `index_id` for a later call to the index.
+  names `{:station, id}`. A row also carries the title and the artwork of a show that
+  a person looked at once, and it carries `index_id` for a later call to the index.
 
   The cost is a row for each answer of each search. A row is small, and a device
   serves one household. A job removes an old show that no person subscribed to.
@@ -55,9 +55,9 @@ defmodule MyHiFi.Source.Podcasts do
   @search_limit 50
   @source "podcasts"
 
-  # **How many of the newest episodes of a followed show the card holds.** A person
+  # **How many of the newest episodes of a followed show the card keeps.** A person
   # sets it. Three is what a person listens to in a week of commuting, and an episode of
-  # 50 MB puts twenty shows at 150 episodes and about 7 GB, which a 30 GB card holds.
+  # 50 MB puts twenty shows at 150 episodes and about 7 GB, which a 30 GB card takes.
   @hold_setting "podcasts.hold_episodes"
   @hold_default 3
 
@@ -83,7 +83,7 @@ defmodule MyHiFi.Source.Podcasts do
   @impl MyHiFi.Source
   # The index gives the categories of each show that it names, so a device learns them
   # from the reads that it already makes and asks for no list of its own. A person sees
-  # the categories of the shows that the device holds.
+  # the categories of the shows that the device has read.
   def roots do
     [
       {"Subscriptions", %{query: subscriptions_query(), kind: :item}},
@@ -101,11 +101,11 @@ defmodule MyHiFi.Source.Podcasts do
   end
 
   @doc """
-  A show holds its episodes with the newest one first, and a category holds the
+  A show reads its episodes with the newest one first, and a category reads the
   trending shows.
 
   **A person opening a show wants the episode of this week**, and a feed of a daily
-  programme holds 200 of them. The control that the page draws for this order flips it,
+  programme has 200 of them. The control that the page draws for this order flips it,
   so a person who starts a series from the start presses one thing.
 
   An episode says its number when the publisher gives one, its date, and how much of it
@@ -150,12 +150,12 @@ defmodule MyHiFi.Source.Podcasts do
   end
 
   @impl MyHiFi.Source
-  # The index holds millions of shows, and this device holds the ones that it has read:
+  # The index has millions of shows, and this device keeps the ones that it has read:
   # the trending list, the subscriptions, and what an earlier search named. A person
   # looks for a show by its name, so this asks the index and writes what it names. The
   # query then finds it.
   #
-  # It gives the shows and the episodes. A person looks for a show to subscribe to it,
+  # It returns the shows and the episodes. A person looks for a show to subscribe to it,
   # and for an episode of a show that they hold, and `MyHiFiWeb.SearchLive` draws a
   # control to choose between the two. See `c:MyHiFi.Source.kinds/0`.
   def search(text) do
@@ -167,7 +167,7 @@ defmodule MyHiFi.Source.Podcasts do
   end
 
   # A device with no key, and an index that does not answer, both leave the catalogue as
-  # it is. A person still gets what the device holds.
+  # it is. A person still gets what the device has read.
   defp read_index(text) do
     case String.trim(text) do
       "" ->
@@ -213,7 +213,7 @@ defmodule MyHiFi.Source.Podcasts do
         description:
           "A show that you follow keeps this many of its newest episodes on the card, " <>
             "so they play with no network. An episode that you finish gives its room back. " <>
-            "0 holds none.",
+            "0 keeps none.",
         link: nil,
         type: :number,
         value: to_string(hold_limit()),
@@ -222,7 +222,7 @@ defmodule MyHiFi.Source.Podcasts do
     ]
   end
 
-  # A person who changes the key writes both values again, because the page holds
+  # A person who changes the key writes both values again, because the page shows
   # neither one. A key with no secret signs nothing, so a half write is no use.
   @impl MyHiFi.Source
   # **Each value stands by itself.** The key and the secret are write only, so the form
@@ -242,12 +242,12 @@ defmodule MyHiFi.Source.Podcasts do
 
   defp answer(false), do: {:ok, held_confirmation(hold_limit())}
 
-  defp held_confirmation(0), do: "A show that you follow holds no episode on the card."
+  defp held_confirmation(0), do: "A show that you follow keeps no episode on the card."
 
-  defp held_confirmation(1), do: "A show that you follow holds its newest episode."
+  defp held_confirmation(1), do: "A show that you follow keeps its newest episode."
 
   defp held_confirmation(count),
-    do: "A show that you follow holds its #{count} newest episodes."
+    do: "A show that you follow keeps its #{count} newest episodes."
 
   defp put_index(%{"key" => key, "secret" => secret}) do
     case {present(key), present(secret)} do
@@ -300,7 +300,7 @@ defmodule MyHiFi.Source.Podcasts do
   end
 
   @doc """
-  How many of the newest episodes of a followed show the card holds.
+  How many of the newest episodes of a followed show the card keeps.
 
   A person sets it, and it is #{@hold_default} until they do. See
   `c:MyHiFi.Source.hold_limit/0`, and `MyHiFi.Playback.FavouriteAudio` for what reads
@@ -374,7 +374,7 @@ defmodule MyHiFi.Source.Podcasts do
       end
     end
 
-    {:ok, "The device holds no key. Your subscriptions stay."}
+    {:ok, "This device has no key now. Your subscriptions stay."}
   end
 
   def run_settings_action(_name), do: {:error, "Podcasts hold no such control."}
@@ -382,7 +382,7 @@ defmodule MyHiFi.Source.Podcasts do
   # The feed of the publisher decides what the episodes are, so a device reads it when
   # the local copy is old. See the `stale?` calculation of `MyHiFi.Podcast.Show`.
   #
-  # A show that no read reached holds no episode, and a person who opened one would see
+  # A show that no read reached has no episode, and a person who opened one would see
   # an empty list, so that read happens now. Every other read takes seconds while a
   # person waits for a list, so it goes to the job instead. The job publishes
   # `MyHiFi.Event.Source.Changed`, and a page that shows the show reads it again.
@@ -394,7 +394,7 @@ defmodule MyHiFi.Source.Podcasts do
     end
   end
 
-  # A show holds the address of the feed, and the item holds what a person sees. The
+  # A show carries the address of the feed, and the item carries what a person sees. The
   # two meet at `item_id`.
   defp show_of(item) do
     Show
@@ -418,7 +418,7 @@ defmodule MyHiFi.Source.Podcasts do
   end
 
   # The index gives a show, and a row gives it a `ref` that survives a restart.
-  # A row of `MyHiFi.Podcast.Show` holds the feed and the index, and an item holds what
+  # A row of `MyHiFi.Podcast.Show` carries the feed and the index, and an item carries what
   # a person sees. A search writes both, and it links them.
   defp store(found) do
     Enum.map(found, fn attributes ->
@@ -431,10 +431,10 @@ defmodule MyHiFi.Source.Podcasts do
   end
 
   # The episodes of `browse/2`, and in the same order, so this list is the list that a
-  # person sees. It holds the newest episode first, and it has two ends.
-  # `MyHiFi.Podcast.Fill` reads the type of the enclosure, so this holds no mime type to
+  # person sees. It reads the newest episode first, and it has two ends.
+  # `MyHiFi.Podcast.Fill` reads the type of the enclosure, so this needs no mime type to
   # name. The title is what tells a person which episode cannot play.
-  # An episode that no read of the feed has filled holds the place of a person and
+  # An episode that no read of the feed has filled carries the place of a person and
   # nothing to play. `MyHiFi.Podcast.CarryPlaces` writes one, and the next read of the
   # feed fills it.
   defp playable(%{url: url, format: format} = item) when is_nil(url) or is_nil(format) do
@@ -453,7 +453,7 @@ defmodule MyHiFi.Source.Podcasts do
        format: item.format,
        live?: false,
        position_ms: item.position_ms,
-       # `MyHiFi.Player.Download` holds the file under this name. It is the identifier
+       # `MyHiFi.Player.Download` keeps the file under this name. It is the identifier
        # of the item now, so a file that an older release wrote is unreachable and the
        # eviction of the cache reclaims it.
        key: item.id,
@@ -463,7 +463,7 @@ defmodule MyHiFi.Source.Podcasts do
 
   # The subtitle and the picture are columns of the item that `MyHiFi.Podcast.Fill`
   # wrote, so a page draws a list with no join for each row. `artwork` of the item is
-  # its own picture, or the cover of the show that holds it.
+  # its own picture, or the cover of the show above it.
   # A person learns now whether the key works, and not when a search fails. The
   # category list is the smallest read of the index.
   defp confirmation do

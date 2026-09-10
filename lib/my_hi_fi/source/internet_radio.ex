@@ -12,7 +12,7 @@ defmodule MyHiFi.Source.InternetRadio do
 
   A station is a track, and it has no length, because a radio stream is live.
 
-  `MyHiFi.Radio.Fill` writes the stations into `MyHiFi.Playback`, so this module holds
+  `MyHiFi.Radio.Fill` writes the stations into `MyHiFi.Playback`, so this module keeps
   no table of its own and it reaches no network to browse. A search works when the
   internet does not.
 
@@ -21,7 +21,7 @@ defmodule MyHiFi.Source.InternetRadio do
 
   ## The one place that needs the network
 
-  `resolve/1` reads it. An HLS address gives a playlist, and the playlist holds the
+  `resolve/1` reads it. An HLS address gives a playlist, and the playlist names the
   container and the codec. Ogg is a container, and the service reports the codec `OGG`
   for each codec inside it, so the first page of the stream names the true one.
   `transport` and `format` of an item hold what the service claims, and this function
@@ -52,7 +52,7 @@ defmodule MyHiFi.Source.InternetRadio do
   @impl MyHiFi.Source
   def capabilities, do: [:search]
 
-  # A station plays, and no station holds another one.
+  # A station plays, and no station contains another one.
   @impl MyHiFi.Source
   def kinds, do: [track: "Stations"]
 
@@ -90,14 +90,14 @@ defmodule MyHiFi.Source.InternetRadio do
 
   def resolve(item), do: {:error, {:not_a_track, item.id}}
 
-  # A station that no read of the service has filled holds the mark of a person and
+  # A station that no read of the service has filled carries the mark of a person and
   # nothing to play. `MyHiFi.Radio.CarryFavourites` writes one, and the next sync
   # fills it. This is first, because an address of `nil` reaches the network below.
   defp playable(%{url: url, format: format} = item) when is_nil(url) or is_nil(format) do
     {:error, {:not_read_yet, item.title}}
   end
 
-  # An HLS address gives a playlist, and the playlist holds the container and the
+  # An HLS address gives a playlist, and the playlist names the container and the
   # codec. `MyHiFi.Player.Hls` reads it. This is the one function of this module
   # that needs the network.
   defp playable(%{transport: :hls} = item) do
@@ -127,7 +127,7 @@ defmodule MyHiFi.Source.InternetRadio do
       {:ok, inside} ->
         {:ok, http_playable(item, :ogg, inside)}
 
-      # A station that names FLAC and holds no Ogg container sends FLAC as it is.
+      # A station that names FLAC and has no Ogg container sends FLAC as it is.
       {:error, _reason} ->
         {:ok, http_playable(item, :none, item.format)}
     end
@@ -143,7 +143,7 @@ defmodule MyHiFi.Source.InternetRadio do
       container: container,
       format: format,
       live?: true,
-      # A live stream holds no place, so it always begins where it begins.
+      # A live stream has no place, so it always begins where it begins.
       position_ms: 0
     }
   end
@@ -210,11 +210,11 @@ defmodule MyHiFi.Source.InternetRadio do
     end
   end
 
-  def run_settings_action(_name), do: {:error, "Internet radio holds no such control."}
+  def run_settings_action(_name), do: {:error, "Internet radio has no such control."}
 
   defp count, do: Ash.count!(Ash.Query.filter(Item, source == ^@source))
 
-  # The station list is in the order that a person elsewhere chose. `rank` holds the
+  # The station list is in the order that a person elsewhere chose. `rank` carries the
   # click count of the service, and it is a column because no data layer sorts on a
   # facet.
   defp codes(text) do

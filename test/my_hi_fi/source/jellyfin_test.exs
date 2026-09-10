@@ -545,7 +545,7 @@ defmodule MyHiFi.Source.JellyfinTest do
 
       assert {:ok, message} = Jellyfin.run_settings_action("remove_link")
 
-      assert message =~ "holds no link"
+      assert message =~ "is not linked now"
       refute Server.configured?()
       assert {:ok, @address} = Server.address()
     end

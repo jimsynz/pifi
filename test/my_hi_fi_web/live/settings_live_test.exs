@@ -959,7 +959,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       html = view |> element("#source-action-remove_key") |> render_click()
 
-      assert html =~ "holds no key"
+      assert html =~ "has no key now"
       refute Index.configured?()
       refute has_element?(view, "#source-action-remove_key")
     end
