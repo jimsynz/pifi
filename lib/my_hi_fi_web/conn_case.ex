@@ -11,6 +11,7 @@ defmodule MyHiFiWeb.ConnCase do
   use ExUnit.CaseTemplate
 
   alias Ecto.Adapters.SQL.Sandbox
+  alias MyHiFi.Settings.Cache
 
   using do
     quote do
@@ -28,6 +29,10 @@ defmodule MyHiFiWeb.ConnCase do
   setup tags do
     pid = Sandbox.start_owner!(MyHiFi.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
+
+    # A rollback takes a row away, and the memory of the settings cannot see that.
+    # See `MyHiFi.Settings.Cache`.
+    Cache.clear()
 
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end

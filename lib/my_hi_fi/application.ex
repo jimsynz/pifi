@@ -23,6 +23,9 @@ defmodule MyHiFi.Application do
     children =
       [
         MyHiFi.Repo,
+        # Almost every other child reads a setting while it starts, and this holds the
+        # answers. See `MyHiFi.Settings.Cache`.
+        MyHiFi.Settings.Cache,
         MyHiFiWeb.Telemetry,
         {Oban, oban_config()},
         {Phoenix.PubSub, [name: MyHiFi.PubSub]},

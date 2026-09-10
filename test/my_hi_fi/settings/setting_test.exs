@@ -2,6 +2,8 @@ defmodule MyHiFi.Settings.SettingTest do
   use MyHiFi.DataCase, async: false
 
   alias MyHiFi.Settings
+  alias MyHiFi.Settings.Cache
+  alias MyHiFi.Settings.Setting
 
   describe "put and fetch" do
     test "writes a value and reads it again" do
@@ -33,5 +35,59 @@ defmodule MyHiFi.Settings.SettingTest do
 
       assert {:error, _reason} = Settings.fetch("standby")
     end
+  end
+
+  # **The memory of `MyHiFi.Settings.Cache` is what these read.** A row that arrives
+  # behind `MyHiFi.Settings` is the probe: the answer that a caller gets does not
+  # move for it, and it moves as soon as the memory goes. Nothing of this firmware
+  # writes such a row, and these tests say why nothing may.
+  describe "the answers in memory" do
+    test "a key that a row holds is read one time" do
+      Settings.put!("standby", "true")
+      write_behind("standby", "false")
+
+      assert {:ok, %{value: "true"}} = Settings.fetch("standby")
+
+      Cache.clear()
+
+      assert {:ok, %{value: "false"}} = Settings.fetch("standby")
+    end
+
+    # A source that a person never chose is the usual case, and a page asks for one on
+    # each navigation.
+    test "a key that no row holds is read one time as well" do
+      assert {:error, _reason} = Settings.fetch("standby")
+
+      write_behind("standby", "true")
+
+      assert {:error, _reason} = Settings.fetch("standby")
+
+      Cache.clear()
+
+      assert {:ok, %{value: "true"}} = Settings.fetch("standby")
+    end
+
+    test "a write moves what a read gives" do
+      write_behind("standby", "true")
+      assert {:ok, %{value: "true"}} = Settings.fetch("standby")
+
+      Settings.put!("standby", "false")
+
+      assert {:ok, %{value: "false"}} = Settings.fetch("standby")
+    end
+
+    test "a delete moves what a read gives" do
+      setting = Settings.put!("standby", "true")
+
+      Settings.delete!(setting)
+
+      assert {:error, _reason} = Settings.fetch("standby")
+    end
+  end
+
+  defp write_behind(key, value) do
+    Setting
+    |> Ash.Changeset.for_create(:put, %{key: key, value: value})
+    |> Ash.create!()
   end
 end
