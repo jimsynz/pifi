@@ -20,6 +20,12 @@ defmodule MyHiFiWeb.PlayerLive do
   no bar. See `MyHiFi.Source` for the reason: `duration_ms` is `nil` for a live
   stream.
 
+  A track that holds a length draws a timeline in the large view, and a person moves
+  the thumb of it to move inside the track. **The player takes a skip and not a
+  place**, so the page sends the difference between the two. A track that a person
+  cannot move inside draws the timeline dead, because the bar still says how far
+  through the track they are.
+
   A touch on the artwork opens the large view, which fills the screen. The state
   of that view belongs to this process, because a browser tab is its own session.
 
@@ -60,6 +66,7 @@ defmodule MyHiFiWeb.PlayerLive do
       |> assign(:live?, state.live?)
       |> assign(:capabilities, capabilities(state.source))
       |> assign(:expanded?, false)
+      |> assign(:scrubbing?, false)
       |> assign(:reason, nil)
       |> assign(:battery, Battery.last_reading())
       |> assign(:volume, Playback.volume!())
@@ -110,6 +117,17 @@ defmodule MyHiFiWeb.PlayerLive do
   @impl Phoenix.LiveView
   def handle_info(%Events.Paused{position_ms: position}, socket) do
     {:noreply, assign(socket, status: :paused, position_ms: position)}
+  end
+
+  # **A person who holds the thumb of the timeline keeps it.** The player publishes
+  # this once a second, and a page that moved the thumb for it would take the control
+  # out of their hand. The length still arrives, because it does not move the thumb.
+  @impl Phoenix.LiveView
+  def handle_info(
+        %Events.Progress{duration_ms: duration},
+        %{assigns: %{scrubbing?: true}} = socket
+      ) do
+    {:noreply, assign(socket, duration_ms: duration)}
   end
 
   @impl Phoenix.LiveView
@@ -232,6 +250,31 @@ defmodule MyHiFiWeb.PlayerLive do
     _result = Playback.skip(String.to_integer(ms))
     {:noreply, socket}
   end
+
+  # **The player takes a skip and not a place**, so this sends the difference between
+  # where the track is and where the person put the thumb. `MyHiFi.Player.Skip`
+  # measures what it really moved and the player reports that, so the next event of
+  # the progress corrects the number that the page holds.
+  @impl Phoenix.LiveView
+  def handle_event("scrub", %{"position_ms" => value}, socket) do
+    case Integer.parse(value) do
+      {position, ""} ->
+        _result = Playback.skip(position - socket.assigns.position_ms)
+
+        {:noreply, assign(socket, position_ms: position, scrubbing?: false)}
+
+      _other ->
+        {:noreply, assign(socket, :scrubbing?, false)}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("scrub_start", _params, socket),
+    do: {:noreply, assign(socket, :scrubbing?, true)}
+
+  @impl Phoenix.LiveView
+  def handle_event("scrub_end", _params, socket),
+    do: {:noreply, assign(socket, :scrubbing?, false)}
 
   @impl Phoenix.LiveView
   def render(assigns) do
@@ -367,6 +410,13 @@ defmodule MyHiFiWeb.PlayerLive do
           <p :if={subtitle(@track)} class="mt-1 text-sm text-ink-faint">{subtitle(@track)}</p>
           <p class="numerals mt-4 text-lg text-ink-dim">{elapsed(assigns)}</p>
 
+          <.timeline
+            :if={is_integer(@duration_ms)}
+            position_ms={@position_ms}
+            duration_ms={@duration_ms}
+            disabled={:skip not in @capabilities or @status not in [:playing, :paused]}
+          />
+
           <p :if={@status == :failed} id="reason" class="mt-3 text-sm text-red-300">
             {Events.Failed.message(@reason)}
           </p>
@@ -489,6 +539,43 @@ defmodule MyHiFiWeb.PlayerLive do
       disabled={is_nil(@track) or @standby?}
       class={@class}
     />
+    """
+  end
+
+  attr(:position_ms, :integer, required: true)
+  attr(:duration_ms, :integer, required: true)
+  attr(:disabled, :boolean, required: true)
+
+  # **A person moves the thumb, and the page sends one place.** `phx-debounce` waits
+  # for them to settle, because each place that arrives makes the player read the file
+  # to find the frame there, and a drag across the bar would send one of those for
+  # every pixel.
+  #
+  # `phx-focus` and `phx-blur` say when a person holds the thumb, so the event of the
+  # progress leaves the thumb alone while they do. A range control takes focus when a
+  # mouse or a finger presses it.
+  #
+  # A track that a person cannot move inside still draws the bar, because the bar says
+  # how far through the track they are and a radio station shows none of this at all.
+  defp timeline(assigns) do
+    ~H"""
+    <form id="timeline" phx-change="scrub" class="mt-4">
+      <input
+        type="range"
+        id="timeline-position"
+        name="position_ms"
+        min="0"
+        max={@duration_ms}
+        step="1000"
+        value={min(@position_ms, @duration_ms)}
+        disabled={@disabled}
+        phx-focus="scrub_start"
+        phx-blur="scrub_end"
+        phx-debounce="400"
+        aria-label="The place in the track"
+        class="w-full accent-[var(--color-accent)] disabled:opacity-40"
+      />
+    </form>
     """
   end
 

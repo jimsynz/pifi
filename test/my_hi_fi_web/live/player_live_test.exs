@@ -437,6 +437,95 @@ defmodule MyHiFiWeb.PlayerLiveTest do
       end
     end
 
+    # A person drags the thumb of the timeline, and the browser sends the place that
+    # they let it go at.
+    test "the timeline draws for a track that holds a length", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(%{duration_ms: 600_000}),
+          source: MyHiFi.Source.Podcasts,
+          artwork_path: nil
+        })
+
+      Event.publish(:player, %Events.Progress{position_ms: 30_000, duration_ms: 600_000})
+      render(player)
+
+      assert has_element?(player, "#timeline-position[max='600000'][value='30000']")
+      refute has_element?(player, "#timeline-position[disabled]")
+    end
+
+    test "a live stream draws no timeline", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(),
+          source: MyHiFi.Source.InternetRadio,
+          artwork_path: nil,
+          live?: true
+        })
+
+      refute has_element?(player, "#timeline")
+    end
+
+    # A track with a length that a person cannot move inside still says how far through
+    # it they are.
+    test "a track that holds no skip draws the timeline dead", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(%{duration_ms: 600_000}),
+          source: nil,
+          artwork_path: nil
+        })
+
+      Event.publish(:player, %Events.Progress{position_ms: 1_000, duration_ms: 600_000})
+      render(player)
+
+      assert has_element?(player, "#timeline-position[disabled]")
+    end
+
+    test "the timeline asks the player to move to the place that a person chose", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(%{duration_ms: 600_000}),
+          source: MyHiFi.Source.Podcasts,
+          artwork_path: nil
+        })
+
+      Event.publish(:player, %Events.Progress{position_ms: 10_000, duration_ms: 600_000})
+      render(player)
+
+      player |> form("#timeline", %{"position_ms" => "90000"}) |> render_change()
+
+      assert has_element?(player, "#timeline-position[value='90000']")
+    end
+
+    # **The player publishes the progress once a second, and a person holding the thumb
+    # keeps it.** A page that took every event would take the control out of their hand.
+    test "an event of the progress leaves the thumb alone while a person holds it", %{conn: conn} do
+      player =
+        expanded(conn, %Events.Started{
+          track: track(%{duration_ms: 600_000}),
+          source: MyHiFi.Source.Podcasts,
+          artwork_path: nil
+        })
+
+      Event.publish(:player, %Events.Progress{position_ms: 10_000, duration_ms: 600_000})
+      render(player)
+
+      player |> element("#timeline-position") |> render_focus()
+
+      Event.publish(:player, %Events.Progress{position_ms: 11_000, duration_ms: 600_000})
+      render(player)
+
+      assert has_element?(player, "#timeline-position[value='10000']")
+
+      player |> element("#timeline-position") |> render_blur()
+
+      Event.publish(:player, %Events.Progress{position_ms: 12_000, duration_ms: 600_000})
+      render(player)
+
+      assert has_element?(player, "#timeline-position[value='12000']")
+    end
+
     test "a skip control asks the player to move", %{conn: conn} do
       player =
         expanded(conn, %Events.Started{
