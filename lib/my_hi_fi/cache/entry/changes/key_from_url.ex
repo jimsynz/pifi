@@ -3,7 +3,7 @@ defmodule MyHiFi.Cache.Entry.Changes.KeyFromUrl do
   Names an entry after the address that it came from, when a caller named nothing.
 
   The name is a hash, so no text from a service reaches the file system. A caller that
-  holds one thing for each address therefore needs no key of its own, and a caller
+  keeps one thing for each address therefore needs no key of its own, and a caller
   that wants its own key keeps it.
   """
 

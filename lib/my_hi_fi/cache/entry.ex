@@ -1,16 +1,16 @@
 defmodule MyHiFi.Cache.Entry do
   @moduledoc """
-  One thing that this device holds on disk.
+  One thing that this device keeps on disk.
 
   `AshStorage.BlobResource` gives the `key`, the `filename`, the `content_type`, the
-  `byte_size`, the `checksum` and the `metadata`, and it gives the `purge_blob`
+  `byte_size`, the `checksum` and the `metadata`, and it adds the `purge_blob`
   action that removes the file and the row together.
 
   This resource adds three things of its own.
 
   - `namespace` says which part of the firmware the entry belongs to, and
     `entry_key` says which thing. The caller chooses what each one means.
-  - `key` of the extension holds the path of the file, which is
+  - `key` of the extension is the path of the file, which is
     `<namespace>/<entry_key>`. `AshStorage` deletes a file by `key`, so that field
     must be the path and not the key of the caller. `Changes.Write` builds it.
   - `last_accessed_at` is what makes the eviction least recently used. **The file
@@ -18,7 +18,7 @@ defmodule MyHiFi.Cache.Entry do
     moves only when it is a day old, and an entry that a person used an hour ago
     would look cold.
   - `keep?` marks an entry that no eviction may take. A download of an episode that
-    holds the place of a person is one of those, and artwork never is. Without it one
+    keeps the place of a person is one of those, and artwork never is. Without it one
     download of 60 MB would remove 50 covers, and a list of shows would remove the
     episode that a person is in the middle of.
   - `weight` says what an entry costs to read again, and the eviction reads it before
@@ -38,8 +38,8 @@ defmodule MyHiFi.Cache.Entry do
 
     # SQLite refuses `ALTER TABLE ... ADD COLUMN ... NOT NULL` with no default, and the
     # `default` of an attribute is a value that Ash writes and not one that the table
-    # holds. A column that arrives after the table therefore needs this, or the
-    # migration stops the boot of every device that already holds a database.
+    # writes. A column that arrives after the table therefore needs this, or the
+    # migration stops the boot of every device that already has a database.
     migration_defaults weight: "0"
   end
 
@@ -65,8 +65,8 @@ defmodule MyHiFi.Cache.Entry do
       description """
       Every entry of one namespace whose key is in a list.
 
-      **One read for a whole list.** A caller that holds many keys and asks which ones
-      the cache holds would otherwise make one query for each of them, and a page of
+      **One read for a whole list.** A caller with many keys that asks which ones
+      the cache has would otherwise make one query for each of them, and a page of
       100 rows draws itself again for each event of the player.
       """
 
@@ -101,7 +101,7 @@ defmodule MyHiFi.Cache.Entry do
 
       An entry that a caller marked with `keep?` is absent.
 
-      `colder_than` holds a floor under the eviction: an entry used at that time or
+      `colder_than` puts a floor under the eviction: an entry used at that time or
       after it stays. A caller that writes files and asks for room between them gives
       the time that it started, so the eviction cannot take back what the same run
       has already written. Without that floor a run of one album reads a track,
@@ -129,7 +129,7 @@ defmodule MyHiFi.Cache.Entry do
       the three variant fields here. **`:create_variant` of `AshStorage` cannot do
       that work**, because it accepts neither `namespace` nor `entry_key` and this
       resource allows no nil in either. A variant is bytes like any other entry, so
-      it takes this action and the cache holds one way to write a file.
+      it takes this action and the cache keeps one way to write a file.
       """
 
       upsert? true
@@ -165,7 +165,7 @@ defmodule MyHiFi.Cache.Entry do
       file is either in the cache or where it was.
 
       The caller owns the file until this action answers. A caller that writes a
-      file over time therefore writes it somewhere else, and it gives that path here
+      file over time therefore writes it somewhere else, and it names that path here
       when the file is whole. See `MyHiFi.Player.Download`.
       """
 
@@ -175,7 +175,7 @@ defmodule MyHiFi.Cache.Entry do
       accept [:namespace, :entry_key, :content_type, :filename, :keep?, :weight]
 
       argument :path, :string do
-        description "The file to move. It holds the whole thing, and it is not in the cache."
+        description "The file to move. It is the whole thing, and it is not in the cache."
         allow_nil? false
         constraints min_length: 1
       end
@@ -185,10 +185,10 @@ defmodule MyHiFi.Cache.Entry do
 
     create :put_from_url do
       description """
-      Read an address and hold what it gives.
+      Read an address and keep what it returns.
 
       `entry_key` becomes the hash of the address when a caller names none, so a
-      caller that holds one thing for each address needs no key of its own.
+      caller that keeps one thing for each address needs no key of its own.
 
       This sets `content_type` from the header of the answer and it reads no byte of
       the body to check that. A caller that needs to know what the bytes are looks at
@@ -247,7 +247,7 @@ defmodule MyHiFi.Cache.Entry do
       less that number, so a caller that must write a file of a known size gets the
       room for it. A caller that asks for nothing gives 0, and the limit alone decides.
 
-      A cache that holds nothing but entries to keep stays above the limit, and this
+      A cache with nothing but entries to keep stays above the limit, and this
       reports that instead of removing what a person needs.
       """
 
@@ -276,7 +276,7 @@ defmodule MyHiFi.Cache.Entry do
   # `MyHiFi.Event.Device.StorageChanged` on the `:device` topic. A part of this firmware
   # reads that typed event and never this one. See `MyHiFi.Event`.
   pub_sub do
-    # `module` is the module that holds `broadcast/3`, and `name` is the process that
+    # `module` is the module that defines `broadcast/3`, and `name` is the process that
     # runs the pub sub. `MyHiFi.PubSub` is a name and not a module, so it belongs in the
     # second one. See `Ash.Notifier.PubSub`.
     module Phoenix.PubSub
@@ -287,7 +287,7 @@ defmodule MyHiFi.Cache.Entry do
     publish_all :destroy, "written"
   end
 
-  # A variant names its source, and the database holds a foreign key on that column,
+  # A variant names its source, and the database enforces a foreign key on that column,
   # so the variants of an entry must go before the entry does. This covers every
   # destroy of this resource, whichever caller starts it.
   changes do
@@ -299,11 +299,11 @@ defmodule MyHiFi.Cache.Entry do
 
     attribute :namespace, :string do
       description """
-      Which part of the firmware holds this entry, such as `"artwork"`. A caller
-      chooses its own, and this resource holds no list of them.
+      Which part of the firmware owns this entry, such as `"artwork"`. A caller
+      chooses its own, and this resource keeps no list of them.
 
       **A string and not an atom.** A caller invents a namespace, so the database
-      holds a name that no code may mention any more. `Ash.Type.Atom` refuses to read
+      carries a name that no code may mention any more. `Ash.Type.Atom` refuses to read
       such a name back, because turning text of a database into an atom fills the
       atom table, and a row of one build would then be unreadable by the next.
       """
@@ -320,10 +320,10 @@ defmodule MyHiFi.Cache.Entry do
 
     attribute :entry_key, :string do
       description """
-      Which thing the caller holds. Artwork uses the hash of an address, and a
+      Which thing the caller keeps. Artwork uses the hash of an address, and a
       download uses the identifier of an episode.
 
-      `key` of the extension holds the path of the file, and it is this with the
+      `key` of the extension is the path of the file, and it is this with the
       namespace in front. Both are here so that each filter is one comparison and
       no query builds a string.
       """

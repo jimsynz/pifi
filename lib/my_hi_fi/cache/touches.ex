@@ -11,7 +11,7 @@ defmodule MyHiFi.Cache.Touches do
   raised in `Oban.Pruner` and in `MyHiFi.Cache.Entry.put_file`, which threw away a
   podcast episode that had already arrived.
 
-  This process holds the marks instead. It writes them in one statement, so 25
+  This process keeps the marks instead. It writes them in one statement, so 25
   acquisitions of the write lock become one, and a card that this firmware must run on
   for years takes 25 times fewer writes for the same browsing.
 
@@ -34,7 +34,7 @@ defmodule MyHiFi.Cache.Touches do
   **A debounce alone can wait for ever.** The timeout starts again with each message,
   so a person who browses a library without a pause would let nothing reach the card
   for as long as they browse. The ceiling bounds that: the wait is the debounce, or
-  what is left of the ceiling, whichever is less. `MyHiFi.SwitchOff` holds the same
+  what is left of the ceiling, whichever is less. `MyHiFi.SwitchOff` uses the same
   shape, with a checkpoint on a period for the power that goes without warning.
 
   ## Who flushes, and when
@@ -77,7 +77,7 @@ defmodule MyHiFi.Cache.Touches do
   @doc """
   Note that something used one entry, and write nothing now.
 
-  It gives `:none` when no buffer runs, and `MyHiFi.Cache.used/1` then writes the row
+  It returns `:none` when no buffer runs, and `MyHiFi.Cache.used/1` then writes the row
   itself.
   """
   @spec record(Ash.UUID.t()) :: :ok | :none
@@ -93,9 +93,9 @@ defmodule MyHiFi.Cache.Touches do
   end
 
   @doc """
-  Write what the buffer holds, and wait for the answer.
+  Write what the buffer keeps, and wait for the answer.
 
-  A caller that must read `last_accessed_at` calls this first. It gives `:ok` when no
+  A caller that must read `last_accessed_at` calls this first. It returns `:ok` when no
   buffer runs, because there is then nothing to wait for.
   """
   @spec flush() :: :ok

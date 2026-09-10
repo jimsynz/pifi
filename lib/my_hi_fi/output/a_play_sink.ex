@@ -2,7 +2,7 @@ defmodule MyHiFi.Output.APlaySink do
   @moduledoc """
   A Membrane sink that plays raw audio through `aplay`.
 
-  The Nerves system holds `alsa-lib`, `aplay` and `amixer`, and no other audio
+  The Nerves system ships `alsa-lib`, `aplay` and `amixer`, and no other audio
   software. `membrane_alsa_plugin` does not exist, so this sink writes the samples to
   `aplay` through an Erlang port.
 
@@ -10,7 +10,7 @@ defmodule MyHiFi.Output.APlaySink do
   of the DAC, and with that option `Port.command/2` blocks this element once the queue
   of the port is full. The demand of Membrane then stops reaching the decoder, and the
   whole pipeline runs at the speed of the hardware.
-  `MyHiFi.Output.APlayPort` holds the limits and the measurement that decided them.
+  `MyHiFi.Output.APlayPort` names the limits and the measurement that decided them.
 
   `aplay` starts again when the stream format changes, because the format is on
   the command line and not in the stream.
@@ -18,7 +18,7 @@ defmodule MyHiFi.Output.APlaySink do
   ## The program outlives this element
 
   **`MyHiFi.Output.APlayPort` owns the port, and this element borrows it.** A start of
-  `aplay` opens the sound card and holds a silence of about one second, so a program of
+  `aplay` opens the sound card and costs a silence of about one second, so a program of
   its own for each pipeline gave a person a gap between one track and the next, and it
   cut the half second that ALSA still held at the end of every track.
 
@@ -46,7 +46,7 @@ defmodule MyHiFi.Output.APlaySink do
       description: """
       The ALSA device, such as `rate48:CARD=Audio,DEV=0`. `MyHiFi.Output.Alsa`
       builds that name, and `rate48` of `/etc/asound.conf` converts the sample
-      format and holds the card at 48000 Hz. 44100 Hz is rough on this board,
+      format and keeps the card at 48000 Hz. 44100 Hz is rough on this board,
       because USB audio needs a whole number of samples in each 1 ms packet.
       """
     ]
@@ -130,7 +130,7 @@ defmodule MyHiFi.Output.APlaySink do
     {[], state}
   end
 
-  # **The end of a track ends no program.** ALSA holds about half a second of sound and
+  # **The end of a track ends no program.** ALSA keeps about half a second of sound and
   # `MyHiFi.Output.APlayPort` keeps the card open, so that half second plays and the
   # pipeline of the next track writes to the same port. This element only stops writing.
   @impl true
@@ -141,7 +141,7 @@ defmodule MyHiFi.Output.APlaySink do
   @doc """
   Stop the sound now, and let the pipeline stop later.
 
-  `aplay` holds the sound card and it reads at the rate of the clock of the DAC, so
+  `aplay` owns the sound card and it reads at the rate of the clock of the DAC, so
   ending the program is what makes the room quiet. `MyHiFi.Output.APlayPort.close/0`
   does that, and a measurement on 2026-08-21 gave 35 to 245 ms from a stop to silence.
   """
@@ -176,7 +176,7 @@ defmodule MyHiFi.Output.APlaySink do
   @doc """
   The command line that one format needs.
 
-  **`MyHiFi.Output.APlayPort` holds one port for one of these**, so this list is the
+  **`MyHiFi.Output.APlayPort` keeps one port for one of these**, so this list is the
   name of the sound as well as the way to make it: two tracks of one rate give the same
   list and one program, and a track of another rate gives another list and another
   program.
@@ -199,7 +199,7 @@ defmodule MyHiFi.Output.APlaySink do
   defp program, do: Application.get_env(:my_hi_fi, :aplay_command, "aplay")
 
   # **A program that went takes its port with it, and a write to a port that is gone
-  # raises.** `MyHiFi.Output.APlayPort` reads the exit of the program and holds the
+  # raises.** `MyHiFi.Output.APlayPort` reads the exit of the program and keeps the
   # reason, so this element ends the pipeline and `MyHiFi.Player` starts the stream
   # again.
   defp write(port, payload) do
@@ -220,9 +220,9 @@ defmodule MyHiFi.Output.APlaySink do
   The ALSA name of one sample format of Membrane.
 
   Membrane packs a 24-bit sample in 3 bytes, and that is `S24_3LE` for ALSA.
-  `S24_LE` holds 24 bits in 4 bytes, so it is the wrong name here, and libmad gives
+  `S24_LE` puts 24 bits in 4 bytes, so it is the wrong name here, and libmad gives
   24-bit samples for each MP3 stream. A wrong name here gives noise and not music,
-  so a test holds each pair.
+  so a test covers each pair.
   """
   @spec alsa_format(Membrane.RawAudio.SampleFormat.t()) :: String.t()
   def alsa_format(:s8), do: "S8"

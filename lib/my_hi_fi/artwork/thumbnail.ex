@@ -24,9 +24,9 @@ defmodule MyHiFi.Artwork.Thumbnail do
   happens here because `vipsthumbnail` runs here: a second run gives a grid of 32 by
   32 pixels, and `MyHiFi.Artwork.Accent` reads it.
 
-  **The grid is a PPM file and not a raw one.** A PPM holds a header that says how
+  **The grid is a PPM file and not a raw one.** A PPM carries a header that says how
   many bands it carries, so a thumbnail of one band reads as the grey that it is. A
-  raw file holds bytes alone, so a grid of grey would read as a grid of colour, and a
+  raw file carries bytes alone, so a grid of grey would read as a grid of colour, and a
   picture of greys would give a colour that no person can see in it. `vipsthumbnail`
   of this version takes no option that forces three bands, so the format is what
   answers the question.
@@ -47,11 +47,11 @@ defmodule MyHiFi.Artwork.Thumbnail do
   @doc """
   What decides the thumbnail and its colour, in 16 characters.
 
-  Each thumbnail row holds this, and `MyHiFi.Artwork.generate_thumbnail/1` compares
+  Each thumbnail row carries this, and `MyHiFi.Artwork.generate_thumbnail/1` compares
   it. A thumbnail that an older build wrote therefore gives way to a new one, and a
-  change here reaches every picture that the device holds.
+  change here reaches every picture that the device keeps.
 
-  **It holds the code of this module and of `MyHiFi.Artwork.Accent`, and not their
+  **It reads the code of this module and of `MyHiFi.Artwork.Accent`, and not their
   settings alone.** A build once changed how the colour is read and left every
   constant as it was. The digest did not move, each device kept the thumbnail that it
   held, and the new build therefore showed nothing new. The BEAM keeps a hash of the

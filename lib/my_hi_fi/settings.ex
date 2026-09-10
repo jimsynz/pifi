@@ -47,7 +47,7 @@ defmodule MyHiFi.Settings do
   end
 
   @doc """
-  Read one setting. It gives an error for a key that no row holds.
+  Read one setting. It returns an error for a key that no row holds.
 
   **The answer for a key that no row holds is held as well.** A source that a person
   never chose is the usual case, and a page asks for one on each navigation.

@@ -13,10 +13,10 @@ if Mix.target() != :host do
 
     Each source of truth is a different shape, and each one cost a measurement to find.
 
-    - **VintageNet holds the network, and it sends the old tuple.** Its property table
+    - **VintageNet reports the network, and it sends the old tuple.** Its property table
       is made with `tuple_events: true`, so a subscriber gets
       `{VintageNet, property, old, new, metadata}` and not a `PropertyTable.Event`.
-    - **NervesUEvent holds the sound cards, and it sends the struct.** It arrives with
+    - **NervesUEvent reports the sound cards, and it sends the struct.** It arrives with
       `nerves_runtime`, so this needs no new dependency. The property of a device is its
       path in `/sys`, and that path is different on each board, so this subscribes to
       every uevent and reads the subsystem of each one. A removal carries the map in
@@ -27,16 +27,16 @@ if Mix.target() != :host do
       an episode grows outside the cache and `MyHiFi.Cache.put_file/3` moves it in when
       it is whole, so the free space settles at the moment of that notification.
       `MyHiFi.Device.Storage.Report` reads `df` and not `:disksup`, because `:disksup`
-      holds a measurement of up to 30 minutes ago and a report after a write must be
+      keeps a measurement of up to 30 minutes ago and a report after a write must be
       fresh.
 
     A sync of the station artwork writes many files in a moment, and each one is a
     notification. One read for each of them would run `df` hundreds of times, so a
     notification asks for one read a moment later and the ones behind it join that read.
 
-    This process also starts ntpd again when a connection reaches the internet. It holds
+    This process also starts ntpd again when a connection reaches the internet. It takes
     the network events already, and a second subscriber of the same property would do
-    that work twice. The comment on `restart_ntpd/1` holds the fault of busybox ntpd
+    that work twice. The comment on `restart_ntpd/1` names the fault of busybox ntpd
     that makes this necessary.
 
     The first read does that work as well, and the event alone is not enough. This
@@ -77,7 +77,7 @@ if Mix.target() != :host do
        {:continue, :first_read}}
     end
 
-    # The state that the device holds at the start is not a change, so this reads it and
+    # The state that the device is in at the start is not a change, so this reads it and
     # publishes nothing. It runs after `init/1` gives the process to the supervisor,
     # because a read of the output asks the player and the player answers a call.
     @impl GenServer
@@ -137,7 +137,7 @@ if Mix.target() != :host do
     # `NervesTime` starts ntpd 10 ms after the boot, and Wi-Fi associates later than
     # that. busybox ntpd reads the address of each pool server one time, at its start,
     # so a start with no DNS leaves the daemon with no server. It then runs and sets no
-    # clock, and the board holds the time of the last shutdown until something starts
+    # clock, and the board keeps the time of the last shutdown until something starts
     # the daemon again.
     #
     # A connection that reaches `:internet` is the first moment that a read of an
@@ -163,7 +163,7 @@ if Mix.target() != :host do
 
     defp restart_ntpd(_property, _old, _new), do: :ok
 
-    # A subscriber learns nothing about a property that already holds its value, so the
+    # A subscriber learns nothing about a property that already has its value, so the
     # first read asks for the value itself. See `PropertyTable.subscribe/2`.
     defp internet? do
       ["interface", :_, "connection"]
@@ -178,7 +178,7 @@ if Mix.target() != :host do
     defp storage, do: Device.storage!()
 
     # A uevent names its subsystem in the map that it carries. A removal carries the map
-    # that the property held before, because the property holds nothing now.
+    # that the property held before, because the property is empty now.
     defp sound?(%PropertyTable.Event{value: %{"subsystem" => "sound"}}), do: true
     defp sound?(%PropertyTable.Event{previous_value: %{"subsystem" => "sound"}}), do: true
     defp sound?(_event), do: false

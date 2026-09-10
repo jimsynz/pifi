@@ -2,20 +2,20 @@ defmodule MyHiFi.Cache.Attachment do
   @moduledoc """
   Joins one entry of the cache to one record that uses it.
 
-  A record names the thing that it holds, and an entry holds the bytes. Many records
+  A record names the thing that it stands for, and an entry keeps the bytes. Many records
   may name one entry, which is the point: a publisher that uses one cover for a show
   and for each of its 200 episodes gives 201 rows here and **one** file of 1.2 MB.
   A join that put the record on the entry would give 201 files and 240 MB.
 
   `record_type` and `record_id` name the record, and no column names a resource. The
-  cache therefore holds no knowledge of the parts of the firmware that use it, which
+  cache therefore needs no knowledge of the parts of the firmware that use it, which
   is the whole point of a cache that anything may use. A host declares its own
   relationship and filters for its own type. See `MyHiFi.Podcast.Show`.
 
   ## What this costs
 
-  A polymorphic join holds no foreign key to the record, so the database cannot refuse
-  a row that names a record which is gone. The entry is different: the database holds
+  A polymorphic join carries no foreign key to the record, so the database cannot refuse
+  a row that names a record which is gone. The entry is different: the database enforces
   that key and removes the join rows with the entry.
 
   **A record that goes therefore leaves its rows behind.** A host that removes itself
@@ -83,7 +83,7 @@ defmodule MyHiFi.Cache.Attachment do
     attribute :record_type, :string do
       description """
       Which kind of record uses the entry, such as `"show"`. A host chooses its own
-      name, and this resource holds no list of them.
+      name, and this resource keeps no list of them.
 
       A string and not an atom, for the reason that `MyHiFi.Cache.Entry` gives for its
       namespace.
@@ -94,7 +94,7 @@ defmodule MyHiFi.Cache.Attachment do
     end
 
     attribute :record_id, :uuid do
-      description "Which record of that kind. No key holds this, because no column names a resource."
+      description "Which record of that kind. No key covers this, because no column names a resource."
       allow_nil? false
       public? true
     end
@@ -104,7 +104,7 @@ defmodule MyHiFi.Cache.Attachment do
 
   relationships do
     belongs_to :entry, MyHiFi.Cache.Entry do
-      description "The entry that holds the bytes. The database holds this key."
+      description "The entry that keeps the bytes. The database enforces this key."
       allow_nil? false
       public? true
       attribute_writable? true

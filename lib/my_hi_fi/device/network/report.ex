@@ -2,7 +2,7 @@ defmodule MyHiFi.Device.Network.Report do
   @moduledoc """
   Reads the state of each interface from VintageNet.
 
-  `vintage_net` is a target dependency, so the host build holds no reference to
+  `vintage_net` is a target dependency, so the host build carries no reference to
   it. A host therefore gives an empty list. See `MyHiFi.Setup` for the same
   pattern.
   """

@@ -2,11 +2,11 @@ defmodule MyHiFi.Device.Network do
   @moduledoc """
   What the network is doing.
 
-  VintageNet holds the state of each interface. A person on the settings page
+  VintageNet keeps the state of each interface. A person on the settings page
   needs the address of the device, the name of the Wi-Fi network, and the strength
   of the signal.
 
-  The resource holds no data of its own, so it needs no data layer.
+  The resource stores no data of its own, so it needs no data layer.
   """
 
   use Ash.Resource, otp_app: :my_hi_fi, domain: MyHiFi.Device

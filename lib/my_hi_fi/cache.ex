@@ -1,13 +1,13 @@
 defmodule MyHiFi.Cache do
   @moduledoc """
-  What this device holds on disk that it can fetch again.
+  What this device keeps on disk that it can fetch again.
 
   Any part of the firmware caches through here. A namespace says which part, and a
   key says which thing, and the caller chooses what each one means.
-  `MyHiFi.Artwork` holds `:artwork` and keys by the hash of an address, and a later
-  version holds `:download` and keys by the identifier of an episode.
+  `MyHiFi.Artwork` uses `:artwork` and keys by the hash of an address, and a later
+  version uses `:download` and keys by the identifier of an episode.
 
-  `MyHiFi.Cache.Entry` holds the data about one entry, and `AshStorage` writes the
+  `MyHiFi.Cache.Entry` keeps the data about one entry, and `AshStorage` writes the
   file.
 
   The cache grows to the free space of the partition, less a reserve, and the entry
@@ -73,7 +73,7 @@ defmodule MyHiFi.Cache do
   answer and costs a card that must run for years. A page of the web interface reads
   25 pictures, and a person who opens it again reads the same 25.
 
-  A mark that it does keep goes to `MyHiFi.Cache.Touches`, which holds it in memory and
+  A mark that it does keep goes to `MyHiFi.Cache.Touches`, which keeps it in memory and
   writes it with the others. A firmware that runs no buffer writes the row at once.
   """
   @spec used(Entry.t()) :: :ok
@@ -176,7 +176,7 @@ defmodule MyHiFi.Cache do
   def free_bytes, do: Kernel.max(limit() - bytes(), 0)
 
   @doc """
-  Where the cache holds its files.
+  Where the cache keeps its files.
 
   It lives on the application data partition, beside the database. That partition is
   the only writable storage of the device.
@@ -189,7 +189,7 @@ defmodule MyHiFi.Cache do
   @doc """
   The path of one entry under `directory/0`.
 
-  The namespace comes first, so each part of the firmware holds its own directory and
+  The namespace comes first, so each part of the firmware gets its own directory and
   two callers may choose the same key.
   """
   @spec storage_key(String.t(), String.t()) :: String.t()

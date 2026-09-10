@@ -9,9 +9,9 @@ defmodule MyHiFi.Output.Volume do
   that is the state that this firmware starts in. A person who drives headphones or
   powered speakers has nowhere else to set it, and they turn this on.
 
-  **The setting holds the number, and the card is only told it.** A read of a card
+  **The setting keeps the number, and the card is only told it.** A read of a card
   cannot give the number back: a measurement on 2026-09-09 set 60 percent on the
-  HiFimeDIY USB DAC and read 59, because that card holds 111 steps and no step lands on
+  HiFimeDIY USB DAC and read 59, because that card has 111 steps and no step lands on
   every percentage. A control that read the card would move under the hand of the
   person using it. The settings are therefore the one source of truth, and
   `MyHiFi.Output.put_volume/2` is a write and never a read.
@@ -19,7 +19,7 @@ defmodule MyHiFi.Output.Volume do
   ## Why it is a process of its own
 
   The hardware forgets the level at each boot, and a card that a person plugs in later
-  has never been told it. This process holds the number, writes it at the start, and
+  has never been told it. This process keeps the number, writes it at the start, and
   writes it again whenever `MyHiFi.Event.Device.OutputChanged` says that the card in
   use changed. `MyHiFi.Player` could hold it, and it answers a control in more than a
   dozen clauses, so a write in each one is a write that the next clause forgets. That is
@@ -56,7 +56,7 @@ defmodule MyHiFi.Output.Volume do
     GenServer.start_link(__MODULE__, options, name: Keyword.get(options, :name, __MODULE__))
   end
 
-  @doc "The settings key that holds the level."
+  @doc "The settings key of the level."
   @spec percent_key() :: String.t()
   def percent_key, do: @percent_key
 
@@ -65,7 +65,7 @@ defmodule MyHiFi.Output.Volume do
   def enabled_key, do: @enabled_key
 
   @doc """
-  What the level is, whether the control is on, and whether the card holds one.
+  What the level is, whether the control is on, and whether the card has one.
 
   A caller reads all three together, because each one alone says nothing that a person
   can act on: a level of 30 means nothing on a card that this firmware cannot set.
@@ -88,7 +88,7 @@ defmodule MyHiFi.Output.Volume do
   # A test starts no listener of the node, so `:noproc` is the normal state of a suite
   # and a warning for each page of it would say nothing. A timeout is a process that is
   # stuck, and that is worth a line.
-  defp log({:noproc, _call}), do: Logger.debug("No process holds the level of the output.")
+  defp log({:noproc, _call}), do: Logger.debug("No process keeps the level of the output.")
 
   defp log(reason), do: Logger.warning("The volume did not say what it is: #{inspect(reason)}")
 
@@ -101,7 +101,7 @@ defmodule MyHiFi.Output.Volume do
   `MyHiFi.Playback.Player.state/0`, and the reason is the same.
 
   It says that the card plays at its loudest and that nothing sets it, which is the
-  state of a device that no person has set. A page that draws this holds no control that
+  state of a device that no person has set. A page that draws this needs no control that
   can do harm, and the next event corrects it.
   """
   @spec fixed() :: %{percent: Output.percent(), enabled?: boolean(), supported?: boolean()}
@@ -110,9 +110,9 @@ defmodule MyHiFi.Output.Volume do
   @doc """
   Set the level.
 
-  It writes the setting and the card, and it publishes what it did. A card that holds
+  It writes the setting and the card, and it publishes what it did. A card with
   no level takes the setting and nothing else, so a person who plugs in a DAC that
-  holds one hears the number that they chose.
+  has one hears the number that they chose.
   """
   @spec set_percent(GenServer.server(), Output.percent()) ::
           :ok | {:error, :out_of_range | :not_enabled}
@@ -229,8 +229,8 @@ defmodule MyHiFi.Output.Volume do
     }
   end
 
-  # A device with no card holds no level, and a card that this firmware cannot set
-  # holds none that a person can move.
+  # A device with no card has no level, and a card that this firmware cannot set
+  # has none that a person can move.
   defp supported? do
     case device() do
       nil -> false
@@ -249,7 +249,7 @@ defmodule MyHiFi.Output.Volume do
     :exit, _reason -> nil
   end
 
-  # A row that holds something that is not a number is a row that no part of this
+  # A row that carries something that is not a number is a row that no part of this
   # firmware writes, and the loudest level is a better answer than a process that will
   # not start.
   defp stored_percent do

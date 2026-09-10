@@ -3,7 +3,7 @@ defmodule MyHiFi.Artwork.Accent do
   The colour that one picture gives to the interface.
 
   The device screen and the web page both draw a colour that comes from the artwork
-  of the track. **This module holds that rule, and it holds it one time.** The page
+  of the track. **This module owns that rule, and it owns it one time.** The page
   held its own copy in JavaScript, which read the same thumbnail in a canvas. Two
   copies of one rule drift, and a change of a clamp then left the screen and the page
   disagreeing about the same track.
@@ -11,19 +11,19 @@ defmodule MyHiFi.Artwork.Accent do
   ## The rule
 
   The work happens in OKLab, because a step of the same size is a step of the same
-  size to a person there, and neither RGB nor HSL holds that. Each pixel of a small
+  size to a person there, and neither RGB nor HSL gives that. Each pixel of a small
   grid becomes a lightness, an `a` and a `b`. A pixel that is nearly black or nearly
   white says nothing about the colour of a picture, so it goes. The rest fall into 24
   buckets of hue, and each one carries the square of its chroma as its weight, so a
   strong colour of a few pixels beats a weak colour of many.
 
   The heaviest bucket gives the answer, as the weighted mean of what fell in it.
-  **A picture that holds a little colour therefore gives that colour**, even when most
-  of it is grey or dark: the most that a picture holds is what a person sees in it.
+  **A picture with a little colour therefore gives that colour**, even when most
+  of it is grey or dark: the most that a picture has is what a person sees in it.
 
   **The answer is then clamped, and that is what makes it usable.** A colour as found
   is often too dark or too strong to read on the slate of the faceplate and of the
-  screen. The lightness holds between 0.72 and 0.84, and the chroma between 0.08 and
+  screen. The lightness stays between 0.72 and 0.84, and the chroma between 0.08 and
   0.19, so every picture gives a colour that a person can read text against.
 
   **A picture of greys gives no colour at all**, and a caller then keeps the colour
@@ -31,24 +31,24 @@ defmodule MyHiFi.Artwork.Accent do
 
   The chroma of the winning bucket is what says which of the two a picture is, and not
   the weight of it. The weight is a sum, so it grows with the number of pixels that a
-  grid holds and with how much of the picture is colour. Three covers of this device
+  grid has and with how much of the picture is colour. Three covers of this device
   measured on 2026-09-01: a red logo reached a chroma of 0.213, a dark cover of a
   green face and a red shirt reached 0.057, and a cover in black and white reached
   0.000. The floor at 0.02 therefore takes the second one and refuses the third, and
   it says the same thing for a grid of any size.
 
-  The floor is not zero, because a picture in black and white that a JPEG holds
+  The floor is not zero, because a picture in black and white that a JPEG carries
   carries faint colour at each edge, and a rule of "more than nothing" would take
   that.
 
-  `MyHiFi.Artwork.Thumbnail.digest/0` holds the code of this module, so a change of a
+  `MyHiFi.Artwork.Thumbnail.digest/0` reads the code of this module, so a change of a
   clamp here writes a new thumbnail and a new colour for every picture that a device
-  holds.
+  keeps.
 
   ## What each caller needs
 
   The page names a colour in `oklch()`, so `to_css/1` gives that and the browser turns
-  it into pixels. The screen holds no such reader, so `to_rgb/1` does the work that
+  it into pixels. The screen has no such reader, so `to_rgb/1` does the work that
   the browser does: OKLab back to sRGB.
   """
 
@@ -66,10 +66,10 @@ defmodule MyHiFi.Artwork.Accent do
   def sample, do: @sample
 
   @doc """
-  The colour of a grid of pixels, or `nil` for a picture that holds no colour.
+  The colour of a grid of pixels, or `nil` for a picture with no colour.
 
-  The grid holds three bytes for each pixel, in the order red, green and blue. A
-  picture of one band gives `nil`, because a grey picture holds no hue.
+  The grid carries three bytes for each pixel, in the order red, green and blue. A
+  picture of one band gives `nil`, because a grey picture has no hue.
   """
   @spec from_pixels(binary()) :: t() | nil
   def from_pixels(pixels) when is_binary(pixels) and byte_size(pixels) > 0 do

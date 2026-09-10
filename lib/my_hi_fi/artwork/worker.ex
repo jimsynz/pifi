@@ -3,17 +3,17 @@ defmodule MyHiFi.Artwork.Worker do
   Reads one picture and stores it.
 
   A station that gives no image, or an image that is too large, gives no retry. A
-  network fault gives one, and Oban holds the count.
+  network fault gives one, and Oban keeps the count.
 
   ## Who hears that a picture arrived
 
   **A job tells the `:player` topic only when the caller asks it to.** The player asks
   for the logo of the track that it is starting, and a page that is open then shows
-  that logo with no reload. `MyHiFiWeb.PlayerLive` draws whatever such an event holds,
+  that logo with no reload. `MyHiFiWeb.PlayerLive` draws whatever such an event names,
   and it takes the accent colour of the interface from it.
 
   `MyHiFi.Jellyfin.Fill` asks for the picture of each container that it writes, and a
-  library holds 5,205 of them. Those jobs must tell that topic nothing: each one that
+  library has 5,205 of them. Those jobs must tell that topic nothing: each one that
   finished announced its own picture as though it were the track that plays, so a
   person reading the library watched the panel move through album covers while it said
   `Nothing selected`, and the colour of the whole interface moved with them.
@@ -60,7 +60,7 @@ defmodule MyHiFi.Artwork.Worker do
         announce(name, args["announce"])
         :ok
 
-      # A station that holds no image cannot start to hold one, so this job stops.
+      # A station with no image cannot start to hold one, so this job stops.
       {:error, {:not_an_image, type}} ->
         Logger.info("#{url} gave #{inspect(type)} and not an image.")
         {:cancel, :not_an_image}
@@ -72,7 +72,7 @@ defmodule MyHiFi.Artwork.Worker do
       {:error, {:status, status}} when status in 400..499 ->
         {:cancel, {:status, status}}
 
-      # An address that holds no scheme can never hold a picture. Radio Browser sends
+      # An address with no scheme can never hold a picture. Radio Browser sends
       # the text `"null"` for 4 of the 247 New Zealand stations.
       {:error, :no_address} ->
         {:cancel, :no_address}
@@ -94,10 +94,10 @@ defmodule MyHiFi.Artwork.Worker do
   end
 
   @doc """
-  Ask for one picture, unless the cache holds it.
+  Ask for one picture, unless the cache has it.
 
   `announce?` says whether the job tells the `:player` topic that the picture arrived.
-  The player asks for the logo of the track that it starts, and it gives `true`. Every
+  The player asks for the logo of the track that it starts, and it passes `true`. Every
   other caller leaves it alone. See the moduledoc.
   """
   @spec enqueue(String.t() | nil, boolean()) :: :ok

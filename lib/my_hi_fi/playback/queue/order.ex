@@ -47,7 +47,7 @@ defmodule MyHiFi.Playback.Queue.Order do
   @doc """
   Number the rows again, from 0, in the order that they hold now.
 
-  It gives the number of rows that moved.
+  It returns the number of rows that moved.
   """
   @spec close_gaps() :: non_neg_integer()
   def close_gaps do

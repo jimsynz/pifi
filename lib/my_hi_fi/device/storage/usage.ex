@@ -1,9 +1,9 @@
 defmodule MyHiFi.Device.Storage.Usage do
   @moduledoc """
-  Reads which kind of media holds the room of the writable partition.
+  Reads which kind of media takes the room of the writable partition.
 
   **A download belongs to the source that gave it, and the cache cannot say which.**
-  `MyHiFi.Cache` holds every episode and every track in the one namespace `download`,
+  `MyHiFi.Cache` keeps every episode and every track in the one namespace `download`,
   keyed by the identifier of the item, so a sum of that namespace gives one number for
   every service together. A person who wants to know whether to remove the podcasts or
   the albums needs the two apart. This therefore reads the items that hold audio and
@@ -12,10 +12,10 @@ defmodule MyHiFi.Device.Storage.Usage do
 
   Artwork is one kind, and it needs no such work: it is a namespace of its own.
 
-  **`other` holds what is left, and it is large.** A measurement on 2026-09-09 gave
+  **`other` covers what is left, and it is large.** A measurement on 2026-09-09 gave
   3.56 GB in use, of which the cache held 1.82 GB and the database 59 MB. The rest is
   the firmware, the logs, and what a file system needs for 10054 small files. A bar
-  that showed the kinds alone would say that half the card holds nothing, so this
+  that showed the kinds alone would say that half the card is empty, so this
   names the remainder and a person reads a bar that adds up.
   """
 
@@ -76,11 +76,11 @@ defmodule MyHiFi.Device.Storage.Usage do
   # colour moved. The sources come first, in the order of `MyHiFi.Source.all/0`, and
   # `other` comes last because it is the fold of what no kind names.
   #
-  # `MyHiFiWeb.SettingsLive` holds a colour for each key of this list, and the two must
+  # `MyHiFiWeb.SettingsLive` names a colour for each key of this list, and the two must
   # agree. The colours are measured for the pairs that touch on the bar, so a kind that
   # moved would put two of them side by side that no measurement covers.
   #
-  # A kind of no bytes is absent: a device that holds no Jellyfin album must draw no
+  # A kind of no bytes is absent: a device with no Jellyfin album must draw no
   # row for one.
   defp order(kinds) do
     keys = Enum.map(Source.all(), &Source.slug/1) ++ ["artwork", "database", "other"]

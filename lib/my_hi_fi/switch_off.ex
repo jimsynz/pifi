@@ -2,9 +2,9 @@ defmodule MyHiFi.SwitchOff do
   @moduledoc """
   What a device does before it loses its power.
 
-  It loses it in two ways, and this module holds one answer for each.
+  It loses it in two ways, and this module has one answer for each.
 
-  **A device that runs on a battery holds no way to turn its own power off.** The
+  **A device that runs on a battery has no way to turn its own power off.** The
   portable device of this firmware has a switch on its side and a hand reaches it, so
   the moment that a person presses standby is the moment to stop writing to the card
   and say so. `MyHiFi.Event.Device.SafeToSwitchOff` is what says it, and the screen
@@ -26,7 +26,7 @@ defmodule MyHiFi.SwitchOff do
   about 11 seconds longer, and every one of those commits is a write of the card. A
   checkpoint on a period pays one fsync for each period instead of one for each commit.
 
-  SQLite holds an auto checkpoint of its own, and it counts the pages of the log and not
+  SQLite runs an auto checkpoint of its own, and it counts the pages of the log and not
   the time, so a device that writes little can leave a commit in the log for as long as
   it stays quiet. This is what bounds that.
 
@@ -43,14 +43,14 @@ defmodule MyHiFi.SwitchOff do
      clock or a connection would have started therefore waits for the person to come
      back, and it loses nothing.
   2. **Wait for the jobs that run.** `Oban.check_all_queues/0` names them, and a job
-     that reads a feed holds the network for a moment. A wait that never ended would
+     that reads a feed keeps the network for a moment. A wait that never ended would
      leave a person holding a switch, so this gives up after
      #{:erlang.convert_time_unit(30_000, :millisecond, :second)} seconds and says that
      the device is not safe.
   3. **Put the database on the card.** `MyHiFi.Cache.Touches` writes the used marks
-     that it holds first, because a device that says that a hand may reach the switch
+     that it keeps first, because a device that says that a hand may reach the switch
      must hold nothing in memory. `PRAGMA wal_checkpoint(TRUNCATE)` then folds the
-     write ahead log back into the file and empties it. The device holds
+     write ahead log back into the file and empties it. The device then keeps
      `journal_mode` at `wal` and `synchronous` at `normal`, so a commit is durable at a
      checkpoint and not before one.
   4. **Commit the journal of the file system.** **There is no `sync` in the busybox of
@@ -67,11 +67,11 @@ defmodule MyHiFi.SwitchOff do
 
   A download writes no Oban job, so a track that arrives while a person presses standby
   is not one of the jobs that step 2 waits for. Standby stops the player and the
-  download with it, and a file that a download left behind holds no row of the cache,
+  download with it, and a file that a download left behind has no row of the cache,
   because `MyHiFi.Cache.put_file/3` renames it only when it is whole.
   `MyHiFi.Player.Download.sweep/0` takes such a file at the next boot.
 
-  This says that the card holds what the device knows. It says nothing about a person
+  This says that the card has what the device knows. It says nothing about a person
   who switches the device off while it plays.
   """
 
@@ -93,13 +93,13 @@ defmodule MyHiFi.SwitchOff do
   # one checkpoint to bound it.
   @checkpoint_ms :timer.minutes(5)
 
-  # A job that reads a feed holds the network for a moment, and a person who pressed
+  # A job that reads a feed keeps the network for a moment, and a person who pressed
   # standby is waiting. This is long enough for an ordinary read and short enough that a
   # person does not give up on the device.
   @drain_ms 30_000
   @poll_ms 250
 
-  # One small file of the data partition. Nothing reads what it holds: the write and the
+  # One small file of the data partition. Nothing reads what it carries: the write and the
   # fsync are the whole of it, and the time in it is there for a person who asks when the
   # device last made itself safe.
   #
@@ -150,7 +150,7 @@ defmodule MyHiFi.SwitchOff do
   end
 
   @doc """
-  Stop the work, put what the device holds on the card, and say whether it is safe.
+  Stop the work, write what the device keeps on to the card, and say whether it is safe.
 
   A page or a person at the console can call this. `MyHiFi.Playback.standby/1` reaches
   it through the event of the player.
@@ -161,8 +161,8 @@ defmodule MyHiFi.SwitchOff do
 
     case drain(drain_ms) do
       :ok ->
-        # A buffer that holds used marks writes them before the log folds into the
-        # database, so a device that says this holds nothing in memory. See
+        # A buffer of used marks writes them before the log folds into the
+        # database, so a device that says this keeps nothing in memory. See
         # `MyHiFi.Cache.Touches`.
         Touches.flush()
         checkpoint(:truncate)
@@ -184,18 +184,18 @@ defmodule MyHiFi.SwitchOff do
   end
 
   @doc """
-  Put what the database holds into the file that holds it.
+  Write what the database keeps into the file behind it.
 
   `:truncate` is for a device that is going quiet, and it empties the log. `:passive`
   is for the checkpoint of the period, and it never waits for a reader and therefore
-  never holds a track that plays.
+  never stops a track that plays.
   """
   @spec checkpoint(:truncate | :passive) :: :ok
   def checkpoint(mode \\ :truncate)
 
   # **A pragma takes no bind parameter**, so the mode cannot be a value of the query and
   # a name that a caller gives would have to reach the text of it. One clause for each
-  # holds the whole query as a literal instead, and a mode that this does not know is a
+  # names the whole query as a literal instead, and a mode that this does not know is a
   # fault of the caller and never a query that runs.
   def checkpoint(:truncate), do: run("PRAGMA wal_checkpoint(TRUNCATE)")
   def checkpoint(:passive), do: run("PRAGMA wal_checkpoint(PASSIVE)")

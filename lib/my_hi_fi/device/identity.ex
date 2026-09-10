@@ -2,7 +2,7 @@ defmodule MyHiFi.Device.Identity do
   @moduledoc """
   What this device is called, and the picture that it shows when it plays nothing.
 
-  A household holds more than one of these, so a person names each one. The name
+  A household has more than one of these, so a person names each one. The name
   reaches five places:
 
   - The mDNS advertisement, so a browser reaches `<name>.local`.
@@ -18,9 +18,9 @@ defmodule MyHiFi.Device.Identity do
     mode and normal operation cannot happen together. A name in the database is
     therefore unreadable in the one mode that needs it for the access point.
   - `fwup` writes the same block when a person makes an SD card, so a factory can name
-    a device before it ever starts. The `provisioning.conf` of the Nerves system holds
+    a device before it ever starts. The `provisioning.conf` of the Nerves system carries
     the line that does it, beside the serial number.
-  - An upgrade keeps what the block holds. `uboot_clearenv` runs in the `complete`
+  - An upgrade keeps what the block carries. `uboot_clearenv` runs in the `complete`
     task of that system and in no upgrade task, so the name goes when the card is
     written and at no other time.
 
@@ -35,7 +35,7 @@ defmodule MyHiFi.Device.Identity do
   and `shipped_splash/1`.
 
   **The name of the board does not move.** erlinit sets the hostname at the boot, and
-  no dependency of this firmware holds a call to change it after that. The device
+  no dependency of this firmware makes a call to change it after that. The device
   therefore answers for `<name>.local` **and** for `nerves-<serial>.local`, and
   `MdnsLite.set_hosts/1` puts the name of the person first, so the advertisement of
   the web service carries it.
@@ -46,12 +46,12 @@ defmodule MyHiFi.Device.Identity do
   a picture of their own draws that instead. `shipped_splash/1` gives the first and
   `splash_path/0` gives the second, and a screen asks for the person's one first.
 
-  `MyHiFi.Artwork` holds the picture of a person, in the way that it holds the logo of a
+  `MyHiFi.Artwork` keeps the picture of a person, in the way that it keeps the logo of a
   station: the same store, the same thumbnail, the same address, and the same rule about
   which types this firmware serves. A screen therefore reads the splash through the path that it
   reads a cover with, and `MyHiFi.Peripheral.PiTft.asset_options/0` needs no change.
 
-  The name of the entry is the hash of the bytes, so it holds 64 characters like every
+  The name of the entry is the hash of the bytes, so it is 64 characters like every
   other name of that module. See `MyHiFi.Artwork.put/1`.
   """
 
@@ -62,7 +62,7 @@ defmodule MyHiFi.Device.Identity do
   alias Nerves.Runtime.KV
 
   # The keys of this firmware, beside the `nerves_` keys of the Nerves project. The
-  # block holds 8 KB, and these three hold a few dozen bytes of it.
+  # block takes 8 KB, and these three take a few dozen bytes of it.
   #
   # **One of them belongs to the device and two belong to the build.**
   # `myhifi_device_name` is what a person called this device.
@@ -90,7 +90,7 @@ defmodule MyHiFi.Device.Identity do
   @doc """
   The name that this device answers to.
 
-  It gives the name of the product for a device that no person named, which is `PiFi`
+  It returns the name of the product for a device that no person named, which is `PiFi`
   until a provisioner says otherwise. See `default_name/0`.
   """
   @spec name() :: String.t()
@@ -108,7 +108,7 @@ defmodule MyHiFi.Device.Identity do
   not in the layout of each screen.
 
   **A provisioner names it, so one firmware serves several products.**
-  `myhifi_product_name` of the firmware key store holds it, `fwup` writes that block
+  `myhifi_product_name` of the firmware key store carries it, `fwup` writes that block
   when a person makes an SD card, and a build that provisions nothing answers `PiFi`.
   The `provisioning.conf` of the Nerves system is where such a line goes, beside the
   serial number.
@@ -143,7 +143,7 @@ defmodule MyHiFi.Device.Identity do
   @doc """
   The name in the form that a host name takes.
 
-  mDNS holds one label of lower case letters, digits and hyphens, and a person writes
+  mDNS takes one label of lower case letters, digits and hyphens, and a person writes
   spaces and capitals. A name that gives no label at all, such as one of Japanese
   characters, gives the default.
 
@@ -184,7 +184,7 @@ defmodule MyHiFi.Device.Identity do
   @doc """
   The address of the picture that the device shows when it plays nothing.
 
-  It gives `nil` for a device that holds no picture. The address is the one that
+  It returns `nil` for a device with no picture. The address is the one that
   `MyHiFi.Artwork` serves, so a page draws it and a screen reads the thumbnail of it.
   """
   @spec splash_path() :: String.t() | nil
@@ -199,10 +199,10 @@ defmodule MyHiFi.Device.Identity do
   The picture that this firmware ships, for a screen of one size.
 
   **A device that a person has given no picture is not a device with no picture.** The
-  firmware holds one for each screen that it drives, drawn at the size of that screen,
+  firmware ships one for each screen that it drives, drawn at the size of that screen,
   so a screen that plays nothing shows the mark of the product and not a dark field.
 
-  It gives `nil` for a size that this firmware holds no picture for, and a screen then
+  It returns `nil` for a size that this firmware ships no picture for, and a screen then
   draws its own field. A new screen therefore needs a file and no code.
 
   The file is a PNG of exactly the size of the screen. **A picture of another size
@@ -211,10 +211,10 @@ defmodule MyHiFi.Device.Identity do
   directory so that Emerge may read it.
 
   **A provisioner names the set, so one firmware carries the artwork of several
-  products.** `myhifi_splash_name` of the firmware key store holds the name in front of
+  products.** `myhifi_splash_name` of the firmware key store carries the name in front of
   the size, `fwup` writes that block when a person makes an SD card, and a build that
   provisions nothing reads `pifi-320x240.png`. `priv/splash` is the list of the sets
-  that this firmware holds, and a product that a person adds needs a file for each
+  that this firmware ships, and a product that a person adds needs a file for each
   screen and no code at all.
 
       iex> MyHiFi.Device.Identity.shipped_splash({7, 7})
@@ -239,7 +239,7 @@ defmodule MyHiFi.Device.Identity do
     Application.get_env(:my_hi_fi, :splash_directory, Application.app_dir(:my_hi_fi, @shipped))
   end
 
-  @doc "The name of the entry that holds the picture, or `nil` for a device with none."
+  @doc "The name of the entry of the picture, or `nil` for a device with none."
   @spec splash_name() :: String.t() | nil
   def splash_name do
     case Settings.fetch(@splash_key) do
@@ -312,7 +312,7 @@ defmodule MyHiFi.Device.Identity do
 
   # The name in front of the size, which a provisioner writes and a build that
   # provisions nothing reads as `pifi`. `splash_name/0` above is another thing: the
-  # entry of the cache that holds the picture of a person.
+  # entry of the cache that keeps the picture of a person.
   defp shipped_name, do: provisioned(@splash_name_key, @default_splash_name)
 
   # **A value of the build, and not of the device.** `fwup` writes the block, so a

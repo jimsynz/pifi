@@ -18,7 +18,7 @@ defmodule MyHiFi.Setup do
   @doc """
   Start the wizard if the device holds no Wi-Fi configuration.
 
-  It gives `:running` for setup mode, and `:not_needed` for normal operation. The
+  It returns `:running` for setup mode, and `:not_needed` for normal operation. The
   host always gives `:not_needed`.
 
   An error also gives `:not_needed`. A board that cannot make an access point

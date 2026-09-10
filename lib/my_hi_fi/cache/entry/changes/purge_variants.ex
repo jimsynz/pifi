@@ -2,13 +2,13 @@ defmodule MyHiFi.Cache.Entry.Changes.PurgeVariants do
   @moduledoc """
   Removes the variants of an entry before the entry goes.
 
-  A thumbnail names its picture in `variant_of_blob_id`, and the migration holds a
+  A thumbnail names its picture in `variant_of_blob_id`, and the migration declares a
   foreign key on that column. **A destroy of the picture alone therefore fails**, and
   `MyHiFi.Cache.Entry.Prune` then reports that it could not remove every entry and
   frees nothing. A thumbnail of a picture that is absent is waste, so the two go
   together.
 
-  A variant holds no variant of its own, so this stops after one step.
+  A variant has no variant of its own, so this stops after one step.
   """
 
   use Ash.Resource.Change
@@ -39,7 +39,7 @@ defmodule MyHiFi.Cache.Entry.Changes.PurgeVariants do
       {:error, errors} ->
         Ash.Changeset.add_error(changeset,
           field: :id,
-          message: "holds variants that could not go: #{inspect(errors)}"
+          message: "has variants that could not go: #{inspect(errors)}"
         )
     end
   end

@@ -27,7 +27,7 @@ defmodule MyHiFi.Settings.Setting do
     defaults [:read]
 
     read :by_key do
-      description "Read one setting. It gives an error when the key is absent."
+      description "Read one setting. It returns an error when the key is absent."
 
       argument :key, :string, allow_nil?: false
 

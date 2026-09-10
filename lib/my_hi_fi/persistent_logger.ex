@@ -74,7 +74,7 @@ defmodule MyHiFi.PersistentLogger do
   @doc """
   Read the log file of this device.
 
-  It gives the older file as well when one is there, and the older lines come
+  It returns the older file as well when one is there, and the older lines come
   first.
   """
   @sobelow_skip ["Traversal.FileModule"]
@@ -91,7 +91,7 @@ defmodule MyHiFi.PersistentLogger do
   @doc """
   Read the log of the boot before this one.
 
-  It gives `{:error, :enoent}` when the last restart was an orderly one, because
+  It returns `{:error, :enoent}` when the last restart was an orderly one, because
   ramoops keeps a record of an unclean reset only.
   """
   @spec last_boot() :: {:ok, String.t()} | {:error, term()}

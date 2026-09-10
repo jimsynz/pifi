@@ -1,15 +1,15 @@
 defmodule MyHiFi.Device.Storage do
   @moduledoc """
-  How much room the device holds.
+  How much room the device has.
 
   The application data partition is the only writable storage. It mounts at
-  `/root` on a target, and it holds the database, the secret, and the artwork
+  `/root` on a target, and it keeps the database, the secret, and the artwork
   later.
 
-  The resource holds no data of its own, so it needs no data layer.
+  The resource stores no data of its own, so it needs no data layer.
 
   `report` gives the numbers of the whole partition, and `usage` says which kind of
-  media holds the room. The two are separate actions because `report` runs at each
+  media takes the room. The two are separate actions because `report` runs at each
   settle of `MyHiFi.Device.Monitor` and `usage` reads the cache and the items, which
   is work that only the storage page needs.
   """
@@ -52,9 +52,9 @@ defmodule MyHiFi.Device.Storage do
       names the kinds, so they know whether to remove the downloads of one source or
       to clear the artwork.
 
-      The kinds sum to `used_bytes` of `report`, because `other` holds the rest: the
+      The kinds sum to `used_bytes` of `report`, because `other` covers the rest: the
       firmware, the logs and what a file system needs for 10000 small files. The
-      largest kind comes first, and a kind that holds no byte is absent.
+      largest kind comes first, and a kind of no bytes is absent.
       """
 
       constraints items: [

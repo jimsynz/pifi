@@ -4,7 +4,7 @@ defmodule MyHiFi.DeviceUi do
 
   A peripheral says that a person pressed a button, and this module decides what the
   press means. **The mapping lives here and nowhere else.** A peripheral names a
-  button by its place on the board, because a board holds four buttons in a row and
+  button by its place on the board, because a board has four buttons in a row and
   no label, and a device that changed the order of its controls would otherwise need
   a change in the driver of the hardware.
 
@@ -20,7 +20,7 @@ defmodule MyHiFi.DeviceUi do
   Standby is the leftmost, as it is on the web page, because a person who wants the
   device quiet reaches for the end of the row.
 
-  The Pirate Audio holds two that answer, down the left of the screen:
+  The Pirate Audio has two that answer, down the left of the screen:
 
   | Button | How long | What it does |
   | ------ | -------- | ------------ |
@@ -28,11 +28,11 @@ defmodule MyHiFi.DeviceUi do
   | 1      | A hold   | Standby, in and out |
   | 2      | A tap    | The track after |
 
-  **Two buttons hold three controls, so one of them holds two.** A board of four has a
+  **Two buttons carry three controls, so one of them carries two.** A board of four has a
   button for standby and therefore reads no hold at all.
 
   The track before is the one that a person asks for least, so it is the one that no
-  button holds.
+  button carries.
 
   It uses `MyHiFi.Playback`, as the web interface does, so a press and a click take
   the same path.
@@ -41,7 +41,7 @@ defmodule MyHiFi.DeviceUi do
 
   This module is to hold the navigation of the device screen as well: the selected
   index, the list that a person moves through, and the `:view` and `:hint` events
-  that go to a screen and to a knob. It holds the buttons alone for now, and the
+  that go to a screen and to a knob. It reads the buttons alone for now, and the
   screen shows the now playing view alone.
   """
 
@@ -100,7 +100,7 @@ defmodule MyHiFi.DeviceUi do
   defp press(_row_of_four, 3, :short), do: play_pause()
   defp press(_row_of_four, 4, :short), do: report(Playback.next())
 
-  # **A hold of the track buttons moves the level.** A row of four holds every control
+  # **A hold of the track buttons moves the level.** A row of four carries every control
   # that this device needs on a short press already, and a hold of one of them held no
   # control at all, so the level costs no control that a person had. It sits on the two
   # that move through the tracks, because down and up must sit beside each other and in
@@ -112,15 +112,15 @@ defmodule MyHiFi.DeviceUi do
   defp press(_row_of_four, 4, :long), do: step_volume(@volume_step)
 
   # A board may hold more buttons than this device knows what to do with, and a hold of
-  # a button that holds no second control is not a second control.
+  # a button with no second control is not a second control.
   defp press(_peripheral, _button, _hold), do: :ok
 
   # **A button that a person holds moves the level, and it reads the level first.** The
-  # player holds no copy of it, and `MyHiFi.Output.Volume` is the one place that does,
+  # player keeps no copy of it, and `MyHiFi.Output.Volume` is the one place that does,
   # so a missed event cannot leave this moving from the wrong number.
   #
   # A press that reaches a card with no level does nothing that a person can hear, and
-  # the log holds the reason. See `MyHiFi.Output.Volume`.
+  # the log names the reason. See `MyHiFi.Output.Volume`.
   defp step_volume(step) do
     case Playback.volume!() do
       %{enabled?: true, percent: percent} ->
@@ -137,7 +137,7 @@ defmodule MyHiFi.DeviceUi do
     report(Playback.standby(not Playback.state!().standby?))
   end
 
-  # The player holds the state, so this reads it and does not keep a copy. A press is
+  # The player owns the state, so this reads it and does not keep a copy. A press is
   # rare, and a copy that a missed event left behind would pause a track that plays.
   #
   # `playing?` says that the audio runs, and a pause of a track that is paused already
@@ -147,7 +147,7 @@ defmodule MyHiFi.DeviceUi do
   end
 
   # A control of a person must never stop this process. A press that cannot happen,
-  # such as a next with nothing after it, is normal and the log holds the reason.
+  # such as a next with nothing after it, is normal and the log names the reason.
   defp report(:ok), do: :ok
   defp report({:ok, _result}), do: :ok
   defp report({:error, reason}), do: Logger.info("The control did nothing: #{inspect(reason)}")

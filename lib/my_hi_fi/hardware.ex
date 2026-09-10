@@ -45,10 +45,10 @@ defmodule MyHiFi.Hardware do
   hardware that answers. A profile that names an overlay which the boot partition does
   not hold therefore writes one time, restarts one time, and then agrees with itself.
 
-  ## Which partition holds `config.txt`
+  ## Which partition carries `config.txt`
 
-  The card holds three FAT partitions. `erlinit.config` mounts the first at `/boot`, and
-  that one holds `autoboot.txt`, `bootcode.bin`, and a `config.txt` of no bytes. The two
+  The card has three FAT partitions. `erlinit.config` mounts the first at `/boot`, and
+  that one carries `autoboot.txt`, `bootcode.bin`, and a `config.txt` of no bytes. The two
   others hold a firmware each, and the real `config.txt` is in one of them.
 
   **The root partition that runs says which of the two, and `autoboot.txt` does not.**
@@ -114,7 +114,7 @@ defmodule MyHiFi.Hardware do
   @doc """
   Choose a profile, write the boot configuration, and restart.
 
-  It gives `{:error, reason}` and restarts nothing when the write fails, so a person
+  It returns `{:error, reason}` and restarts nothing when the write fails, so a person
   reads what went wrong on the page that they pressed.
   """
   @spec choose(String.t()) :: :ok | {:error, term()}
@@ -129,20 +129,20 @@ defmodule MyHiFi.Hardware do
   Write the boot configuration again when it does not hold the choice of a person.
 
   `MyHiFi.Application` calls this at each boot. It restarts the device when it writes,
-  and it does nothing at all when the file already agrees. A host holds no boot
-  partition and needs none, so it gives `:not_needed`.
+  and it does nothing at all when the file already agrees. A host has no boot
+  partition and needs none, so it returns `:not_needed`.
   """
   @spec reconcile() :: :ok | :not_needed | {:error, term()}
   def reconcile, do: do_reconcile()
 
   @doc """
-  The name of the setting that holds the choice.
+  The name of the setting of the choice.
   """
   @spec setting() :: String.t()
   def setting, do: @setting
 
   # `config.txt` belongs to the bootloader, and the bootloader runs before Linux, so a
-  # host holds no such file and needs none.
+  # host has no such file and needs none.
   if Mix.target() == :host do
     defp do_choose(profile) do
       with {:ok, _setting} <- Settings.put(@setting, profile.id), do: :ok
@@ -154,9 +154,9 @@ defmodule MyHiFi.Hardware do
 
     alias MyHiFi.Hardware.ConfigTxt
 
-    # The card holds three FAT partitions. `erlinit.config` mounts the first at `/boot`,
-    # and that one holds `autoboot.txt`, `bootcode.bin`, and a `config.txt` of no bytes.
-    # The two others hold a firmware each, and each one holds the `config.txt` and the
+    # The card has three FAT partitions. `erlinit.config` mounts the first at `/boot`,
+    # and that one carries `autoboot.txt`, `bootcode.bin`, and a `config.txt` of no bytes.
+    # The two others carry a firmware each, and each one carries the `config.txt` and the
     # `cmdline.txt` of its own slot.
     @boot_devices ["/dev/mmcblk0p2", "/dev/mmcblk0p3"]
     @cmdline_path "/proc/cmdline"
@@ -189,7 +189,7 @@ defmodule MyHiFi.Hardware do
 
     # The guard tries every 10 seconds. It waits for the applications and then for the
     # status, and it gives each of the two 10 tries, so 200 seconds is its own limit.
-    # This waits longer than that before it gives up.
+    # This waits longer than that before it stops.
     @validation_poll_ms 1_000
     @validation_wait_ms 240_000
 
@@ -203,7 +203,7 @@ defmodule MyHiFi.Hardware do
       Logger.error(
         "This firmware is not validated, so the device does not restart. A restart now " <>
           "would give the slot back to the firmware before it. The boot configuration " <>
-          "holds the profile, and the next restart uses it."
+          "has the profile, and the next restart uses it."
       )
 
       {:error, :not_validated}
@@ -220,11 +220,11 @@ defmodule MyHiFi.Hardware do
     end
 
     @doc """
-    The block device that holds the `config.txt` of this boot, or `nil`.
+    The block device of the `config.txt` of this boot, or `nil`.
 
     **The root partition that runs is the answer, and `autoboot.txt` is not.** The
     bootloader passed the root partition on the kernel command line, so `/proc/cmdline`
-    holds what it chose and nothing has to presume it. Each boot partition holds the
+    names what it chose and nothing has to presume it. Each boot partition carries the
     `cmdline.txt` of its own slot, and that file names one root partition. The boot
     partition whose `cmdline.txt` names the root that runs is the one that the bootloader
     read. `fwup-ops.conf` of the Nerves system reads the root partition for the same
@@ -258,7 +258,7 @@ defmodule MyHiFi.Hardware do
     end
 
     # The boot partition is not mounted, so this mounts each one in turn and takes it
-    # away again. A partition that does not mount holds no answer and is not the one.
+    # away again. A partition that does not mount gives no answer and is not the one.
     defp names_root?(device, root) do
       case mount(device) do
         :ok ->
@@ -275,8 +275,8 @@ defmodule MyHiFi.Hardware do
     defp slot_root({:ok, contents}), do: root_in(contents)
     defp slot_root({:error, _reason}), do: nil
 
-    # A `cmdline.txt` holds comment lines above the one line that the kernel takes, and
-    # no comment of it holds `root=`. `rootwait` sits beside the name and holds no `=`,
+    # A `cmdline.txt` carries comment lines above the one line that the kernel takes, and
+    # no comment of it names `root=`. `rootwait` sits beside the name and carries no `=`,
     # so it cannot match.
     defp root_in(contents) do
       case Regex.run(~r/\broot=(\S+)/, contents) do

@@ -3,13 +3,13 @@ defmodule MyHiFi.Output.APlayPort do
   Holds `aplay` open across more than one pipeline.
 
   This firmware builds a pipeline for each playable, and a pipeline used to build its
-  own `aplay` with it. **A start of `aplay` opens the sound card, and that holds a
+  own `aplay` with it. **A start of `aplay` opens the sound card, and that costs a
   silence of about one second**, so a person heard a gap between one track of an album
   and the next, and `MyHiFi.Player.Prefetch` could remove the wait for the network and
   not that gap.
 
   It also cut the end of every track. `MyHiFi.Output.APlaySink` ended the program when
-  its input ended, and ALSA holds about half a second of sound, so the last half second
+  its input ended, and ALSA keeps about half a second of sound, so the last half second
   of a track went with the program that was going to play it.
 
   This process owns the port instead, and it outlives every pipeline. A sink asks for
@@ -19,14 +19,14 @@ defmodule MyHiFi.Output.APlayPort do
 
   ## The arguments are the name of the sound
 
-  `hold/2` takes a program and its arguments, and it holds one port for one of those.
+  `hold/2` takes a program and its arguments, and it keeps one port for one of those.
   **The format of the audio is on the command line of `aplay`**, so two tracks of one
   rate give the same arguments and one port, and a track of another rate gives other
   arguments and a new port. An album therefore plays through one port, and a change
   from a station at 24000 Hz to a track at 44100 Hz costs what it always cost.
 
   A port for every format would need a resampler in front of the sink, and this
-  firmware holds none: `rate48` of `/etc/asound.conf` converts from the rate that
+  firmware needs none: `rate48` of `/etc/asound.conf` converts from the rate that
   `aplay` **names** to the 48000 Hz that the card runs at, so naming 48000 Hz for
   44100 Hz audio plays the music 8.8% fast. See `MyHiFi.Output.Alsa`.
 
@@ -70,8 +70,8 @@ defmodule MyHiFi.Output.APlayPort do
   @doc """
   The port of one program, opened now or held from before.
 
-  It gives the port that it holds when the program and the arguments are the ones that
-  it holds. It ends the program that it held and opens the new one otherwise.
+  It returns the port that it already keeps when the program and the arguments are the
+  ones that it opened. It ends that program and opens the new one otherwise.
   """
   @spec hold(String.t(), [String.t()]) :: {:ok, port()} | {:error, term()}
   def hold(program, arguments) do
@@ -82,14 +82,14 @@ defmodule MyHiFi.Output.APlayPort do
   End the program now, so the room is quiet.
 
   **Closing the port alone is not enough.** `aplay` then sees the end of its input and
-  plays what it already holds, which is about half a second of ALSA and whatever the
+  plays what it already has, which is about half a second of ALSA and whatever the
   pipeline sends while it stops, so a person who pressed stop waited seconds for
   silence.
   """
   @spec close() :: :ok
   def close, do: GenServer.call(__MODULE__, :close)
 
-  @doc "The program and the arguments of the port that this holds, or `nil` for none."
+  @doc "The program and the arguments of the port that this keeps, or `nil` for none."
   @spec held() :: {String.t(), [String.t()]} | nil
   def held, do: GenServer.call(__MODULE__, :held)
 
@@ -164,7 +164,7 @@ defmodule MyHiFi.Output.APlayPort do
     %{state | port: nil, key: nil}
   end
 
-  # The program holds the sound card and it reads at the rate of the clock of the DAC,
+  # The program owns the sound card and it reads at the rate of the clock of the DAC,
   # so ending it is what makes the room quiet. A measurement on 2026-08-21 gave 35 to
   # 245 ms from a stop to silence.
   defp stop_program(port) do

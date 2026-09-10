@@ -1,6 +1,6 @@
 defmodule MyHiFi.Cache.Entry.Changes.Write do
   @moduledoc """
-  Puts the file of an entry on the disk, and holds what it is.
+  Puts the file of an entry on the disk, and records what it is.
 
   It builds the `key` of the extension, which is the path of the file under the root
   of the cache. `AshStorage` deletes a file by that field, so it must be the path and
@@ -15,13 +15,13 @@ defmodule MyHiFi.Cache.Entry.Changes.Write do
 
   A caller gives the `bytes` argument or the `path` argument.
 
-  - `bytes` holds the whole file in memory. `MyHiFi.Artwork` uses it, because a
+  - `bytes` carries the whole file in memory. `MyHiFi.Artwork` uses it, because a
     picture is 46 KB and it reads the first bytes to name the type.
   - `path` names a file that already sits on this partition, and the hook moves it
     with `File.rename/2`. `MyHiFi.Player.Download` uses it: an episode is 50 MB, and
     a move of one partition copies no byte and cannot half finish.
 
-  A `path` entry holds no `checksum`. `AshStorage` allows nil there, and nothing in
+  A `path` entry carries no `checksum`. `AshStorage` allows nil there, and nothing in
   this firmware reads the field, because each reader opens the file by its path. An
   md5 of 50 MB costs about a second of the CPU of this board and it answers no
   question that a caller asks.
@@ -52,7 +52,7 @@ defmodule MyHiFi.Cache.Entry.Changes.Write do
     changeset
     |> Ash.Changeset.force_change_attribute(:key, Cache.storage_key(namespace, entry_key))
     # `AshStorage.BlobResource.Changes.PurgeFile` calls `blob.service_name.delete/2`,
-    # so this field holds the module and not a short name for it.
+    # so this field names the module and not a short name for it.
     |> Ash.Changeset.force_change_attribute(:service_name, Disk)
     # The attribute holds a map, and `AshStorage.Service.Disk` reads a keyword list
     # from the context. The two shapes are not the same, so each one gets its own.

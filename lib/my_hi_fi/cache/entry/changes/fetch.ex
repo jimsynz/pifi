@@ -8,7 +8,7 @@ defmodule MyHiFi.Cache.Entry.Changes.Fetch do
 
   It sets `content_type` from the header of the answer, and it reads nothing of the
   body to check that. **A caller that needs to know what the bytes are must look at
-  them itself**, because a `content-type` header is often wrong and this cache holds
+  them itself**, because a `content-type` header is often wrong and this cache keeps
   anything. `MyHiFi.Artwork` reads the first bytes of an image for that reason.
 
   `max_bytes` stops a body that is too large. Without it a cache of pictures would

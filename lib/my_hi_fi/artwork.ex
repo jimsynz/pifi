@@ -5,14 +5,14 @@ defmodule MyHiFi.Artwork do
   A station names its logo, and a podcast names the cover of a show and the picture
   of an episode. The web interface serves the copy instead, for two reasons. A page
   then shows a picture when the internet is not there, and the content security
-  policy of the device holds `'self'` alone, so no page asks another server for
+  policy of the device names `'self'` alone, so no page asks another server for
   anything.
 
-  `MyHiFi.Cache` holds the file and the row, in the namespace `"artwork"`. This module
+  `MyHiFi.Cache` keeps the file and the row, in the namespace `"artwork"`. This module
   holds what a cache cannot know:
 
   - The four types that this firmware serves, and the reason that SVG is absent. An
-    SVG file holds a script, and the device serves each file from its own address, so
+    SVG file can carry a script, and the device serves each file from its own address, so
     such a script would run with the rights of the web interface.
   - The read of the first bytes, because a `content-type` header is often wrong.
   - The 4 MB limit for one picture.
@@ -23,7 +23,7 @@ defmodule MyHiFi.Artwork do
 
   **A person also gives a picture, and it lives here too.** The splash of the device
   screen comes from a browser and not from a service, so `put/1` names it by the hash
-  of the bytes. That name holds 64 characters like the hash of an address, and every
+  of the bytes. That name is 64 characters like the hash of an address, and every
   reader of this module therefore takes it. See `MyHiFi.Device.Identity`.
   """
 
@@ -51,14 +51,14 @@ defmodule MyHiFi.Artwork do
 
   @served_types Map.values(@content_types)
 
-  # A logo of a station is small, and a cover of a podcast is 1.2 MB. 4 MB holds
+  # A logo of a station is small, and a cover of a podcast is 1.2 MB. 4 MB takes
   # either one and refuses a photograph that a service named by mistake.
   @byte_limit 4 * 1024 * 1024
 
   @doc """
-  The name of the entry for one address, if the cache holds it.
+  The name of the entry for one address, if the cache has it.
 
-  It gives `nil` for an address that the cache does not hold, and for an address that
+  It returns `nil` for an address that the cache does not hold, and for an address that
   is absent. A caller then shows no picture and asks for a copy.
   """
   @spec name(String.t() | nil) :: String.t() | nil
@@ -100,16 +100,16 @@ defmodule MyHiFi.Artwork do
   @doc """
   Everything that the web interface needs to send one picture.
 
-  It gives the path, the type and the entity tag in one read, and it notes that
+  It returns the path, the type and the entity tag in one read, and it notes that
   something used the entry, which is what orders the eviction. See `MyHiFi.Cache`.
 
   The entity tag is the checksum of the bytes, which `MyHiFi.Cache` writes for each
   entry that arrives as bytes. Every picture and every thumbnail arrives that way, so
-  the field always holds a value here.
+  the field always carries a value here.
 
   `name` comes from a request, so a name that is not a hash gives `:error` and no
   request reads another file of the partition. A type that this module does not serve
-  gives `:error` as well, because the cache holds any bytes and this route must send
+  gives `:error` as well, because the cache keeps any bytes and this route must send
   an image alone.
   """
   @spec serve(String.t()) :: {:ok, Path.t(), String.t(), String.t()} | :error
@@ -158,7 +158,7 @@ defmodule MyHiFi.Artwork do
   @doc """
   Read one address and store the answer.
 
-  It gives the name of the entry. It refuses an answer that is not an image of a type
+  It returns the name of the entry. It refuses an answer that is not an image of a type
   that this module serves, and it refuses one that is too large for a picture.
 
   The bytes decide the type, and the header of the answer does not. Of the 11 New
@@ -182,7 +182,7 @@ defmodule MyHiFi.Artwork do
   Hold a picture that a person gave, and give the name of the entry.
 
   A person gives bytes and no address, so the name of the entry is the hash of the
-  bytes. That name holds 64 hexadecimal characters like every other name here, so
+  bytes. That name is 64 hexadecimal characters like every other name here, so
   `serve/1`, `serve_thumbnail/1` and `accent/1` take it and no route needs a rule of
   its own. The same file twice is therefore one entry.
 
@@ -195,7 +195,7 @@ defmodule MyHiFi.Artwork do
   and never the picture. The person who gave the file learns that at the moment that
   they give it.
 
-  A host build holds no `vipsthumbnail`, and that one fault gives no error: the picture
+  A host build has no `vipsthumbnail`, and that one fault gives no error: the picture
   is held, and the screen of a target is where the thumbnail matters.
   """
   @spec put(binary()) :: {:ok, String.t()} | {:error, term()}
@@ -219,7 +219,7 @@ defmodule MyHiFi.Artwork do
   @doc """
   Remove one picture, and the thumbnail of it.
 
-  A name that the cache does not hold gives `:ok`, because the cache then holds what
+  A name that the cache does not hold gives `:ok`, because the cache then has what
   the caller asked for.
   """
   @spec remove(String.t()) :: :ok
@@ -238,7 +238,7 @@ defmodule MyHiFi.Artwork do
   Whether this firmware can read one address.
 
   **4 of the 247 New Zealand stations name the text `"null"` as their logo**,
-  because that is what Radio Browser sends. `Req` raises for an address that holds
+  because that is what Radio Browser sends. `Req` raises for an address that carries
   no scheme, so a caller of `fetch/1` got an exception and not an error, and
   `MyHiFi.Artwork.Worker` then failed three times for a station that can never hold
   a picture.
@@ -262,14 +262,14 @@ defmodule MyHiFi.Artwork do
   @doc """
   Where the pictures live.
 
-  A test removes this directory. The cache holds each namespace in a directory of its
+  A test removes this directory. The cache keeps each namespace in a directory of its
   own.
   """
   @spec directory() :: Path.t()
   def directory, do: Path.join(Cache.directory(), @namespace)
 
   @doc """
-  The namespace that the cache holds a picture under.
+  The namespace that the cache keeps a picture under.
 
   `MyHiFi.Device.Storage.Usage` reads it, so the storage report names the same
   namespace that this module writes. See `MyHiFi.Player.Download.namespace/0`.
@@ -289,14 +289,14 @@ defmodule MyHiFi.Artwork do
   Make a thumbnail of one artwork entry.
 
   It reads the source file, runs `vipsthumbnail`, and writes the answer to the cache
-  as an entry of its own. That entry holds `variant_of_blob_id`, which names the
+  as an entry of its own. That entry carries `variant_of_blob_id`, which names the
   picture, so a caller finds one from the other.
 
   A source that is not JPEG or PNG gives no thumbnail, because libvips in this
   firmware writes neither WebP nor GIF.
 
-  A source that already holds a thumbnail of these settings does nothing and gives
-  that one. A thumbnail that an older build wrote holds another digest, and this
+  A source that already has a thumbnail of these settings does nothing and returns
+  that one. A thumbnail that an older build wrote carries another digest, and this
   writes a new one over it. See `MyHiFi.Artwork.Thumbnail.digest/0`.
   """
   @spec generate_thumbnail(MyHiFi.Cache.Entry.t()) ::
@@ -315,16 +315,16 @@ defmodule MyHiFi.Artwork do
   @doc """
   The thumbnail of one artwork entry, if it exists.
 
-  It gives `nil` for an entry that holds no thumbnail, or for an entry that is
+  It returns `nil` for an entry with no thumbnail, or for an entry that is
   absent. A caller then shows the original or no picture.
   """
   @spec thumbnail(MyHiFi.Cache.Entry.t()) :: MyHiFi.Cache.Entry.t() | nil
   def thumbnail(entry), do: existing_thumbnail(entry)
 
   @doc """
-  The name of the thumbnail for one address, if the cache holds it.
+  The name of the thumbnail for one address, if the cache has it.
 
-  It gives `nil` for an address that the cache does not hold, for one that holds
+  It returns `nil` for an address that the cache does not hold, for one that has
   no thumbnail, or for an address that is absent.
   """
   @spec thumbnail_name(String.t() | nil) :: String.t() | nil
@@ -351,9 +351,9 @@ defmodule MyHiFi.Artwork do
 
   `MyHiFi.Artwork.Thumbnail` writes it when it makes the thumbnail, so this reads a
   row and no picture. The device screen and the web page both read this, and neither
-  one holds a rule of its own. See `MyHiFi.Artwork.Accent`.
+  one has a rule of its own. See `MyHiFi.Artwork.Accent`.
 
-  A picture of greys gives `nil`, and so does a picture that holds no thumbnail: a
+  A picture of greys gives `nil`, and so does a picture with no thumbnail: a
   WebP and a GIF each hold none.
   """
   @spec accent(String.t() | nil) :: Accent.t() | nil
@@ -372,13 +372,13 @@ defmodule MyHiFi.Artwork do
   @doc """
   Everything that a caller needs to send one thumbnail.
 
-  It gives the path, the type and the entity tag in one read, and it notes that
+  It returns the path, the type and the entity tag in one read, and it notes that
   something used the entry. See `serve/1`.
 
   The entity tag moves when the thumbnail moves, and a new build of
   `MyHiFi.Artwork.Thumbnail` is one thing that moves it. The address of a thumbnail
-  holds the name of the picture alone, so the tag is what tells a browser that the
-  bytes at that address are not the bytes that it holds.
+  carries the name of the picture alone, so the tag is what tells a browser that the
+  bytes at that address are not the bytes that it already has.
   """
   @spec serve_thumbnail(String.t()) :: {:ok, Path.t(), String.t(), String.t()} | :error
   def serve_thumbnail(name) do
@@ -412,7 +412,7 @@ defmodule MyHiFi.Artwork do
     Enum.reject(urls, &MapSet.member?(held, hash(&1)))
   end
 
-  # The row holds the colour as the database gives it back, which is a map of strings.
+  # The row carries the colour as the database gives it back, which is a map of strings.
   defp colour(%{"accent" => %{"lightness" => lightness, "chroma" => chroma, "hue" => hue}}) do
     %{lightness: lightness, chroma: chroma, hue: hue}
   end
@@ -449,14 +449,14 @@ defmodule MyHiFi.Artwork do
     end
   end
 
-  # The cache writes the file and holds the row, as it does for the picture itself.
+  # The cache writes the file and keeps the row, as it does for the picture itself.
   # See the `:put` action of `MyHiFi.Cache.Entry` for why the variant action of
   # `AshStorage` cannot.
   defp store_thumbnail(source, bytes, metadata) do
     Cache.put(@namespace, thumbnail_key(source.entry_key), %{
       bytes: bytes,
       # A variant of an entry that stays against an eviction must stay with it. A
-      # picture that a person gave holds `keep?`, and a screen draws the thumbnail and
+      # picture that a person gave carries `keep?`, and a screen draws the thumbnail and
       # never the picture, so a thumbnail that an eviction took would empty the screen
       # and leave the bytes that made it on the card.
       keep?: source.keep?,
@@ -468,7 +468,7 @@ defmodule MyHiFi.Artwork do
     })
   end
 
-  # The key of the picture and a name for what this is. It holds no hash of 64
+  # The key of the picture and a name for what this is. It is no hash of 64
   # characters, so `serve/1` refuses it and the thumbnail route is the one way to it.
   defp thumbnail_key(source_key), do: "#{source_key}.thumbnail"
 
@@ -487,7 +487,7 @@ defmodule MyHiFi.Artwork do
 
   defp small_enough(_bytes), do: :ok
 
-  # A host build holds no `vipsthumbnail`, and a picture without one still belongs to
+  # A host build has no `vipsthumbnail`, and a picture without one still belongs to
   # the device. Every other fault reaches the person who gave the file.
   defp thumbnail_of(entry) do
     case generate_thumbnail(entry) do
@@ -541,7 +541,7 @@ defmodule MyHiFi.Artwork do
 
   defp extension(<<"GIF89a", _rest::binary>>, _declared), do: {:ok, "gif"}
 
-  # A WebP file holds the count of its bytes between the two names.
+  # A WebP file carries the count of its bytes between the two names.
   defp extension(<<"RIFF", _size::binary-size(4), "WEBP", _rest::binary>>, _declared),
     do: {:ok, "webp"}
 
@@ -568,7 +568,7 @@ defmodule MyHiFi.Artwork do
 
   defp body(_response), do: {:error, :empty}
 
-  # A name comes from a request, so it holds 64 hexadecimal characters or nothing at
+  # A name comes from a request, so it is 64 hexadecimal characters or nothing at
   # all reads a file.
   defp hash?(name) when is_binary(name) and byte_size(name) == 64 do
     String.match?(name, ~r/^[0-9a-f]{64}$/)

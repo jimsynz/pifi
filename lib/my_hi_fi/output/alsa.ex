@@ -2,26 +2,26 @@ defmodule MyHiFi.Output.Alsa do
   @moduledoc """
   A sound card, through ALSA.
 
-  The Nerves system holds `alsa-lib`, `aplay` and `amixer`, and no other audio
+  The Nerves system ships `alsa-lib`, `aplay` and `amixer`, and no other audio
   software. `membrane_alsa_plugin` does not exist. `MyHiFi.Output.APlaySink`
   therefore writes the samples to an `aplay` port, and this module finds the
   hardware and names it.
 
   It lists every card, and not the USB cards alone. A USB DAC is what this device
   plays through, and an I2S DAC on the GPIO header is an ALSA card as well. The
-  host of a developer holds a card, and a person can now choose it and hear the
+  host of a developer has a card, and a person can now choose it and hear the
   audio while they work.
 
-  It lists a playback device of a card, and not the card. A card holds none, one,
-  or several, and `aplay` opens a device. One HD-Audio card of a laptop holds the
-  devices 3, 7, 8 and 9 for HDMI and holds no device 0, so a name that ends in
+  It lists a playback device of a card, and not the card. A card has none, one,
+  or several, and `aplay` opens a device. One HD-Audio card of a laptop has the
+  devices 3, 7, 8 and 9 for HDMI and no device 0, so a name that ends in
   `DEV=0` cannot open on it.
 
   A device of a USB card comes first in the list. `MyHiFi.Player` uses the first
   device when the chosen one is absent, so a target with HDMI audio still uses the
   DAC.
 
-  The target needs a custom Nerves system, because the stock `rpi0_2` system holds
+  The target needs a custom Nerves system, because the stock `rpi0_2` system ships
   no USB host stack and no USB audio class driver.
   """
 
@@ -38,7 +38,7 @@ defmodule MyHiFi.Output.Alsa do
   @doc """
   List each playback device that ALSA knows about.
 
-  It reads `/proc/asound`, so it runs no command. It gives an empty list when that
+  It reads `/proc/asound`, so it runs no command. It returns an empty list when that
   directory is absent, so a machine with no sound card gives no error.
   """
   @impl MyHiFi.Output
@@ -63,7 +63,7 @@ defmodule MyHiFi.Output.Alsa do
   `{:membrane_child_crash, :sink, :epipe}`. A measurement on the board on 2026-09-01
   showed `S24_3LE` refused on `hw:` and played on `plughw:`.
 
-  The USB DAC hid this. `rate48` holds the `plug` layer, so that card converted the
+  The USB DAC hid this. `rate48` names the `plug` layer, so that card converted the
   format from the first day, and only a card that reached `hw:` could show the fault.
 
   **The rate is not a preference, and it is not a fact about every card.** USB audio
@@ -71,25 +71,25 @@ defmodule MyHiFi.Output.Alsa do
   packet and a controller must alternate the size of them. The dwc2 controller of this
   board handles that badly. A 440 Hz tone straight to `aplay` on 2026-08-24 was rough
   at 44100 Hz and clean at 24000 Hz and at 48000 Hz, and the level of the tone decided
-  nothing. Almost every podcast holds 44100 Hz MP3, and both RNZ streams hold 24000 Hz,
+  nothing. Almost every podcast is 44100 Hz MP3, and both RNZ streams are 24000 Hz,
   so internet radio never met this.
 
   The fault is in the USB controller of the board, so it reaches USB cards and no
   other kind. A card on the I2S pins plays 44100 Hz as it arrives, and forcing 48000 Hz
   there would resample every podcast for no reason.
 
-  `:alsa_rate48?` says whether the definition is there to name. `rootfs_overlay` holds
+  `:alsa_rate48?` says whether the definition is there to name. `rootfs_overlay` ships
   it, so a target build has it and a host does not. Naming a definition that no
-  configuration holds gives `Unknown PCM rate48:...` and no sound at all.
+  configuration names gives `Unknown PCM rate48:...` and no sound at all.
   """
   @impl MyHiFi.Output
   def sink_spec(device_id) do
     %MyHiFi.Output.APlaySink{device: String.replace_prefix(device_id, "hw:", plug(device_id))}
   end
 
-  # `plughw:` is a device of ALSA itself, so it needs no definition and a host holds it
+  # `plughw:` is a device of ALSA itself, so it needs no definition and a host has it
   # as well. `rate48` is ours, and `:alsa_rate48?` says whether the configuration that
-  # holds it is there to name: naming a definition that no configuration holds gives
+  # says that it is there to name: naming a definition that no configuration has gives
   # `Unknown PCM rate48:...` and no sound at all.
   defp plug(device_id), do: if(forced_48k?(device_id), do: "rate48:", else: "plughw:")
 
@@ -97,8 +97,8 @@ defmodule MyHiFi.Output.Alsa do
     Application.get_env(:my_hi_fi, :alsa_rate48?, false) and usb?(device_id)
   end
 
-  # The identifier holds the name of the card, and `/proc/asound/cards` says which
-  # driver holds it.
+  # The identifier carries the name of the card, and `/proc/asound/cards` says which
+  # driver owns it.
   defp usb?(device_id) do
     case Regex.run(~r/CARD=([^,]+)/, device_id) do
       [_whole, name] -> Enum.any?(cards(), &(&1.id == name and &1.usb?))
@@ -116,13 +116,13 @@ defmodule MyHiFi.Output.Alsa do
   @doc """
   Read the cards from the text of `/proc/asound/cards`.
 
-  Each card takes two lines. The first holds the number, the identifier, the
-  driver and a short name. The second holds a longer description.
+  Each card takes two lines. The first carries the number, the identifier, the
+  driver and a short name. The second carries a longer description.
 
       ` 0 [Audio          ]: USB-Audio - SA9023 USB Audio`
       `                      HiFimeDIY Audio SA9023 USB Audio at usb-1, full speed`
 
-  A card of a USB DAC comes first, and the order of ALSA holds inside each group.
+  A card of a USB DAC comes first, and the order of ALSA stands inside each group.
   """
   @spec parse_cards(String.t()) :: [
           %{number: integer(), id: String.t(), title: String.t(), usb?: boolean()}
@@ -144,7 +144,7 @@ defmodule MyHiFi.Output.Alsa do
   @doc """
   Read the number of a playback device from the text of one `pcm` info file.
 
-  It gives `nil` for a device that records, because a person cannot play to a
+  It returns `nil` for a device that records, because a person cannot play to a
   microphone.
 
       `card: 1`
@@ -168,10 +168,10 @@ defmodule MyHiFi.Output.Alsa do
   end
 
   # The name of a device is what `aplay` opens, and it is what the settings hold.
-  # The title names the card and the device, because one card holds more than one.
+  # The title names the card and the device, because one card has more than one.
   #
   # No path here comes from a person. `Path.wildcard/1` gives each name, and the
-  # pattern holds the number of a card that `/proc/asound/cards` gave.
+  # pattern names the number of a card that `/proc/asound/cards` gave.
   @sobelow_skip ["Traversal.FileModule"]
   defp playback_devices(card) do
     "#{@card_path}#{card.number}/pcm*p/info"
@@ -195,9 +195,9 @@ defmodule MyHiFi.Output.Alsa do
   end
 
   @doc """
-  Whether one card holds a level that this firmware can set.
+  Whether one card has a level that this firmware can set.
 
-  **A DAC of a stereo often holds none.** A measurement on 2026-09-09 gave no mixer
+  **A DAC of a stereo often has none.** A measurement on 2026-09-09 gave no mixer
   control at all for the PCM5102A of a Pirate Audio board, and one control named `PCM`
   for the HiFimeDIY SA9023 USB DAC of the other board. The first chip gives a fixed
   output on purpose, and a person with one sets the level on their amplifier.
@@ -214,8 +214,8 @@ defmodule MyHiFi.Output.Alsa do
 
   **A read of the card cannot hold the number that a person chose.** A measurement on
   2026-09-09 set 60 percent on the USB DAC and read 59 back, because the range of that
-  card holds 111 steps and no step lands on every percentage.
-  `MyHiFi.Output.Volume` therefore holds what the person chose and this only writes it.
+  card has 111 steps and no step lands on every percentage.
+  `MyHiFi.Output.Volume` therefore keeps what the person chose and this only writes it.
   """
   @impl MyHiFi.Output
   def put_volume(device_id, percent) when percent in 0..100 do
@@ -240,9 +240,9 @@ defmodule MyHiFi.Output.Alsa do
       `Simple mixer control 'PCM',0`
       `  Capabilities: pvolume pswitch pswitch-joined`
 
-  **`pvolume` is the capability that matters**, and it says that the control holds a
-  playback level. A control of a capture level holds `cvolume`, and one that only mutes
-  holds `pswitch` alone.
+  **`pvolume` is the capability that matters**, and it says that the control sets a
+  playback level. A control of a capture level names `cvolume`, and one that only mutes
+  names `pswitch` alone.
   """
   @spec parse_scontents(String.t()) :: [%{name: String.t(), index: integer()}]
   def parse_scontents(contents) do
@@ -261,12 +261,12 @@ defmodule MyHiFi.Output.Alsa do
     end
   end
 
-  # **The order is the one that a person means by "the volume".** A card that holds
-  # `Master` holds the level of the whole card there, and `PCM` is the level of the
-  # stream. A card that holds one of the two holds it under one of these names, and the
-  # USB DAC of the measurement holds `PCM` and no `Master`.
+  # **The order is the one that a person means by "the volume".** A card with
+  # `Master` sets the level of the whole card there, and `PCM` is the level of the
+  # stream. A card with one of the two names it one of these ways, and the
+  # USB DAC of the measurement has `PCM` and no `Master`.
   #
-  # A card that names none of them still holds a level, so the first control with a
+  # A card that names none of them still has a level, so the first control with a
   # playback level is better than nothing.
   @preferred ~w[Master PCM Speaker Headphone]
 

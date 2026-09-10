@@ -7,7 +7,7 @@ defmodule MyHiFi.AutoStandby do
   with an automatic standby does. `MyHiFi.Playback.set_standby_minutes/1` sets the
   period, and 0 turns the timer off.
 
-  **The device is quiet when it plays nothing.** A track that plays holds the timer
+  **The device is quiet when it plays nothing.** A track that plays keeps the timer
   off, so an episode of two hours reaches its end with no press. The period starts
   when the audio stops: after a pause, after the last track of the queue, and after a
   fault.
@@ -31,7 +31,7 @@ defmodule MyHiFi.AutoStandby do
 
   ## Why this is a process of its own
 
-  `MyHiFi.Player` holds the standby state already, so the timer looks like it belongs
+  `MyHiFi.Player` keeps the standby state already, so the timer looks like it belongs
   there. It does not. The player answers a control in more than a dozen clauses, and a
   reset of a timer in each one is a reset that the next clause forgets.
 
@@ -53,7 +53,7 @@ defmodule MyHiFi.AutoStandby do
 
   @key "standby.minutes"
 
-  # The period of the ErP rule of the European Union, which a stereo of a shop holds.
+  # The period of the ErP rule of the European Union, which a stereo of a shop follows.
   @default_minutes 20
 
   # The longest period is a day. A person who wants no standby chooses 0.
@@ -70,7 +70,7 @@ defmodule MyHiFi.AutoStandby do
     GenServer.start_link(__MODULE__, options, name: Keyword.get(options, :name, __MODULE__))
   end
 
-  @doc "The settings key that holds the period."
+  @doc "The settings key of the period."
   @spec key() :: String.t()
   def key, do: @key
 
@@ -161,7 +161,7 @@ defmodule MyHiFi.AutoStandby do
 
   # **A cell that reaches the low point puts the device in standby**, because this device
   # cannot turn its own power off and a person who reads nothing loses what the card
-  # holds. See `MyHiFi.Peripheral.Battery`.
+  # reads. See `MyHiFi.Peripheral.Battery`.
   #
   # It acts on the change to low, and not on each event under it. The gauge publishes
   # again at each percentage, so a device that acted on every one of them would go back
@@ -214,7 +214,7 @@ defmodule MyHiFi.AutoStandby do
     end
   end
 
-  # A person who set no period gets the period of the rule. A row that holds something
+  # A person who set no period gets the period of the rule. A row that carries something
   # that is not a number is a row that no part of this firmware writes, and the default
   # is a better answer than a process that will not start.
   defp stored_minutes do

@@ -3,14 +3,14 @@ defmodule MyHiFi.Device.Storage.Report do
   Reads the free space of the writable partition.
 
   **`df` gives the numbers, and not `:disksup`.** `:disksup` of `os_mon` measures on a
-  timer of its own and holds the answer, and its interval is 30 minutes by default. A
+  timer of its own and keeps the answer, and its interval is 30 minutes by default. A
   read between two measurements gives the same numbers again, so a reader that waits for
   a notification and then asks would draw the state of half an hour ago.
   `:disksup.set_check_interval/1` resets that timer and measures nothing, so there is no
   way to ask `os_mon` for a fresh figure. `df` measures when it is called, which is what
-  a report after a write needs. The Nerves system holds `df` in busybox.
+  a report after a write needs. The Nerves system ships `df` in busybox.
 
-  `df -k -P` names the file system that holds one path, so this needs no list of the
+  `df -k -P` names the file system of one path, so this needs no list of the
   mount points and no rule for which one is the longest.
 
   `full?` is the `:disk_almost_full` alarm of `os_mon`, which `:disksup` raises for a
@@ -26,7 +26,7 @@ defmodule MyHiFi.Device.Storage.Report do
   names the same mount point, and `/` counts on a host that keeps the database there.
 
   The path comes from the repository configuration, so a host reports the partition
-  that holds the development database and needs no target.
+  that keeps the development database and needs no target.
   """
 
   use Ash.Resource.Actions.Implementation
@@ -66,12 +66,12 @@ defmodule MyHiFi.Device.Storage.Report do
       {0, 0, nil}
   end
 
-  # The first line names the columns, and the second holds the file system that holds
+  # The first line names the columns, and the second names the file system of
   # the path. The fourth field is the available space, and the second is the size.
   #
   # **The last field is the mount point**, which `full?/1` compares with the alarm of
   # `os_mon`. `-P` puts the whole record on one line, so the last field is that mount
-  # point. A mount point that holds a space would break this, and this device holds
+  # point. A mount point with a space would break this, and this device has
   # `/`, `/root` and `/tmp`.
   defp blocks(output) do
     with [_header, line | _rest] <- String.split(output, "\n", trim: true),

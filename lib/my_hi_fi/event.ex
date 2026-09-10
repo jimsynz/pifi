@@ -7,9 +7,9 @@ defmodule MyHiFi.Event do
   map.
 
   There are six topics. `:player` carries what the player does, and
-  `MyHiFi.Event.Player` holds those structs. `:source` carries a change to the
-  content of a source, and `MyHiFi.Event.Source` holds those. `:device` carries the
-  state of the hardware that no person changes, and `MyHiFi.Event.Device` holds
+  `MyHiFi.Event.Player` defines those structs. `:source` carries a change to the
+  content of a source, and `MyHiFi.Event.Source` defines those. `:device` carries the
+  state of the hardware that no person changes, and `MyHiFi.Event.Device` defines
   those. `:view`, `:input` and `:hint` belong to the device screen and the knob, and
   they arrive with that work.
   """
