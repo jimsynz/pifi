@@ -54,7 +54,9 @@ defmodule MyHiFiWeb.QueueLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: Event.subscribe(:player)
 
-    {:ok, socket |> assign(:page_title, "Play queue") |> load()}
+    socket = socket |> assign(page_title: "Play queue", asked: MapSet.new()) |> load()
+
+    {:ok, socket}
   end
 
   # Any player event can move the playing mark, and a track that ends moves it with
@@ -206,7 +208,30 @@ defmodule MyHiFiWeb.QueueLive do
       |> Enum.map(& &1.item_id)
       |> items_by_id()
 
-    assign(socket, :rows, rows_with_items(rows, items))
+    rows = rows_with_items(rows, items)
+
+    socket |> assign(:rows, rows) |> ask_for_pictures(rows)
+  end
+
+  # **Nothing else asks for the picture of a track.** `MyHiFi.Jellyfin.Fill` asks for
+  # the picture of a container, because a list of containers draws one, and the player
+  # asks for the picture of the track that it starts. This is the one list of tracks
+  # that draws a picture, so a queue showed the picture of the tracks that had played
+  # and a folder for the rest.
+  #
+  # **A page asks one time for one address.** `load/1` runs for each event of the
+  # player, which is once a second while a track plays, and `MyHiFi.Artwork.ensure/1`
+  # reads the cache for the list that it gets.
+  defp ask_for_pictures(socket, rows) do
+    urls =
+      rows
+      |> Enum.map(& &1.item.artwork)
+      |> Enum.reject(&(is_nil(&1) or MapSet.member?(socket.assigns.asked, &1)))
+      |> Enum.uniq()
+
+    Artwork.ensure(urls)
+
+    assign(socket, :asked, MapSet.union(socket.assigns.asked, MapSet.new(urls)))
   end
 
   defp items_by_id([]), do: %{}

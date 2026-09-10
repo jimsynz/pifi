@@ -61,6 +61,21 @@ defmodule MyHiFi.Cache.Entry do
       filter expr(namespace == ^arg(:namespace) and entry_key == ^arg(:entry_key))
     end
 
+    read :by_keys do
+      description """
+      Every entry of one namespace whose key is in a list.
+
+      **One read for a whole list.** A caller that holds many keys and asks which ones
+      the cache holds would otherwise make one query for each of them, and a page of
+      100 rows draws itself again for each event of the player.
+      """
+
+      argument :namespace, :string, allow_nil?: false
+      argument :entry_keys, {:array, :string}, allow_nil?: false
+
+      filter expr(namespace == ^arg(:namespace) and entry_key in ^arg(:entry_keys))
+    end
+
     read :by_namespace do
       description "Every entry of one namespace, the most recently used first."
 

@@ -1,8 +1,10 @@
 defmodule MyHiFi.ArtworkTest do
   use MyHiFi.DataCase, async: false
+  use Oban.Testing, repo: MyHiFi.Repo
 
   alias MyHiFi.Artwork
   alias MyHiFi.Artwork.Thumbnail
+  alias MyHiFi.Artwork.Worker
   alias MyHiFi.Cache
 
   @png <<0x89, "PNG\r\n", 0x1A, "\n", "the rest of a small image">>
@@ -56,6 +58,40 @@ defmodule MyHiFi.ArtworkTest do
       |> Plug.Conn.put_resp_content_type(type)
       |> Plug.Conn.send_resp(200, body)
     end)
+  end
+
+  describe "ensure/1" do
+    test "asks for each address that the cache does not hold" do
+      assert Artwork.ensure([
+               "https://station.test/one.png",
+               "https://station.test/two.png"
+             ]) == :ok
+
+      assert_enqueued(worker: Worker, args: %{"url" => "https://station.test/one.png"})
+      assert_enqueued(worker: Worker, args: %{"url" => "https://station.test/two.png"})
+    end
+
+    test "asks for nothing that the cache holds" do
+      stub("image/png", @png)
+      {:ok, _name} = Artwork.fetch("https://station.test/one.png")
+
+      assert Artwork.ensure(["https://station.test/one.png"]) == :ok
+
+      refute_enqueued(worker: Worker)
+    end
+
+    test "asks for nothing for an address that is absent" do
+      assert Artwork.ensure([nil, "", nil]) == :ok
+
+      refute_enqueued(worker: Worker)
+    end
+
+    test "asks one time for an address that a list holds twice" do
+      assert Artwork.ensure(["https://station.test/one.png", "https://station.test/one.png"]) ==
+               :ok
+
+      assert [_job] = all_enqueued(worker: Worker)
+    end
   end
 
   describe "fetch/1" do

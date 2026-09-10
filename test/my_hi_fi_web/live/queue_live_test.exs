@@ -2,6 +2,7 @@ defmodule MyHiFiWeb.QueueLiveTest do
   # `MyHiFi.Playback.Queue` is on ETS and the table is not private, so its rows outlive
   # one test in the way that `MyHiFi.Player` does.
   use MyHiFiWeb.ConnCase, async: false
+  use Oban.Testing, repo: MyHiFi.Repo
 
   alias MyHiFi.Playback
 
@@ -88,6 +89,27 @@ defmodule MyHiFiWeb.QueueLiveTest do
 
       render_hook(view, "move", %{"id" => third.id, "position" => 2})
       assert titles_on(view) == ["Alpha", "Bravo", "Charlie"]
+    end
+
+    # **Nothing else asks for the picture of a track**, so a queue drew the picture of
+    # the tracks that had played and a folder for the rest.
+    test "the page asks for the picture of each row", %{conn: conn} do
+      item =
+        Playback.upsert_item!(%{
+          source: "internet-radio",
+          source_ref: "station-with-a-logo",
+          title: "Delta",
+          artwork_url: "https://station.test/logo.png"
+        })
+
+      {:ok, _rows} = Playback.replace_queue([item.id], %{playing_index: 0})
+
+      {:ok, _view, _html} = live(conn, ~p"/queue")
+
+      assert_enqueued(
+        worker: MyHiFi.Artwork.Worker,
+        args: %{"url" => "https://station.test/logo.png"}
+      )
     end
 
     test "every row holds a handle to drag", %{conn: conn, rows: rows} do

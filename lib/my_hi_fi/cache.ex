@@ -43,6 +43,7 @@ defmodule MyHiFi.Cache do
       define :put_file, action: :put_file, args: [:namespace, :entry_key]
       define :put_from_url, action: :put_from_url, args: [:namespace]
       define :fetch, action: :by_key, args: [:namespace, :entry_key]
+      define :fetch_many, action: :by_keys, args: [:namespace, :entry_keys]
       define :list_entries, action: :read
       define :entries_in, action: :by_namespace, args: [:namespace]
       define :touch, action: :touch

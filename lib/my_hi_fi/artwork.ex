@@ -29,6 +29,7 @@ defmodule MyHiFi.Artwork do
 
   alias MyHiFi.Artwork.Accent
   alias MyHiFi.Artwork.Thumbnail
+  alias MyHiFi.Artwork.Worker
   alias MyHiFi.Cache
 
   # Sobelow reads `@sobelow_skip` from the source. This registration stops the
@@ -123,6 +124,35 @@ defmodule MyHiFi.Artwork do
     else
       _other -> :error
     end
+  end
+
+  @doc """
+  Ask for every picture of a list that the cache does not hold.
+
+  A page that draws a list of pictures calls this, and the pictures that are absent
+  arrive in a moment. Nothing else on the path of a list asks for one:
+  `thumbnail_path/1` builds an address and reads nothing, and the address of a
+  picture that the cache does not hold answers 404.
+
+  **One read for the whole list.** `MyHiFi.Artwork.Worker.enqueue/1` reads the cache
+  for the address that it gets, so a list of 100 rows would make 100 queries. This
+  makes one, and it calls the worker for the misses alone.
+
+  **A caller must ask one time for one list.** A page of this firmware draws itself
+  again for each event of the player, which is once a second while a track plays, and
+  a caller that asks again on each of those makes that one query each second.
+
+      iex> MyHiFi.Artwork.ensure([nil, ""])
+      :ok
+
+  """
+  @spec ensure([String.t() | nil]) :: :ok
+  def ensure(urls) do
+    urls
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+    |> absent()
+    |> Enum.each(&Worker.enqueue/1)
   end
 
   @doc """
@@ -368,6 +398,18 @@ defmodule MyHiFi.Artwork do
     else
       _other -> :error
     end
+  end
+
+  defp absent([]), do: []
+
+  defp absent(urls) do
+    held =
+      urls
+      |> Enum.map(&hash/1)
+      |> then(&Cache.fetch_many!(@namespace, &1))
+      |> MapSet.new(& &1.entry_key)
+
+    Enum.reject(urls, &MapSet.member?(held, hash(&1)))
   end
 
   # The row holds the colour as the database gives it back, which is a map of strings.
