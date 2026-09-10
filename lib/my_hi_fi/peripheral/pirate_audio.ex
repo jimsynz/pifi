@@ -87,9 +87,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.Battery
   alias MyHiFi.Peripheral.Buttons
-  alias MyHiFi.Peripheral.NetworkIcon
   alias MyHiFi.Peripheral.PirateAudio.{Screen, St7789}
   alias MyHiFi.Playback
+  alias MyHiFi.Screen.Network
 
   # The two buttons that answer on this board, in the order that they sit down the left
   # of the screen. See the moduledoc for the measurement that found them.
@@ -161,7 +161,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # long after the last one moved.** A screen that waited for an event would say nothing
   # about a router that went off before the board booted.
   defp with_network(view) do
-    %{view | network: NetworkIcon.connection(Device.network!())}
+    %{view | network: Network.connection(Device.network!())}
   end
 
   # **A device that a person gave no picture draws the one that the firmware ships.**
@@ -333,9 +333,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   # A router that goes off is the reason that the music stopped, and a person reading a
   # screen that said nothing would look at the device instead. See
-  # `MyHiFi.Peripheral.NetworkIcon`.
+  # `MyHiFi.Screen.Network`.
   defp view(%DeviceEvents.NetworkChanged{interfaces: interfaces}, view),
-    do: %{view | network: NetworkIcon.connection(interfaces)}
+    do: %{view | network: Network.connection(interfaces)}
 
   defp view(%Player.Buffering{}, view), do: %{view | state: :buffering}
 

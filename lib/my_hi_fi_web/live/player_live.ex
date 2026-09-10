@@ -501,7 +501,7 @@ defmodule MyHiFiWeb.PlayerLive do
   #
   # The colour says the warning and the bar says the charge, and the two are separate: a
   # cell at 15 percent means one thing under a threshold of 10 and another under 20. See
-  # `MyHiFi.Peripheral.BatteryIcon`, which draws the same shape for the two screens.
+  # `MyHiFi.Screen.Battery`, which draws the same shape for the two screens.
   defp battery(assigns) do
     ~H"""
     <div

@@ -1,4 +1,4 @@
-defmodule MyHiFi.Peripheral.BatteryIcon do
+defmodule MyHiFi.Screen.Battery do
   @moduledoc """
   A battery, drawn for a screen that Emerge renders.
 

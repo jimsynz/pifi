@@ -169,7 +169,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
   end
 
   # **A mark that is there at all is the signal**, and the colour says which fault. See
-  # `MyHiFi.Peripheral.NetworkIcon`.
+  # `MyHiFi.Screen.Network`.
   describe "the network" do
     test "a network that carries the music draws no mark" do
       assert marks(:internet) == %{amber: 0, rose: 0}

@@ -1,11 +1,11 @@
-defmodule MyHiFi.Peripheral.NetworkIcon do
+defmodule MyHiFi.Screen.Network do
   @moduledoc """
   A network, drawn for a screen that Emerge renders.
 
   `MyHiFi.Peripheral.PiTft.Screen` and `MyHiFi.Peripheral.PirateAudio.Screen` both draw
   one, and the shape of it belongs to neither of them. **This is a component and not a
   layout**: each screen still decides where the mark sits and how large it is, which is
-  the rule that `MyHiFi.Peripheral` holds. It is `MyHiFi.Peripheral.BatteryIcon` for the
+  the rule that `MyHiFi.Peripheral` holds. It is `MyHiFi.Screen.Battery` for the
   network.
 
   **A screen draws this only when the network cannot carry the music.** A person whose
@@ -20,7 +20,7 @@ defmodule MyHiFi.Peripheral.NetworkIcon do
 
   ## Why it is drawn and not an image
 
-  The reason is the one that `MyHiFi.Peripheral.BatteryIcon` gives. Emerge draws an SVG
+  The reason is the one that `MyHiFi.Screen.Battery` gives. Emerge draws an SVG
   with `Emerge.UI.svg/2`, which takes a source that it must read from the disk, and a
   runtime path of this firmware is a thumbnail of the cache and nothing else. Rectangles
   need no file, no allowlist and no decode, and they stay sharp at 11 pixels tall where
@@ -84,7 +84,7 @@ defmodule MyHiFi.Peripheral.NetworkIcon do
   ## Options
 
   - `:height` - the height of the tallest bar, in pixels. #{@default_height} by default,
-    which is the height of the body of `MyHiFi.Peripheral.BatteryIcon`, so the two sit
+    which is the height of the body of `MyHiFi.Screen.Battery`, so the two sit
     level.
   """
   @spec render(connection() | nil, keyword()) :: Emerge.tree()
@@ -108,10 +108,10 @@ defmodule MyHiFi.Peripheral.NetworkIcon do
   **A device holds more than one interface**, and Wi-Fi and a cable both count, so the
   best state of any of them is the state of the device.
 
-      iex> MyHiFi.Peripheral.NetworkIcon.connection([%{connection: :lan}, %{connection: :internet}])
+      iex> MyHiFi.Screen.Network.connection([%{connection: :lan}, %{connection: :internet}])
       :internet
 
-      iex> MyHiFi.Peripheral.NetworkIcon.connection([])
+      iex> MyHiFi.Screen.Network.connection([])
       nil
   """
   @spec connection([map()]) :: connection() | nil

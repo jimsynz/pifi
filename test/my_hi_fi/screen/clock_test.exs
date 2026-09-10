@@ -1,9 +1,9 @@
-defmodule MyHiFi.Peripheral.ClockTest do
+defmodule MyHiFi.Screen.ClockTest do
   use ExUnit.Case, async: true
 
-  alias MyHiFi.Peripheral.Clock
+  alias MyHiFi.Screen.Clock
 
-  doctest MyHiFi.Peripheral.Clock
+  doctest MyHiFi.Screen.Clock
 
   describe "text/1" do
     test "gives minutes and seconds under an hour" do

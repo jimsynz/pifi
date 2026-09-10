@@ -1,12 +1,12 @@
-defmodule MyHiFi.Peripheral.BatteryIconTest do
+defmodule MyHiFi.Screen.BatteryTest do
   use ExUnit.Case, async: true
 
-  alias MyHiFi.Peripheral.BatteryIcon
+  alias MyHiFi.Screen.Battery
 
   # The icon is a tree, so a test draws it and reads the pixels. A bar that a caller
   # cannot see is the failure that matters, and the width of it is what says the charge.
   defp pixels(percent, low?, opts \\ []) do
-    BatteryIcon.render(percent, low?, opts)
+    Battery.render(percent, low?, opts)
     |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: 40, height: 20)
   end
 

@@ -1,4 +1,4 @@
-defmodule MyHiFi.Peripheral.Clock do
+defmodule MyHiFi.Screen.Clock do
   @moduledoc """
   The time of a track, as a person reads it on a screen.
 
@@ -7,7 +7,7 @@ defmodule MyHiFi.Peripheral.Clock do
   other reads one device, so `1:37:12` on the large screen cannot be `97:12` on the
   small one.
 
-  This is a component in the way that `MyHiFi.Peripheral.BatteryIcon` is one: it gives
+  This is a component in the way that `MyHiFi.Screen.Battery` is one: it gives
   the words, and each screen decides the place, the size and the colour of them.
 
   The web page holds its own, and it stays there. A browser has room for a label beside
@@ -20,10 +20,10 @@ defmodule MyHiFi.Peripheral.Clock do
   An hour or more takes a third part, because a podcast episode runs that long and a
   person who reads "97:12" has to do the arithmetic.
 
-      iex> MyHiFi.Peripheral.Clock.text(9_000)
+      iex> MyHiFi.Screen.Clock.text(9_000)
       "0:09"
 
-      iex> MyHiFi.Peripheral.Clock.text(5_832_000)
+      iex> MyHiFi.Screen.Clock.text(5_832_000)
       "1:37:12"
   """
   @spec text(non_neg_integer()) :: String.t()

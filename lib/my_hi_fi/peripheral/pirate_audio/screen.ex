@@ -47,9 +47,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
 
   use Emerge.UI
 
-  alias Emerge.UI.{Background, Border, Font}
+  alias Emerge.UI.{Background, Font}
   alias MyHiFi.Device.Identity
-  alias MyHiFi.Peripheral.{BatteryIcon, Clock, NetworkIcon}
+  alias MyHiFi.Screen.{Badge, Bar, Battery, Clock, Network, Row}
 
   @width 240
   @height 240
@@ -76,7 +76,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   bar.
 
   `network` is what the interfaces of the device are doing, and the screen says nothing
-  about a network that carries the music. See `MyHiFi.Peripheral.NetworkIcon`.
+  about a network that carries the music. See `MyHiFi.Screen.Network`.
 
   `volume_percent` is the level that a person is setting now, and it is `nil` at every
   other moment. A level that stayed on the glass would take the room of the subtitle
@@ -95,7 +95,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
           safe_to_switch_off?: boolean(),
           position_ms: non_neg_integer(),
           duration_ms: pos_integer() | nil,
-          network: NetworkIcon.connection() | nil,
+          network: Network.connection() | nil,
           volume_percent: 0..100 | nil
         }
 
@@ -198,28 +198,19 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   #
   # The band behind each one is what keeps it readable over a bright picture, in the way
   # that the scrim keeps the words readable.
-  defp top_row(view) do
-    row([width(fill()), padding_xy(10, 8)], [
-      network(view),
-      el([width(fill())], none()),
-      battery(view)
-    ])
-  end
+  defp top_row(view), do: Row.ends([network(view)], [battery(view)], padding: {10, 8})
 
   # **A device on the mains draws no battery at all.** It holds no gauge, so it publishes
   # no charge, and a battery at 0 would be a lie. See `MyHiFi.Peripheral.Battery`.
   defp battery(%{battery_percent: nil}), do: none()
 
   defp battery(view) do
-    el(
-      [padding_xy(5, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
-      BatteryIcon.render(view.battery_percent, view.low_battery?)
-    )
+    Badge.render(Battery.render(view.battery_percent, view.low_battery?))
   end
 
   # **A network that carries the music draws nothing.** A person whose music plays needs
   # no mark that says so, and this corner is 240 pixels wide.
-  # `MyHiFi.Peripheral.NetworkIcon` gives nothing for that state, so this needs no test
+  # `MyHiFi.Screen.Network` gives nothing for that state, so this needs no test
   # of its own.
   #
   # The band behind it is the one that the battery holds, because the mark sits over the
@@ -227,12 +218,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   defp network(%{network: :internet}), do: none()
   defp network(%{network: nil}), do: none()
 
-  defp network(view) do
-    el(
-      [padding_xy(5, 4), Border.rounded(6), Background.color(color_rgba(0, 0, 0, 0.55))],
-      NetworkIcon.render(view.network)
-    )
-  end
+  defp network(view), do: Badge.render(Network.render(view.network))
 
   # One flat band, and not a gradient that fades into the picture. **A gradient cannot
   # do that here**, and the reason is a rule of Emerge that a reader cannot guess.
@@ -315,80 +301,40 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   defp times(%{duration_ms: nil} = view), do: el(time_style(), text(Clock.text(view.position_ms)))
 
   defp times(view) do
-    row([width(fill())], [
-      el(time_style(), text(Clock.text(view.position_ms))),
-      el([width(fill())], none()),
-      el(time_style(), text(Clock.text(view.duration_ms)))
-    ])
+    Row.ends(
+      [el(time_style(), text(Clock.text(view.position_ms)))],
+      [el(time_style(), text(Clock.text(view.duration_ms)))]
+    )
   end
 
   defp time_style, do: [Font.size(12), Font.color(color(:slate, 300))]
 
   defp volume_words(percent) do
-    row([width(fill())], [
-      el(time_style(), text("VOLUME")),
-      el([width(fill())], none()),
-      el(time_style(), text("#{percent}%"))
-    ])
+    Row.ends([el(time_style(), text("VOLUME"))], [el(time_style(), text("#{percent}%"))])
   end
 
   # The accent of the product, and not the white of the timeline, so a person reads at
   # a glance that this bar is not the place of the track.
-  defp volume_bar(percent) do
-    el(
-      [
-        width(fill()),
-        height(px(@bar_height)),
-        Border.rounded(2),
-        Background.color(color_rgba(255, 255, 255, 0.28))
-      ],
-      el(
-        [
-          width(px(bar_width(percent))),
-          height(px(@bar_height)),
-          Border.rounded(2),
-          Background.color(color(:amber, 400))
-        ],
-        none()
-      )
-    )
-  end
-
-  defp bar_width(percent) do
-    Kernel.max(round((@width - 2 * @scrim_padding) * percent / 100), 2)
-  end
+  defp volume_bar(percent), do: bar(percent / 100, color(:amber, 400))
 
   defp bar(%{duration_ms: nil}), do: none()
 
-  defp bar(view) do
-    el(
-      [
-        width(fill()),
-        height(px(@bar_height)),
-        Border.rounded(2),
-        Background.color(color_rgba(255, 255, 255, 0.28))
-      ],
-      el(
-        [
-          width(px(played_width(view))),
-          height(px(@bar_height)),
-          Border.rounded(2),
-          Background.color(color(:slate, 50))
-        ],
-        none()
-      )
+  defp bar(view), do: bar(played(view), color(:slate, 50))
+
+  # The bar sits inside the padding of the scrim, so it is that much narrower than the
+  # glass. `MyHiFi.Screen.Bar` holds the two rectangles and the least width of the
+  # part that is full.
+  defp bar(part, colour) do
+    Bar.render(part,
+      width: @width - 2 * @scrim_padding,
+      height: @bar_height,
+      radius: 2,
+      track: color_rgba(255, 255, 255, 0.28),
+      fill: colour
     )
   end
 
-  # The bar sits inside the padding of the scrim, so it is that much narrower than the
-  # glass.
-  #
-  # `use Emerge.UI` brings its own `min/2` and `max/2`, which build layout constraints
-  # and not numbers, so this names the `Kernel` ones. A bar of no width draws nothing,
-  # and a track that just began still needs to show that it began.
-  defp played_width(view) do
-    played = Kernel.min(view.position_ms, view.duration_ms)
-
-    Kernel.max(round((@width - 2 * @scrim_padding) * played / view.duration_ms), 2)
-  end
+  # `use Emerge.UI` brings its own `min/2`, which builds a layout constraint and not a
+  # number, so this names the `Kernel` one.
+  defp played(view), do: Kernel.min(view.position_ms, view.duration_ms) / view.duration_ms
 end

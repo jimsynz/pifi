@@ -31,6 +31,11 @@ defmodule MyHiFi.Peripheral do
   knob needs a detent count and the count comes from the length of the list. A
   screen shows the part of a list that fits, so a screen does not know the length.
 
+  **A layout is its own, and the parts of it are not.** A battery, a bar and the
+  black band under a mark read the same way on every screen of this device, so
+  `MyHiFi.Screen` holds them and a screen composes them where it wants. A screen that
+  drew its own battery would give a person two devices to read.
+
   `MyHiFi.Peripheral.Server` holds the process and the subscriptions, so a
   peripheral module holds no PubSub code and no process code.
 
