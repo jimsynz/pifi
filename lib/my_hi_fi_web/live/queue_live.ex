@@ -28,6 +28,12 @@ defmodule MyHiFiWeb.QueueLive do
 
   They can remove a row, move a row, and empty the queue.
 
+  **A person moves a row by dragging its handle**, and the page holds no control that
+  moves a row one place. A row of a long queue needs many presses of such a control,
+  and a finger on a small screen hits the wrong one of a pair. The `DragToReorder` hook
+  of `assets/js/drag_to_reorder.js` reorders the list in the page and sends one `move`
+  when the person lets the row go.
+
   **Moving a row does not change what is playing.** It changes what comes next. See
   `MyHiFi.Playback.Queue.Order`.
 
@@ -79,11 +85,9 @@ defmodule MyHiFiWeb.QueueLive do
   end
 
   @impl Phoenix.LiveView
-  def handle_event("move", %{"id" => id, "position" => position}, socket) do
-    case Integer.parse(position) do
-      {position, ""} -> _result = Playback.reorder_queue(id, position)
-      _other -> :ok
-    end
+  def handle_event("move", %{"id" => id, "position" => position}, socket)
+      when is_integer(position) do
+    _result = Playback.reorder_queue(id, position)
 
     {:noreply, load(socket)}
   end
@@ -120,9 +124,14 @@ defmodule MyHiFiWeb.QueueLive do
         The queue is empty. Play a track and the rest of its list joins the queue.
       </p>
 
-      <ul :if={@rows != []} class="divide-y divide-edge">
-        <li :for={{row, index} <- Enum.with_index(@rows)} id={"queue-#{row.id}"}>
-          <.queue_row row={row} index={index} last?={index == length(@rows) - 1} />
+      <ul
+        :if={@rows != []}
+        id="queue-rows"
+        phx-hook="DragToReorder"
+        class="divide-y divide-edge"
+      >
+        <li :for={row <- @rows} id={"queue-#{row.id}"} data-row={row.id}>
+          <.queue_row row={row} />
         </li>
       </ul>
     </div>
@@ -130,8 +139,6 @@ defmodule MyHiFiWeb.QueueLive do
   end
 
   attr(:row, :map, required: true)
-  attr(:index, :integer, required: true)
-  attr(:last?, :boolean, required: true)
 
   defp queue_row(assigns) do
     assigns = assign(assigns, :artwork, Artwork.thumbnail_path(assigns.row.item.artwork))
@@ -166,31 +173,14 @@ defmodule MyHiFiWeb.QueueLive do
         <.icon name="hero-speaker-wave" class="size-4" />
       </span>
 
-      <button
-        type="button"
-        id={"up-#{@row.id}"}
-        phx-click="move"
-        phx-value-id={@row.id}
-        phx-value-position={@index - 1}
-        disabled={@index == 0}
-        aria-label="Move up"
-        class="control rounded-lg p-1 disabled:opacity-30"
+      <span
+        id={"drag-#{@row.id}"}
+        data-drag-handle
+        aria-label="Drag to move this row"
+        class="control shrink-0 cursor-grab touch-none rounded-lg p-1 active:cursor-grabbing"
       >
-        <.icon name="hero-chevron-up-mini" class="size-4" />
-      </button>
-
-      <button
-        type="button"
-        id={"down-#{@row.id}"}
-        phx-click="move"
-        phx-value-id={@row.id}
-        phx-value-position={@index + 1}
-        disabled={@last?}
-        aria-label="Move down"
-        class="control rounded-lg p-1 disabled:opacity-30"
-      >
-        <.icon name="hero-chevron-down-mini" class="size-4" />
-      </button>
+        <.icon name="hero-bars-2-mini" class="size-4" />
+      </span>
 
       <button
         type="button"

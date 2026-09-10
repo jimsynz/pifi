@@ -76,30 +76,29 @@ defmodule MyHiFiWeb.QueueLiveTest do
       assert Enum.map(Playback.queue!(), & &1.position) == [0, 1]
     end
 
-    test "a row moves up and down", %{conn: conn, rows: rows} do
+    # The drop sends the place that the row landed on, and the browser holds the drag
+    # itself.
+    test "a row that a person drags lands where they dropped it", %{conn: conn, rows: rows} do
       third = Enum.find(rows, &(&1.position == 2))
 
       {:ok, view, _html} = live(conn, ~p"/queue")
 
-      view |> element("#up-#{third.id}") |> render_click()
+      render_hook(view, "move", %{"id" => third.id, "position" => 1})
       assert titles_on(view) == ["Alpha", "Charlie", "Bravo"]
 
-      view |> element("#down-#{third.id}") |> render_click()
+      render_hook(view, "move", %{"id" => third.id, "position" => 2})
       assert titles_on(view) == ["Alpha", "Bravo", "Charlie"]
     end
 
-    # A person who presses "up" on the first row means the first row, so the control is
-    # not there to press.
-    test "the ends hold no control that would do nothing", %{conn: conn, rows: rows} do
-      first = Enum.find(rows, &(&1.position == 0))
-      last = Enum.find(rows, &(&1.position == 2))
-
+    test "every row holds a handle to drag", %{conn: conn, rows: rows} do
       {:ok, view, _html} = live(conn, ~p"/queue")
 
-      assert has_element?(view, "#up-#{first.id}[disabled]")
-      assert has_element?(view, "#down-#{last.id}[disabled]")
-      refute has_element?(view, "#down-#{first.id}[disabled]")
-      refute has_element?(view, "#up-#{last.id}[disabled]")
+      assert has_element?(view, "#queue-rows[phx-hook='DragToReorder']")
+
+      for row <- rows do
+        assert has_element?(view, "#queue-#{row.id}[data-row='#{row.id}']")
+        assert has_element?(view, "#drag-#{row.id}[data-drag-handle]")
+      end
     end
 
     # **A move never moves the mark.** A person who moves a row means to change what
@@ -109,7 +108,7 @@ defmodule MyHiFiWeb.QueueLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/queue")
 
-      view |> element("#up-#{third.id}") |> render_click()
+      render_hook(view, "move", %{"id" => third.id, "position" => 1})
 
       assert playing_title() == "Bravo"
     end
