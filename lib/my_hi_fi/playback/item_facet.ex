@@ -1,8 +1,8 @@
 defmodule MyHiFi.Playback.ItemFacet do
   @moduledoc """
-  One item holds one facet.
+  One item links to one facet.
 
-  This is the join of `MyHiFi.Playback.Item` and `MyHiFi.Playback.Facet`. It holds two
+  This is the join of `MyHiFi.Playback.Item` and `MyHiFi.Playback.Facet`. It carries two
   keys and nothing else, so a station that carries a country, a language, a codec, a
   bitrate and three tags writes seven small rows and no text of its own.
 

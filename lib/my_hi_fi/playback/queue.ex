@@ -2,8 +2,8 @@ defmodule MyHiFi.Playback.Queue do
   @moduledoc """
   What plays now, and what plays next.
 
-  Each row names one `MyHiFi.Playback.Item` and its place in the order. One row holds
-  `playing?`, and that is the track that the player has.
+  Each row identifies one `MyHiFi.Playback.Item` and its place in the order. One row
+  carries `playing?`, and that row is the track that the player is playing.
 
   ## Why ETS, and what a restart does
 
@@ -14,7 +14,7 @@ defmodule MyHiFi.Playback.Queue do
   person asks. Standby is not a restart: it stops the audio and keeps the machine, so
   the queue lives through it.
 
-  ## It holds an identifier, and not a relationship
+  ## A row carries an identifier, and not a relationship
 
   `item_id` is a plain attribute. An item lives in SQLite and a queue row lives in ETS,
   and Ash cannot join two data layers. A caller that wants the item reads it with
@@ -54,7 +54,7 @@ defmodule MyHiFi.Playback.Queue do
     end
 
     read :playing do
-      description "The one row that the player has. It gives nothing for an empty queue."
+      description "The one row that the player is playing. It returns nothing for an empty queue."
       filter expr(playing? == true)
       get? true
     end
@@ -89,8 +89,7 @@ defmodule MyHiFi.Playback.Queue do
       description """
       Move the mark to the row before or after the one that plays.
 
-      It gives `{:error, :no_more}` at each end of the list, and for a queue that no
-      row holds.
+      It returns `{:error, :no_more}` at each end of the list, and for an empty queue.
       """
 
       constraints instance_of: __MODULE__
@@ -119,7 +118,7 @@ defmodule MyHiFi.Playback.Queue do
       Move one row to another position, and renumber the rest around it.
 
       `position` counts from 0. A position outside the queue is clamped to the nearest
-      end, so pressing "up" on the first row leaves it where it is. This does not change
+      end, so a drag above the first row leaves it where it is. This does not change
       which row is playing. See `MyHiFi.Playback.Queue.Reorder`.
       """
 
@@ -133,15 +132,15 @@ defmodule MyHiFi.Playback.Queue do
 
     action :next_up, :struct do
       description """
-      The row after the one that plays, and this moves no mark.
+      The row after the one that plays. It moves no mark.
 
       `MyHiFi.Player` reads the audio of the next track before the current one ends,
       so it must know which row that is without playing it. `:move` cannot answer,
       because it moves the mark and a person in the middle of a track has not asked
       for the next one yet.
 
-      It gives `{:error, :no_more}` at the end of the list, and for a queue that no
-      row holds, in the way that `:move` does.
+      It returns `{:error, :no_more}` at the end of the list, and for an empty queue,
+      in the way that `:move` does.
       """
 
       constraints instance_of: __MODULE__
@@ -150,7 +149,7 @@ defmodule MyHiFi.Playback.Queue do
     end
 
     action :clear, :integer do
-      description "Empty the queue, and give the number of rows that went."
+      description "Empty the queue. It returns the number of rows that it removed."
 
       run fn _input, _context ->
         rows = Ash.read!(__MODULE__)
@@ -189,7 +188,7 @@ defmodule MyHiFi.Playback.Queue do
     uuid_primary_key :id
 
     attribute :item_id, :uuid do
-      description "The `MyHiFi.Playback.Item` that this row names."
+      description "The `MyHiFi.Playback.Item` that this row identifies."
       allow_nil? false
       public? true
     end
@@ -201,7 +200,7 @@ defmodule MyHiFi.Playback.Queue do
     end
 
     attribute :playing?, :boolean do
-      description "The player has this row."
+      description "The player is playing this row."
       source :playing
       allow_nil? false
       default false

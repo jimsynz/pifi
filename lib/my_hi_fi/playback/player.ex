@@ -2,15 +2,15 @@ defmodule MyHiFi.Playback.Player do
   @moduledoc """
   The controls of the player.
 
-  This resource holds no data, so it needs no data layer. Each action calls
-  `MyHiFi.Player`, and that process holds the pipeline and the state.
+  This resource stores no data, so it needs no data layer. Each action calls
+  `MyHiFi.Player`, and that process owns the pipeline and the state.
 
   Read the name with care. `MyHiFi.Player` is the process, and this module is the
   resource in front of it.
 
   ## A reader of the state waits for nothing
 
-  The player is one process, and a pipeline that crashes holds it for as long as six
+  The player is one process, and a pipeline that crashes blocks it for as long as six
   seconds: `Membrane.Pipeline.terminate/2` waits five, and the silence before it waits
   one. A `GenServer.call` waits five seconds and then the **caller** stops.
 
@@ -96,7 +96,7 @@ defmodule MyHiFi.Playback.Player do
 
       A pause is not a stop. A stop leaves the device with nothing selected, and a
       pause leaves the track in front of the person. A play starts it at the place
-      that the source holds.
+      that the source reports.
       """
 
       argument :paused?, :boolean, allow_nil?: false
@@ -113,7 +113,7 @@ defmodule MyHiFi.Playback.Player do
       description """
       Play the row after the one that plays now.
 
-      The queue holds the order. The end of it gives `{:error, :no_more}`.
+      The queue decides the order. The end of it returns `{:error, :no_more}`.
       """
 
       run fn _input, _context ->
@@ -180,7 +180,7 @@ defmodule MyHiFi.Playback.Player do
       description """
       The minutes of quiet that the device waits for before it enters standby.
 
-      0 means that it enters standby by itself never.
+      0 means that it never enters standby by itself.
       """
 
       run fn _input, _context -> {:ok, MyHiFi.AutoStandby.minutes()} end
@@ -190,7 +190,7 @@ defmodule MyHiFi.Playback.Player do
       description """
       Set the minutes of quiet that the device waits for before it enters standby.
 
-      A track that plays holds the timer off, and a control of a person starts the
+      A track that plays keeps the timer off, and a control of a person starts the
       period again. 0 turns the automatic standby off. See `MyHiFi.AutoStandby`.
       """
 
@@ -316,7 +316,7 @@ defmodule MyHiFi.Playback.Player do
   @doc """
   What the player is doing, or `idle/0` when it cannot say.
 
-  A pipeline that crashes holds the player, and a caller that waited would stop with
+  A pipeline that crashes blocks the player, and a caller that waited would stop with
   it. This waits one second, which is long enough for a player that is working and
   short enough that a person does not notice.
   """

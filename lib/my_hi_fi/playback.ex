@@ -7,9 +7,9 @@ defmodule MyHiFi.Playback do
   function, and a policy guards an action and not a function. The internal API and
   the external API then have one shape.
 
-  `MyHiFi.Player` is the process. It holds the pipeline, the count of tries, and
+  `MyHiFi.Player` is the process. It owns the pipeline, the count of tries, and
   the monitor, and none of that belongs in an action. `MyHiFi.Playback.Player`
-  holds the actions, and each one calls that process.
+  declares the actions, and each one calls that process.
   """
 
   use Ash.Domain, otp_app: :my_hi_fi

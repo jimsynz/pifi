@@ -3,7 +3,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   Reads the audio of what a person marked on to the card.
 
   A person who marks an album hears it with no wait, and hears it when the server
-  that holds it is off. The mark is the whole instruction: no person asks for a
+  that stores it is off. The mark is the whole instruction: no person asks for a
   download, and no page holds a control for one.
 
   ## What reads, and what does not
@@ -12,10 +12,10 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   the rule, and nothing here names a source.
 
   - A radio station is a live stream. Its transport is `:http`, and a stream with no
-    end holds nothing to read.
+    end has nothing to read.
   - A song of a library reads from a file, so it reads, and a mark on the album that
-    holds it reads every song of that album.
-  - **An episode of a show reads, and a count holds it down.** A show holds hundreds of
+    contains it reads every song of that album.
+  - **An episode of a show reads, and a count keeps it down.** A show has hundreds of
     episodes and a feed grows every day, so a mark on one reads **the newest few that a
     person has not played**, and `c:MyHiFi.Source.hold_limit/0` is how many.
     `keeps_place?` said that an episode reads nothing at all before this, and a person
@@ -24,29 +24,29 @@ defmodule MyHiFi.Playback.FavouriteAudio do
     person marks the show, and `MyHiFiWeb.ItemList.favourite/1` draws no control on an
     episode for that reason.
 
-  **A mark reaches two levels.** An album holds tracks, so a mark on an album reads
-  every one of them. An artist holds albums and no track of its own, so a mark on an
-  artist reads the tracks of each album, one album after the other. A show holds
+  **A mark reaches two levels.** An album contains tracks, so a mark on an album reads
+  every one of them. An artist contains albums and no track of its own, so a mark on an
+  artist reads the tracks of each album, one album after the other. A show contains
   episodes, so a mark on one reads the newest few of them. A discography is
   gigabytes, and **a person who marks one has said what they want the card for**: the
-  three steps below stop the run at the first track that the card holds no room for,
-  and the marks that a person put on most recently are the ones that the device holds.
+  three steps below stop the run at the first track that the card has no room for,
+  and the marks that a person put on most recently are the ones that the device keeps.
 
   A run that reads album by album leaves whole albums on the card when it stops, and
   not one track of each.
 
   ## How much the card holds, in three steps
 
-  1. **Read the track while the cache holds room for it.**
-  2. **When it does not hold room, run the ordinary eviction, and name the room that
+  1. **Read the track while the cache has room for it.**
+  2. **When it has no room, run the ordinary eviction, and name the room that
      this track needs.** That is `MyHiFi.Cache.prune/1` with `want_bytes`, and it
-     takes the coldest entries that no `keep?` holds until the card holds that room.
+     takes the coldest entries that no `keep?` protects, until the card has that room.
      There is no eviction here, and there must not be: two rules for one card would
      fight each other. **The number matters.** An eviction with no target removes
      down to the limit alone, and a cache that is already inside its limit then loses
      nothing, so a track of 40 MB is refused beside gigabytes of cold artwork.
   3. **When the cache is still short of room, stop the run.** The card is full, and
-     the marks that a person put on most recently are the ones that the device holds.
+     the marks that a person put on most recently are the ones that the device keeps.
 
   **A run stops at the first track that does not fit, and it tries no smaller one.**
   This is what makes the run settle. A run that stepped over a large track and took a
@@ -63,7 +63,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
 
   `MyHiFi.Playback.Item` gives the marked items newest first, through the
   `favourited_at` attribute. That order is the whole of step 3: without it a full
-  card holds an arbitrary set, and with it the card holds what a person chose last.
+  card keeps an arbitrary set, and with it the card keeps what a person chose last.
 
   ## The size of a track is a guard, and not an accounting
 
@@ -85,7 +85,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   as its download is complete.** The cache then holds it by its last use, in the way
   that it holds every other entry.
 
-  **`MyHiFi.Player.Download.ensure/2` gives two answers, and both of them release.**
+  **`MyHiFi.Player.Download.ensure/2` returns two answers, and both of them release.**
   It answers that a file grows, and it answers that a file is already whole. The
   second answer comes when two runs ask for one track: the later caller joins the
   download of the first, and that download may end while it joins. A branch that
@@ -136,7 +136,7 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   control. A queue that refuses the job leaves the audio for the next run of
   `MyHiFi.Jellyfin.Sync.Favourites`, so this raises nothing.
 
-  **An item that holds no audio to read asks for nothing.** A person who subscribes to
+  **An item with no audio to read asks for nothing.** A person who subscribes to
   a show marks a container of episodes, and an episode keeps its place, so
   `caches_audio?` is false for it. A job for such an item cancelled itself with
   `:trigger_no_longer_applies` when it ran, because AshOban reads the `where` of the
@@ -157,16 +157,17 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   end
 
   @doc """
-  Read the audio of one item, and give the number of tracks that the cache now holds.
+  Read the audio of one item. It returns the number of tracks that the cache now
+  holds.
 
-  A track that the cache holds already reads nothing and it touches nothing. Every
+  A track that the cache already holds reads nothing, and it touches nothing. Every
   other one reads now, one at a time, so a marked album does not open twenty requests
   at once.
 
-  It stops at the first track that the card holds no room for, and it counts the ones
+  It stops at the first track that the card has no room for, and it counts the ones
   that arrived before that. See the moduledoc.
 
-  **The link of a source that holds one is read once before the loop.** A source that
+  **The link of a source that needs one is read once before the loop.** A source that
   needs credentials to build an address reads them here and not for each track, so a
   marked album of twelve tracks makes one read of the settings and not twelve.
   """
@@ -192,9 +193,10 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   end
 
   @doc """
-  The tracks of one item whose audio this device can hold.
+  The tracks of one item whose audio this device can keep.
 
-  A track gives itself, or nothing. A container gives the tracks that it holds, in
+  A track returns itself, or nothing. A container returns the tracks that it
+  contains, in
   the order that a person reads them on the page of that container. See the moduledoc
   for the rule.
   """
@@ -288,7 +290,8 @@ defmodule MyHiFi.Playback.FavouriteAudio do
   @doc """
   How many bytes one track needs of the card.
 
-  It is the size that the source gave, or an estimate from the length of the track,
+  It is the size that the source reported, or an estimate from the length of the
+  track,
   or a fixed number for a track that says neither. See the moduledoc: this is a guard
   and not an accounting.
   """

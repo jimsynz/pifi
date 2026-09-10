@@ -1,30 +1,31 @@
 defmodule MyHiFi.Playback.Item do
   @moduledoc """
-  One thing that a person plays, and one thing that holds others.
+  One thing that a person plays, or one thing that contains others.
 
-  Every source writes items, and nothing else in the firmware holds a list of media.
+  Every source writes items, and nothing else in the firmware keeps a list of media.
   A station, an episode and a show are all items, so a user interface reads one
   resource and it needs no knowledge of any source.
 
-  `kind` says which of the two an item is. A `:track` plays, and a `:container` holds
-  others through `parent_id`. A show is a container, and its episodes name it.
+  `kind` says which of the two an item is. A `:track` plays, and a `:container`
+  contains others through `parent_id`. A show is a container, and each of its episodes
+  points to it.
 
-  `source` holds the name of the source in an address, and not the module. A module
-  name is an atom, and a build that removes a source would then fail to read every
-  row of this table. `MyHiFi.Source.from_slug/1` reads the name and reports one that
-  this firmware no longer holds.
+  `source` is the name of the source in an address, and not the module. A module name
+  is an atom, and a build that removed a source would then fail to read every row of
+  this table. `MyHiFi.Source.from_slug/1` reads the name, and it reports a source that
+  this firmware no longer has.
 
   ## Two meanings of the word container
 
-  `kind` names a container of the browse tree. `container_format` names what holds
+  `kind` names a container of the browse tree. `container_format` names what carries
   the audio, which is the `container` field of `MyHiFi.Source.playable`. The two are
   different things, so they have different names here.
 
   ## The picture
 
-  `artwork_url` is the address, and `cached_files` is what the device holds on the
-  card. An item with no address of its own uses the address of its parent, which the
-  `artwork` calculation gives. A publisher writes artwork for 70% of the episodes of
+  `artwork_url` is the address, and `cached_files` is what the device keeps on the
+  card. An item with no address of its own uses the address of its parent, and the
+  `artwork` calculation returns that. A publisher writes artwork for 70% of the episodes of
   the measurement, and the cover of the show serves the rest.
 
   ## The audio of a favourite
@@ -154,15 +155,15 @@ defmodule MyHiFi.Playback.Item do
 
     read :marked_for_audio do
       description """
-      The items of one source whose audio this device holds because a person marked
+      The items of one source whose audio this device keeps, because a person marked
       them.
 
-      It names the item that a person marked, and not the tracks under it. One job
-      takes one of these and reads what it holds.
+      It returns the item that a person marked. It does not return the tracks under
+      that item, and one job takes one of these and reads everything under it.
 
       **The newest mark comes first.** A card that fills stops the run, so the order
       decides what the device keeps: what a person marked a moment ago, and not what
-      they marked a year ago. An item that an older firmware marked holds no time,
+      they marked a year ago. An item that an older firmware marked carries no time,
       and it comes last. See `MyHiFi.Playback.FavouriteAudio`.
       """
 
@@ -191,11 +192,11 @@ defmodule MyHiFi.Playback.Item do
 
     read :holding_audio do
       description """
-      Every item whose audio this device holds on the card.
+      Every item whose audio this device keeps on the card.
 
       The storage report reads it, so a person sees which source uses the room. It
-      names the item that holds a file and not the container above it, because the
-      card holds a track and never an album.
+      returns the item that owns a file, and never the container above it, because the
+      card keeps a track and never an album.
 
       **The size is a field of the cache entry and not of the item**, so this loads
       `audio_file`. `byte_size` of an item is what a service said the file would be,
@@ -394,7 +395,7 @@ defmodule MyHiFi.Playback.Item do
     end
 
     attribute :kind, :atom do
-      description "`:track` plays, and `:container` holds other items."
+      description "`:track` plays, and `:container` contains other items."
       constraints one_of: [:track, :container]
       allow_nil? false
       default :track
@@ -418,21 +419,21 @@ defmodule MyHiFi.Playback.Item do
     end
 
     attribute :artwork_url, :string do
-      description "The address of the picture. `MyHiFi.Artwork` reads it and the cache holds it."
+      description "The address of the picture. `MyHiFi.Artwork` reads that address, and the cache keeps the file."
       public? true
     end
 
     attribute :duration_ms, :integer do
-      description "How long it plays. A stream with no end holds none."
+      description "How long it plays. A stream with no end has none."
       public? true
     end
 
     attribute :byte_size, :integer do
       description """
-      How many bytes the audio holds. A container and a live stream hold none.
+      How many bytes the audio takes. A container and a live stream have none.
 
       `MyHiFi.Playback.FavouriteAudio` reads this before it asks for a track, so it
-      can see whether the cache holds room for one. That check must reach no service,
+      can see whether the cache has room for one. That check must reach no service,
       because a device with no network still has to decide. A source that cannot say
       leaves it absent, and the check estimates the size from `duration_ms` instead.
       """
@@ -442,10 +443,10 @@ defmodule MyHiFi.Playback.Item do
 
     attribute :number, :integer do
       description """
-      The place of this item inside the container that holds it.
+      The place of this item inside the container that it belongs to.
 
-      A track holds its track number, and an episode holds the number that the
-      publisher gave it. **It is absent for an item that holds no such place**, and a
+      A track carries its track number, and an episode carries the number that the
+      publisher gave it. **It is absent for an item that has no such place**, and a
       feed that names none gets none: `MyHiFi.Podcast.Feed.Parser` keeps 200 episodes
       of a feed that may hold 2955, so the place in the list would print a confident
       and wrong episode number.
@@ -462,7 +463,7 @@ defmodule MyHiFi.Playback.Item do
       description """
       Which disc of a set holds this track.
 
-      An album of one disc holds nothing here, and a set of two names 1 and 2. A row of
+      An album of one disc leaves this absent, and a set of two names 1 and 2. A row of
       such a set reads `2-12`, because track 1 of disc 2 comes after track 12 of disc 1
       and the number alone cannot say that.
       """
@@ -518,7 +519,7 @@ defmodule MyHiFi.Playback.Item do
     end
 
     attribute :url, :string do
-      description "Where the audio is. A container holds none."
+      description "Where the audio is. A container has none."
       public? true
     end
 
@@ -529,7 +530,7 @@ defmodule MyHiFi.Playback.Item do
     end
 
     attribute :container_format, :atom do
-      description "What holds the audio. This is not `kind`."
+      description "What carries the audio. This is not `kind`."
       constraints one_of: [:none, :mpeg_ts, :ogg]
       default :none
       public? true
@@ -559,7 +560,7 @@ defmodule MyHiFi.Playback.Item do
 
     attribute :favourited_at, :utc_datetime_usec do
       description """
-      When a person put the mark on. It is absent for an item that holds no mark.
+      When a person put the mark on. It is absent for an item with no mark.
 
       **`updated_at` cannot answer this.** A sync writes every row that a service
       owns, so that time says when the device last read the service and not when a
@@ -579,7 +580,7 @@ defmodule MyHiFi.Playback.Item do
 
       An episode of a podcast and a chapter of an audiobook keep their place. A song
       does not: a person who stops half way through one does not want the second half
-      of it tomorrow. A live stream holds no place at all.
+      of it tomorrow. A live stream has no place at all.
 
       This belongs to the item and not to the source, because one library holds both
       an album and an audiobook.
@@ -637,7 +638,7 @@ defmodule MyHiFi.Playback.Item do
 
   relationships do
     belongs_to :parent, __MODULE__ do
-      description "The container that holds this item."
+      description "The container that this item belongs to."
       public? true
     end
 
@@ -701,7 +702,7 @@ defmodule MyHiFi.Playback.Item do
       description """
       How many items name this one as their container.
 
-      A show says how many episodes it holds. It is 0 for a track, which holds nothing.
+      A show says how many episodes it contains. It is 0 for a track, which contains none.
       """
     end
 
@@ -717,8 +718,8 @@ defmodule MyHiFi.Playback.Item do
       A person marked this item, and this device holds the audio of what it covers.
 
       **It names no source, and it must not.** `transport` says that the audio is a
-      file that this device reads, so a station reads nothing at all: a live stream
-      holds no file to hold.
+      file that this device reads, so a station reads nothing at all: a live stream has
+      no file to keep.
 
       **A mark reaches two levels.** A mark on an album reads every track of it, and a
       mark on an artist reads a whole discography, because a person who marks one has
@@ -728,8 +729,8 @@ defmodule MyHiFi.Playback.Item do
       **A container of episodes reads too, and a count is what holds it down.** An
       episode keeps its place, and this said false for a show for that reason, so a
       person who subscribed to a show could not hear it away from the network. A show
-      holds hundreds of episodes and no podcast reader holds a feed, so
-      `c:MyHiFi.Source.hold_limit/0` says how many of the newest a source holds. A
+      has hundreds of episodes and no podcast reader keeps a whole feed, so
+      `c:MyHiFi.Source.hold_limit/0` says how many of the newest a source keeps. A
       track that keeps its place and that a person marked by itself still reads
       nothing, because a person marks the show and not the episode.
 
@@ -746,9 +747,8 @@ defmodule MyHiFi.Playback.Item do
       column that they pressed, so `[disc: :asc, number: :asc]` became `number` alone
       and a set of two discs read 1-01, 2-01, 1-02, 2-02.
 
-      1000 is larger than the track count of any record. An album of one disc holds no
-      `disc`, so the number decides, and an item that holds no number gives nothing at
-      all: SQLite reads an absent value as the smallest, and such an item leads a list
+      1000 is larger than the track count of any record. An album of one disc carries no
+      `disc`, so the number decides, and an item with no number gives nothing at all: SQLite reads an absent value as the smallest, and such an item leads a list
       whose other rows hold numbers.
 
       `MyHiFiWeb.ItemList.place_text/1` draws the same fact for a person to read, as
@@ -768,10 +768,10 @@ defmodule MyHiFi.Playback.Item do
       is what removes that: AshSqlite writes `title COLLATE NOCASE` for a term of that
       type, and SQLite then compares the letters and not the bytes.
 
-      **Sort by this and never by `title`.** A sort of the attribute holds the order of
-      the bytes, and this is the one column that holds the order of the letters, in the
-      way that `place` is the one column that holds the order of a set. The custom
-      statement above holds the index that serves it.
+      **Sort by this and never by `title`.** A sort of the attribute reads the order of
+      the bytes, and this is the one column that reads the order of the letters, in the
+      way that `place` is the one column that reads the order of a set. The custom
+      statement above declares the index that serves it.
       """
 
       public? true
@@ -779,7 +779,7 @@ defmodule MyHiFi.Playback.Item do
 
     calculate :audio_held?, :boolean, expr(not is_nil(audio_file.id)) do
       description """
-      This device holds the audio of this item on the card.
+      This device keeps the audio of this item on the card.
 
       A person reads it to know what plays with no network, and a list draws it beside
       the title. **It is one query for a page and not one for each row**, because it
@@ -787,7 +787,7 @@ defmodule MyHiFi.Playback.Item do
       does.
 
       A container gives `false`. The audio of an album is the audio of its tracks, and
-      a person opens the album to read which of them are held.
+      a person opens the album to read which of them the card holds.
       """
 
       public? true
@@ -811,7 +811,7 @@ defmodule MyHiFi.Playback.Item do
 
     calculate :artwork, :string, expr(artwork_url || parent.artwork_url) do
       description """
-      The address of the picture of this item, or of the container that holds it.
+      The address of the picture of this item, or of the container that it belongs to.
 
       One rule serves every source. A publisher writes artwork for 70% of the
       episodes of the measurement, and the cover of the show serves the rest.

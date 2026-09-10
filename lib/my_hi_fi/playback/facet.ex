@@ -1,6 +1,6 @@
 defmodule MyHiFi.Playback.Facet do
   @moduledoc """
-  One value that a key takes, and the items that hold it.
+  One value that a key takes, and the items that link to it.
 
   A facet is a country, a tag, a codec, a category or a language. `MyHiFi.Playback.Item`
   links to it through `MyHiFi.Playback.ItemFacet`, so `country` and `NZ` are written
@@ -13,7 +13,7 @@ defmodule MyHiFi.Playback.Facet do
   ## What is a facet, and what is a column of an item
 
   **A facet is something that a person would want a list of.** A country, a tag and a
-  category are each a short list, and each one holds many items.
+  category are each a short list, and each one covers many items.
 
   A value that differs for each item is a column of `MyHiFi.Playback.Item`, and not a
   facet. `published_at` and `duration_ms` are two of those. To make one a facet would
@@ -36,8 +36,8 @@ defmodule MyHiFi.Playback.Facet do
 
   ## Counting the items
 
-  `item_count` gives the number of items that hold this facet, and the browse page draws
-  it beside the name. Load it, and do not count by hand:
+  `item_count` returns the number of items that link to this facet, and the browse
+  page draws it beside the name. Load it, and do not count by hand:
 
       MyHiFi.Playback.Facet
       |> Ash.Query.for_read(:by_key, %{key: "country"})
@@ -75,8 +75,8 @@ defmodule MyHiFi.Playback.Facet do
       description """
       Every value that one key takes. This is one container of the browse tree.
 
-      It gives no facet that no item holds. A station that loses its last tag leaves a
-      row behind, and a person must not meet a container that holds nothing.
+      It returns no facet that no item links to. A station that loses its last tag
+      leaves a row behind, and a person must not meet an empty container.
       """
 
       argument :key, :string, allow_nil?: false
@@ -101,7 +101,8 @@ defmodule MyHiFi.Playback.Facet do
 
     action :destroy_orphans, :integer do
       description """
-      Remove every facet that no item holds any more, and give the number that went.
+      Remove every facet that no item links to any more. It returns the number that
+      it removed.
 
       `by_key` hides these already, so this reclaims the rows and nothing else. A fill
       calls it when it finishes.
@@ -156,7 +157,7 @@ defmodule MyHiFi.Playback.Facet do
     calculate :item_count,
               :integer,
               {MyHiFi.Playback.GroupedCount, table: "playback_item_facets", column: "facet_id"} do
-      description "How many items hold this facet."
+      description "How many items link to this facet."
     end
   end
 

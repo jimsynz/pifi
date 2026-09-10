@@ -1,6 +1,6 @@
 defmodule MyHiFi.Playback.Queue.NextUp do
   @moduledoc """
-  The row after the one that plays, and this moves no mark.
+  The row after the one that plays. It moves no mark.
 
   `MyHiFi.Playback.Queue.Move` answers which row is next by making it the one that
   plays. The player needs the answer while a person is still in the middle of a
