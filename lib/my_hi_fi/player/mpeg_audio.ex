@@ -4,7 +4,7 @@ defmodule MyHiFi.Player.MpegAudio do
 
   It removes the timestamp of each buffer, and that keeps the decoder alive.
 
-  `membrane_mp3_mad_plugin` holds a fault. A live stream starts at any point, so
+  `membrane_mp3_mad_plugin` has a fault. A live stream starts at any point, so
   the first frame that the decoder sees is almost always a part of a frame. The
   decoder calls that frame recoverable, it steps over the bytes, and it then asks
   for the time of the next frame. That step reads the stream format of its own
@@ -20,7 +20,7 @@ defmodule MyHiFi.Player.MpegAudio do
   Nothing after the decoder needs the timestamp. The sink writes the samples to
   `aplay`, and the player counts the time from its own clock.
 
-  Remove this element when the plugin holds the format of the input pad, or when
+  Remove this element when the plugin reads the format of the input pad, or when
   it stops asking for a time that it cannot know.
   """
 

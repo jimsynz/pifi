@@ -8,7 +8,7 @@ defmodule MyHiFi.Player.FileSource do
   that another library owns, which is why `MyHiFi.Player.HttpSource` dropped the
   audio of a podcast. Nothing here can arrive faster than a read asks for it.
 
-  The file is the buffer, so this element holds no queue. `:file.pread/3` gives the
+  The file is the buffer, so this element keeps no queue. `:file.pread/3` returns the
   bytes that a demand asks for, and the rest wait on the disk.
 
   ## What it waits for
@@ -18,8 +18,8 @@ defmodule MyHiFi.Player.FileSource do
   then hears silence for as long as the network is slower than the audio, which is
   what a live stream does today.
 
-  It gives `end_of_stream` when it reaches the end of a file that the download
-  called whole. A file that the cache already holds is whole from the start, so an
+  It sends `end_of_stream` when it reaches the end of a file that the download
+  called whole. A file that the cache already keeps is whole from the start, so an
   episode that a person plays a second time asks the network for nothing.
 
   ## Where it starts
@@ -45,9 +45,9 @@ defmodule MyHiFi.Player.FileSource do
 
   # **The largest buffer that may leave this element.** `Membrane.MP3.MAD.Decoder`
   # decodes a whole input buffer in one callback: `decode_buffer/5` recurses to the
-  # end of it and holds every action until it returns. A buffer of a whole 49.7 MB
+  # end of it and blocks every action until it returns. A buffer of a whole 49.7 MB
   # episode therefore asks it to decode 3108 seconds at once, and that is 822 MB of
-  # `s24le` samples on a board that holds 363.9 MB.
+  # `s24le` samples on a board with 363.9 MB.
   #
   # A read on 2026-08-24 did exactly that. The board raised its memory alarm, the
   # decoder reported a malformed frame for each byte that it then skipped, and a
@@ -57,12 +57,12 @@ defmodule MyHiFi.Player.FileSource do
   # 16 KB is about one second of a 128 kbit/s episode, and about 38 frames.
   @read_bytes 16 * 1024
 
-  # How far a resume steps back before the byte that it holds.
+  # How far a resume steps back before the byte that it reads.
   #
-  # **The byte that a resume holds is in front of what a person heard.** This element
-  # reports the byte that it read, and the pipeline holds a lead over the sound: a
+  # **The byte that a resume starts at is in front of what a person heard.** This
+  # element reports the byte that it read, and the pipeline runs ahead of the sound: a
   # read on the board on 2026-08-24 measured 1.7 s after a short play and 3.8 s after
-  # a longer one, and 3.8 s of a 128 kbit/s episode is 61 KB. 96 KB therefore holds
+  # a longer one, and 3.8 s of a 128 kbit/s episode is 61 KB. 96 KB therefore covers
   # more than the largest lead that a read has measured, so a person hears a little
   # again and never loses a word.
   #
@@ -73,7 +73,7 @@ defmodule MyHiFi.Player.FileSource do
   def_options(
     key: [
       spec: String.t(),
-      description: "The key that a download holds this track under."
+      description: "The key that a download writes this track under."
     ],
     uri: [
       spec: String.t(),
@@ -89,7 +89,7 @@ defmodule MyHiFi.Player.FileSource do
       default: :mp3,
       description: """
       The codec of the file. A resume steps back to a frame boundary, and only
-      `:mp3` holds frames that `MyHiFi.Player.Mp3Frame` reads.
+      `:mp3` carries frames that `MyHiFi.Player.Mp3Frame` reads.
       """
     ],
     buffer_bytes: [
@@ -254,7 +254,7 @@ defmodule MyHiFi.Player.FileSource do
   end
 
   @doc """
-  The byte that a resume begins at, given the byte that it holds.
+  The byte that a resume begins at, given the byte that the item reports.
 
   It steps back by `@rewind_bytes` and it lands on a frame boundary. See
   `MyHiFi.Player.Mp3Frame` for both reasons.
@@ -271,7 +271,7 @@ defmodule MyHiFi.Player.FileSource do
         Membrane.Logger.info("A resume of #{offset} begins at #{byte}.")
         byte
 
-      # A file that holds no frame where this looked still plays. The step back is
+      # A file with no frame where this looked still plays. The step back is
       # what stops a person from losing a word, and the alignment costs MAD under two
       # frames when it is absent.
       {:error, reason} ->
@@ -280,7 +280,7 @@ defmodule MyHiFi.Player.FileSource do
     end
   end
 
-  # Another codec holds frames of another shape, so this steps back and aligns
+  # Another codec has frames of another shape, so this steps back and aligns
   # nothing. A repeat of some audio is still better than a step over some.
   def rewound(offset, _device, _format), do: max(offset - @rewind_bytes, 0)
 
@@ -300,11 +300,11 @@ defmodule MyHiFi.Player.FileSource do
     end
   end
 
-  # Nothing leaves this element until the file holds enough to hide a network that
+  # Nothing leaves this element until the file has enough to hide a network that
   # falls behind the audio for a moment. A whole file passes at once.
   defp serve(%State{filling?: true, whole?: false} = state) do
     if state.available - state.offset >= state.buffer_bytes do
-      Membrane.Logger.info("The file holds #{state.available} bytes. Playing.")
+      Membrane.Logger.info("The file has #{state.available} bytes. Playing.")
       serve(%State{state | filling?: false})
     else
       {[], state}
@@ -341,7 +341,7 @@ defmodule MyHiFi.Player.FileSource do
            actions ++ continuing(state), state}
 
       # The file is shorter than the count that the download reported, so the next
-      # message says what it really holds.
+      # message says what it really is.
       :eof ->
         {[], state}
 
@@ -350,7 +350,7 @@ defmodule MyHiFi.Player.FileSource do
     end
   end
 
-  # One buffer holds `@read_bytes` at most, so a demand larger than that needs more
+  # One buffer carries `@read_bytes` at most, so a demand larger than that needs more
   # than one turn. `:redemand` asks Membrane for that turn. The demand falls with each
   # buffer, so this ends.
   defp continuing(%State{} = state) do

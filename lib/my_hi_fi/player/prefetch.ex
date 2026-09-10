@@ -3,20 +3,20 @@ defmodule MyHiFi.Player.Prefetch do
   Reads the audio of the next track before the current one ends.
 
   A track that plays from a file waits for the network twice: once for the request,
-  and once for the first 64 KB that `MyHiFi.Player.FileSource` holds before the first
+  and once for the first 64 KB that `MyHiFi.Player.FileSource` waits for before the first
   sound. Both of those waits sit between one track and the next, where a person hears
   them as a gap. This removes them, by reading the file while the track before it
   still plays.
 
   **It does not make the change of track gapless.** `MyHiFi.Output.APlaySink` starts
-  `aplay` for each pipeline, and that start holds a silence of about one second. Only
+  `aplay` for each pipeline, and that start costs a silence of about one second. Only
   a sink that lives longer than one pipeline can remove that, and this firmware
   builds a pipeline for each playable. See `MyHiFi.Player.Pipeline`.
 
   ## What it reads, and what it leaves
 
   **A track of the `:download` transport, and nothing else.** A live stream has no
-  next byte to read early, and an HLS playlist holds its own buffer.
+  next byte to read early, and an HLS playlist is its own buffer.
 
   **One track ahead.** `MyHiFi.Playback.Queue.NextUp` gives the row after the one
   that plays, and this asks for that one alone. A person who skips through a list
@@ -36,7 +36,7 @@ defmodule MyHiFi.Player.Prefetch do
   `MyHiFi.Player.Download.ensure/2` makes its caller a watcher, so every count of
   bytes reaches that process. The player must answer a person who presses a control,
   and a mailbox of one message for each 16 KB of a 40 MB file is not the way to do
-  that. A task therefore holds the wait, and the player asks and forgets.
+  that. A task therefore does the waiting, and the player asks and forgets.
   """
 
   require Logger
@@ -52,7 +52,7 @@ defmodule MyHiFi.Player.Prefetch do
   @doc """
   Read the audio of one item, and answer at once.
 
-  It gives `:ok` for a track that it began to read, and `:ignored` for one that holds
+  It returns `:ok` for a track that it began to read, and `:ignored` for one that needs
   nothing to read early. A person is in the middle of a track while this runs, so it
   raises nothing and it logs what did not work.
   """

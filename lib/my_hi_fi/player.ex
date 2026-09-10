@@ -3,7 +3,7 @@ defmodule MyHiFi.Player do
   Plays one track at a time.
 
   A caller gives one `MyHiFi.Playback.Item`, and the player asks the source of it to
-  resolve it, builds a pipeline, and plays it. It holds one pipeline at a time, and it
+  resolve it, builds a pipeline, and plays it. It runs one pipeline at a time, and it
   stops the old one first.
 
   `MyHiFi.Playback.play/2` is what a page calls. It puts the list that a person saw in
@@ -16,22 +16,22 @@ defmodule MyHiFi.Player do
   ## The controls
 
   A pause stops the pipeline and it keeps the track selected, so a play starts the
-  pipeline again at the place that the item holds. A pause therefore needs no mechanism
+  pipeline again at the place that the item reports. A pause therefore needs no mechanism
   of its own.
 
   A skip keeps the pipeline. It moves the byte that `MyHiFi.Player.FileSource` reads,
-  because a pipeline holds the decoder and the buffer of a stream, and a start of one
-  reads the network again. `MyHiFi.Output.APlayPort` holds the sound card across a
+  because a pipeline owns the decoder and the buffer of a stream, and a start of one
+  reads the network again. `MyHiFi.Output.APlayPort` keeps the sound card across a
   pipeline now, so a start no longer opens the card unless the format of the audio
   changed. See `MyHiFi.Player.Skip`.
 
-  Next and previous move the mark of `MyHiFi.Playback.Queue`, which holds the order
+  Next and previous move the mark of `MyHiFi.Playback.Queue`, which decides the order
   that a person saw. A track that reaches its end moves the mark as well, and the row
   stays, so a person can go back to what they heard.
 
   A live stream ends when the network fails, and a person expects the music to
   come back. The player therefore starts the stream again after a short wait, and
-  it gives up after a few tries.
+  it stops after a few tries.
   """
 
   use GenServer
@@ -138,7 +138,7 @@ defmodule MyHiFi.Player do
   A pause is not a stop. A stop leaves the device with nothing selected, and a pause
   leaves the track in front of the person.
 
-  A play starts the track at the place that the source holds, so a podcast episode
+  A play starts the track at the place that the source reports, so a podcast episode
   continues and a live station opens again at the current point of the stream. A play
   also leaves standby, because a person who asks for music asks the device to be
   awake.
@@ -149,7 +149,7 @@ defmodule MyHiFi.Player do
   @doc """
   Play the row after the one that plays now.
 
-  The queue holds the order. See `MyHiFi.Playback.Queue`.
+  The queue decides the order. See `MyHiFi.Playback.Queue`.
   """
   @spec next() :: :ok | {:error, term()}
   def next, do: GenServer.call(__MODULE__, {:move, :next}, :timer.seconds(30))
@@ -170,9 +170,9 @@ defmodule MyHiFi.Player do
   `MyHiFi.Event.Player.Progress` event.
 
   A track that a person cannot move inside gives `{:error, :cannot_skip}`: a live
-  stream holds no place, a source may hold no skip at all, and
+  stream has no place, a source may offer no skip at all, and
   `MyHiFi.Player.Skip` reads MP3 frames alone. A track that makes no sound yet gives
-  `{:error, :not_playing}`, and a pause therefore holds no skip.
+  `{:error, :not_playing}`, and a pause therefore takes no skip.
   """
   @spec skip(integer()) :: :ok | {:error, term()}
   def skip(ms), do: GenServer.call(__MODULE__, {:skip, ms})
@@ -189,7 +189,7 @@ defmodule MyHiFi.Player do
   @doc """
   What the player is doing, for a person at the console.
 
-  A caller that must not wait gives a timeout and catches the exit.
+  A caller that must not wait passes a timeout and catches the exit.
   `MyHiFi.Playback.Player.state/0` does that, and every page reads it through there.
   """
   @spec state(timeout()) :: map()
@@ -199,11 +199,11 @@ defmodule MyHiFi.Player do
   The output devices, and the one that the player uses.
 
   The settings page shows this, so that page needs no knowledge of which output
-  module the player holds.
+  module the player uses.
 
   `selected` is the card that a person chose, and it is nil for a device that no
   person has changed. `in_use` is the card that the sound comes out of, and it is
-  nil only when the machine holds no card at all. The two are different when a
+  nil only when the machine has no card at all. The two are different when a
   person chose nothing, and when the card that they chose has left the machine. A
   page must mark `in_use`, because that is the one that plays.
   """
@@ -237,7 +237,7 @@ defmodule MyHiFi.Player do
     do: GenServer.call(__MODULE__, {:enable_source, source, enabled?}, :timer.seconds(30))
 
   @doc """
-  The settings key that holds the chosen output device.
+  The settings key of the chosen output device.
   """
   @spec output_device_key() :: String.t()
   def output_device_key, do: @output_device_key
@@ -291,7 +291,7 @@ defmodule MyHiFi.Player do
     {:reply, :ok, cleared(state), {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
-  # A pause holds a track for a person, so a device with nothing selected has nothing
+  # A pause keeps a track for a person, so a device with nothing selected has nothing
   # to pause.
   @impl GenServer
   def handle_call({:pause, true}, _from, %State{item: nil} = state) do
@@ -303,7 +303,7 @@ defmodule MyHiFi.Player do
     {:reply, :ok, %State{state | paused?: true}}
   end
 
-  # `offset_ms` holds the place, because the terminate below clears `started_at` and
+  # `offset_ms` keeps the place, because the terminate below clears `started_at` and
   # `position_ms/1` then counts from the offset alone. A page that opens while the
   # device is paused therefore reads the place that a person stopped at.
   @impl GenServer
@@ -492,7 +492,7 @@ defmodule MyHiFi.Player do
      }}
   end
 
-  # `MyHiFi.Player.FileSource` reports the byte that it has read. The player holds
+  # `MyHiFi.Player.FileSource` reports the byte that it has read. The player keeps
   # the last one, and `store_position/1` writes it beside the time. The two numbers
   # therefore come from one stop, and no part of this firmware turns a time into a
   # byte with a bitrate. See `MyHiFi.Source.place/0`.
@@ -577,9 +577,9 @@ defmodule MyHiFi.Player do
     {:noreply, state}
   end
 
-  # **Every start ends the pipeline that the state holds.** `Membrane.Pipeline.start/2`
+  # **Every start ends the pipeline that the state names.** `Membrane.Pipeline.start/2`
   # links nothing to this process, so a state that loses the reference leaves a
-  # pipeline that holds `aplay` and keeps the room loud. The next pipeline then finds
+  # pipeline that owns `aplay` and keeps the room loud. The next pipeline then finds
   # the sound card busy and dies with `:epipe`, the notices of the one that plays reach
   # a player that does not know it, and a person who presses stop stops nothing. This
   # is the one place that answers for it, so no caller can forget.
@@ -629,9 +629,9 @@ defmodule MyHiFi.Player do
   # this process needs, and it survives the pipeline.
   # A test names its own pipeline with `config :my_hi_fi, :pipeline, ...`, in the
   # same way that it names its own source and its own output. The pipeline of this
-  # firmware holds `aplay`, and `aplay` holds a sound card, so a test of what the
+  # firmware runs `aplay`, and `aplay` opens a sound card, so a test of what the
   # player does at the end of a track cannot use it: the host of a build server
-  # holds no card. Nothing sets this in production.
+  # has no card. Nothing sets this in production.
   defp start_pipeline(playable, sink, _state) do
     module = Application.get_env(:my_hi_fi, :pipeline, Pipeline)
 
@@ -674,7 +674,7 @@ defmodule MyHiFi.Player do
   end
 
   # A page shows the local copy of a logo, and never the address of the station.
-  # The content security policy of the device holds `'self'` alone. A logo that the
+  # The content security policy of the device names `'self'` alone. A logo that the
   # cache does not hold arrives in a later event, from `MyHiFi.Artwork.Worker`.
   defp artwork_path(%{artwork: url}) do
     case Artwork.name(url) do
@@ -704,10 +704,10 @@ defmodule MyHiFi.Player do
     %State{state | standby?: false}
   end
 
-  # A skip needs four things: a source that holds one, a track with an end, a file to
+  # A skip needs four things: a source that offers one, a track with an end, a file to
   # read, and a format that `MyHiFi.Player.Skip` reads. `:download` is the transport
   # that gives the file, and `MyHiFi.Player.FileSource` is the element that moves. All
-  # four give one answer to a person: this track holds no skip.
+  # four give one answer to a person: this track takes no skip.
   defp skippable?(%State{
          source: source,
          playable: %{live?: false, transport: :download, format: :mp3}
@@ -749,7 +749,7 @@ defmodule MyHiFi.Player do
     end
   end
 
-  # The queue holds the order, so the row after this one is the row that plays next.
+  # The queue decides the order, so the row after this one is the row that plays next.
   # An empty queue, and either end of it, both mean the same thing to a person: there
   # is nothing that way. The code interface of Ash wraps the reason, and no caller
   # reads inside it.
@@ -812,10 +812,10 @@ defmodule MyHiFi.Player do
     end
   end
 
-  # `aplay` holds the sound card, so closing its port is what makes the room quiet.
+  # `aplay` owns the sound card, so closing its port is what makes the room quiet.
   # The pipeline may take its time after that. A call that no pipeline answers is a
   # pipeline that is already wedged, and the forced terminate of `stop_pipeline/1`
-  # holds that case.
+  # covers that case.
   # A stop leaves the device with nothing selected. The pipeline goes down in a
   # `handle_continue`, so each caller of this adds that step itself.
   defp cleared(%State{} = state) do
@@ -851,7 +851,7 @@ defmodule MyHiFi.Player do
   defp stop_pipeline(%State{pipeline: nil} = state), do: state
 
   # **This waits for the old pipeline, and the wait is what makes a change of track
-  # work.** `MyHiFi.Output.APlayPort` holds one port, and two sinks that write to it at
+  # work.** `MyHiFi.Output.APlayPort` keeps one port, and two sinks that write to it at
   # once interleave their samples into noise. The order here is what stops that: the old
   # pipeline is gone before `advance/1` builds the next one.
   #
@@ -960,7 +960,7 @@ defmodule MyHiFi.Player do
     })
   end
 
-  # The end of one track is the start of the next one. A queue that holds no more
+  # The end of one track is the start of the next one. A queue with no more
   # leaves the device with the track that ended still selected, so a person reads what
   # they heard last and a play control starts it again.
   defp advance(%State{} = state) do
@@ -981,7 +981,7 @@ defmodule MyHiFi.Player do
   #
   # A track that never began has no place to keep, and writing 0 would lose the
   # place that a person already had.
-  # A track that keeps no place holds nothing for a person to go back to, so a stop is
+  # A track that keeps no place leaves nothing for a person to go back to, so a stop is
   # the end of it and its file must stop holding the card against every eviction. The
   # `:mark_played` action does this for a track that reaches its end by itself, and a
   # person who stops half way through a song reaches that path never. Such a file
@@ -1007,7 +1007,7 @@ defmodule MyHiFi.Player do
   end
 
   # The audio of the next track arrives before a person asks for it, so the gap
-  # between two tracks holds no request and no first 64 KB. See
+  # between two tracks needs no request and no first 64 KB. See
   # `MyHiFi.Player.Prefetch` for what this does not remove.
   #
   # **A track whose own file is not whole reads nothing ahead.** Two downloads then

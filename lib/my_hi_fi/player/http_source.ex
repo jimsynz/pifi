@@ -2,13 +2,13 @@ defmodule MyHiFi.Player.HttpSource do
   @moduledoc """
   A Membrane source that reads an HTTP audio stream.
 
-  It holds the ring buffer of the player. The buffer holds the compressed bytes
+  It owns the ring buffer of the player. The buffer keeps the compressed bytes
   and not the samples, so it costs little: a 128 kbps stream is 16 KB each second,
   and 10 seconds cost about 160 KB. The same 10 seconds of samples cost 1.7 MB.
   The buffer stays in memory, and it never touches the SD card.
 
   It reads with `Req`, and the response arrives as messages. This firmware
-  therefore holds one HTTP client and not two. `Membrane.Hackney.Source` would
+  therefore needs one HTTP client and not two. `Membrane.Hackney.Source` would
   bring a second one, and it cannot read the ICY titles that a Shoutcast stream
   sends between the audio.
 
@@ -148,7 +148,7 @@ defmodule MyHiFi.Player.HttpSource do
 
   A live stream arrives at about the bitrate of the audio, so the queue stays near
   the low mark. If it ever grows far past that mark, something downstream has
-  stopped asking, and this board holds 363.9 MB of memory. Dropping the oldest
+  stopped asking, and this board has 363.9 MB of memory. Dropping the oldest
   audio keeps the device alive, and a person hears a gap and not a restart.
 
   This function is public so that a test can reach it. It is the guard that stopped
@@ -161,7 +161,7 @@ defmodule MyHiFi.Player.HttpSource do
 
     if byte_size(state.queue) > limit do
       Membrane.Logger.warning(
-        "The buffer holds #{byte_size(state.queue)} bytes, past the limit of #{limit}. " <>
+        "The buffer has #{byte_size(state.queue)} bytes, past the limit of #{limit}. " <>
           "Dropping the oldest audio."
       )
 
@@ -173,13 +173,13 @@ defmodule MyHiFi.Player.HttpSource do
     end
   end
 
-  # Nothing leaves this element until the buffer holds enough to hide a short
+  # Nothing leaves this element until the buffer has enough to hide a short
   # network fault.
   defp serve(%State{filling?: true, done?: false} = state) do
     if byte_size(state.queue) >= state.buffer_bytes do
-      Membrane.Logger.info("Buffer holds #{byte_size(state.queue)} bytes. Playing.")
+      Membrane.Logger.info("The buffer has #{byte_size(state.queue)} bytes. Playing.")
       # The sink says when sound starts. This element only says that the buffer
-      # holds enough to begin.
+      # has enough to begin.
       serve(%State{state | filling?: false})
     else
       {[], state}

@@ -3,15 +3,15 @@ defmodule MyHiFi.Player.Hls do
   Reads an HLS playlist and says how to play it.
 
   An HLS address gives a playlist and not audio. The player needs three facts
-  before it builds a pipeline, and only the playlist holds them.
+  before it builds a pipeline, and only the playlist names them.
 
   A **master** playlist names one or more variant streams, and each variant names
   a media playlist. A **media** playlist names the segments. A station address can
   be either one, and 4 of the 44 New Zealand HLS stations give a media playlist.
 
   The **container** comes from the name of the first segment. A `.ts` segment
-  holds MPEG-TS, and the pipeline then needs a demultiplexer. Any other segment
-  holds the audio with no container, so the decoder reads it as it arrives.
+  carries MPEG-TS, and the pipeline then needs a demultiplexer. Any other segment
+  carries the audio with no container, so the decoder reads it as it arrives.
 
   The **codec** comes from the `CODECS` attribute of the variant. `mp4a.40.34`
   is MP3, and the other `mp4a` values are AAC. A media playlist carries no such

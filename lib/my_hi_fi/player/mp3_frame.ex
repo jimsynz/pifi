@@ -3,7 +3,7 @@ defmodule MyHiFi.Player.Mp3Frame do
   Reads the frames of an MP3 file, to find a place inside it.
 
   A resume needs the boundary of a frame a little before a byte. A skip needs the
-  byte that holds a time. Both come from the frame headers, and neither one needs a
+  byte at a given time. Both come from the frame headers, and neither one needs a
   bitrate.
 
   ## What a resume needs
@@ -15,8 +15,8 @@ defmodule MyHiFi.Player.Mp3Frame do
   2026-08-24 measured 591 such skips after a resume, which is under two frames and
   about 50 ms.
 
-  **The byte that a resume holds is in front of what a person heard.**
-  `MyHiFi.Player.FileSource` reports the byte that it read, and the pipeline holds a
+  **The byte that a resume starts at is in front of what a person heard.**
+  `MyHiFi.Player.FileSource` reports the byte that it read, and the pipeline runs a
   lead of one to four seconds over the sound. Opening the file at that byte steps
   over a second or two of speech. A person who resumes must hear a little again, and
   never lose a word, so this steps back before it aligns.
@@ -27,15 +27,15 @@ defmodule MyHiFi.Player.Mp3Frame do
   measurement of 2026-08-24 hold more than one bitrate, and a resume that used one
   landed as much as 1994.6 s from the mark.
 
-  A header holds the bitrate and the sample rate of its own frame, so it gives the
+  A header carries the bitrate and the sample rate of its own frame, so it gives the
   length of that frame in bytes and its length in time. `forward/4` adds both, so it
-  measures a real span of audio and it holds for a file of many bitrates as well as
-  for a file of one. `MyHiFi.Player.Skip` holds what a backward skip then does with
+  measures a real span of audio, and it is true for a file of many bitrates as well as
+  for a file of one. `MyHiFi.Player.Skip` says what a backward skip then does with
   that measurement.
 
   ## Why it walks forward
 
-  An MP3 frame holds no pointer to the frame before it, so the only way back is to
+  An MP3 frame has no pointer to the frame before it, so the only way back is to
   look for the 11 bits of a sync word. **Those bits appear inside audio as well**,
   and a scan backwards would often stop on one of them. That is the same trap that
   MAD meets when it skips a byte at a time.
@@ -67,7 +67,7 @@ defmodule MyHiFi.Player.Mp3Frame do
   @max_frame_bytes 1441
 
   # How far before the target to look for a frame. One frame of any bitrate fits in
-  # this many times over, so a window that holds no frame at all holds no audio.
+  # this many times over, so a window with no frame at all carries no audio.
   @search_bytes 8192
 
   # How much audio a probe of the bitrate walks over. One second is about 38 frames of
@@ -81,9 +81,9 @@ defmodule MyHiFi.Player.Mp3Frame do
   `limit` is the byte to stop at. `MyHiFi.Player.FileSource` gives the count that the
   download reports, so nothing reads a part of the file that has not arrived.
 
-  A window that holds no frame gives `{:error, :no_frame}`. That window is about 10
+  A window with no frame returns `{:error, :no_frame}`. That window is about 10
   KB, and one frame of any bitrate fits in it many times over, so a window with no
-  frame holds no audio.
+  frame carries no audio.
   """
   @spec boundary_at(:file.fd(), non_neg_integer(), non_neg_integer()) ::
           {:ok, non_neg_integer()} | {:error, term()}
@@ -104,10 +104,10 @@ defmodule MyHiFi.Player.Mp3Frame do
 
   `margin` is in bytes and not in milliseconds, because the lead that this steps
   back over is itself a count of bytes: the reader read that many more than a person
-  heard. A count of bytes therefore needs no bitrate, and it holds for a variable
+  heard. A count of bytes therefore needs no bitrate, and it is true for a variable
   bitrate file as well as a constant one.
 
-  It gives 0 when the margin reaches the start of the file. The first byte of a file
+  It returns 0 when the margin reaches the start of the file. The first byte of a file
   is where a first play begins, and `Membrane.MP3.MAD.Decoder` steps over an ID3 tag
   itself.
   """
@@ -152,9 +152,9 @@ defmodule MyHiFi.Player.Mp3Frame do
   It stops at the first bound that it meets: `ms` of audio, or `limit` bytes. An `ms`
   of `:infinity` therefore measures the time between two bytes, which is what a
   backward skip needs, and a `limit` that the walk meets first is a skip that reaches
-  the end of what the file holds.
+  the end of what the file has.
 
-  The byte that it gives is a frame boundary, and the milliseconds are the sum of the
+  The byte that it returns is a frame boundary, and the milliseconds are the sum of the
   length of each frame that it stepped over. It never passes the time that the caller
   asks for, so it lands inside one frame of it, which is 26 ms of a 44100 Hz file.
   """
@@ -179,8 +179,8 @@ defmodule MyHiFi.Player.Mp3Frame do
     end
   end
 
-  # A frame that a header names, and a second one where its length says. Audio holds
-  # the bits of a sync word often, and it holds two that agree on a length rarely.
+  # A frame that a header names, and a second one where its length says. Audio carries
+  # the bits of a sync word often, and it carries two that agree on a length rarely.
   defp first_frame(window, index) do
     cond do
       index + @max_frame_bytes >= byte_size(window) ->
@@ -215,12 +215,12 @@ defmodule MyHiFi.Player.Mp3Frame do
     end
   end
 
-  # The sum is in microseconds, because one frame of a 44100 Hz file holds 26.122 ms
+  # The sum is in microseconds, because one frame of a 44100 Hz file runs 26.122 ms
   # and a walk of 30 seconds steps over 1149 of them. A sum of whole milliseconds
   # would lose 5 seconds of that walk.
   #
   # `:infinity` needs no clause of its own. A number is less than an atom in the term
-  # order of Erlang, so the guard holds for it.
+  # order of Erlang, so the guard is correct for it.
   defp step(device, byte, ms, limit, microseconds) do
     case frame_at(device, byte) do
       {:ok, length, added}

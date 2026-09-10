@@ -7,9 +7,9 @@ defmodule MyHiFi.Player.PortDecoder do
   the compressed bytes to the standard input of a program, and it reads the samples
   from the standard output.
 
-  Two codecs need this, and Membrane holds a decoder for neither.
+  Two codecs need this, and Membrane has a decoder for neither.
 
-  - **Ogg Vorbis**, with `oggdec` from vorbis-tools. Hex holds no Vorbis package at
+  - **Ogg Vorbis**, with `oggdec` from vorbis-tools. Hex has no Vorbis package at
     all.
   - **Ogg FLAC**, with `flac --decode --ogg`. `membrane_flac_plugin` is a parser,
     and it decodes nothing.
@@ -43,20 +43,20 @@ defmodule MyHiFi.Player.PortDecoder do
   `MyHiFi.Player.Pipeline.handle_element_end_of_stream/4` never told the player to
   play the next track. A device on 2026-09-07 held a FLAC track of 3:44 at 5:32 and
   counted on. Every Jellyfin track of FLAC or of Ogg reached that state, and MP3 and
-  AAC never did, because Membrane holds a decoder for those two and it forwards the
+  AAC never did, because Membrane has a decoder for those two and it forwards the
   end of a stream itself.
 
   **The program cannot be told that its input ended.** A measurement on the device on
   2026-09-07 fed a whole FLAC file to `flac --decode --stdout --silent -` and held the
   pipe open for 20 seconds after the last byte: the program waited all 20 seconds and
   then exited. So it ends when its standard input ends, and not at the end of the
-  stream that it reads. Erlang holds no half close for a port, and
+  stream that it reads. Erlang has no half close for a port, and
   `Port.close/1` ends the program and takes the output that it has not written yet.
   The `exit_status` clause below therefore never answers a track that reached its end.
 
   **This waits for the output to go quiet instead.** The end of the input starts a
   timer of a quarter of a second, each answer of the program starts it again, and the
-  timer then closes the port and sends the end of the stream. A program that holds
+  timer then closes the port and sends the end of the stream. A program that keeps
   nothing more gives nothing more, so this loses no sample that a person could hear.
   The wait costs no time that a person waits either: the sink is playing the audio
   that this element already gave it, and the end of the stream travels behind that
@@ -156,7 +156,7 @@ defmodule MyHiFi.Player.PortDecoder do
     {[end_of_stream: :output], %State{state | port: nil}}
   end
 
-  # The program gave nothing for `@flush_ms`, so it holds nothing more and the track
+  # The program gave nothing for `@flush_ms`, so it has nothing more and the track
   # reached its end. See the module documentation for why this cannot wait for the
   # program to exit.
   @impl true
@@ -170,7 +170,7 @@ defmodule MyHiFi.Player.PortDecoder do
     {[], state}
   end
 
-  # A port that is already closed holds nothing to wait for.
+  # A port that is already closed leaves nothing to wait for.
   @impl true
   def handle_end_of_stream(:input, _ctx, %State{port: nil} = state) do
     {[end_of_stream: :output], state}
@@ -209,7 +209,7 @@ defmodule MyHiFi.Player.PortDecoder do
     {[buffer: {:output, %Membrane.Buffer{payload: audio}}], %State{state | held: <<>>}}
   end
 
-  # A WAV file holds chunks. This reads the `fmt ` chunk for the shape of a sample,
+  # A WAV file carries chunks. This reads the `fmt ` chunk for the shape of a sample,
   # and it then finds the `data` marker. It ignores the length that `data` names,
   # because a live stream has no length.
   defp header(<<"RIFF", _size::binary-size(4), "WAVE", rest::binary>>), do: chunks(rest, nil)
@@ -246,7 +246,7 @@ defmodule MyHiFi.Player.PortDecoder do
     }
   end
 
-  # A WAV file holds a signed sample of 16 bits or more, and an unsigned one of 8.
+  # A WAV file carries a signed sample of 16 bits or more, and an unsigned one of 8.
   defp sample_format(8), do: :u8
   defp sample_format(16), do: :s16le
   defp sample_format(24), do: :s24le
@@ -258,7 +258,7 @@ defmodule MyHiFi.Player.PortDecoder do
         raise """
         #{state.command} is not on the PATH.
 
-        The Nerves system holds no decoder for Ogg. NBPR gives the program, and it
+        The Nerves system has no decoder for Ogg. NBPR gives the program, and it
         ships a binary and no header file, which is all that a port needs. See
         <https://github.com/jimsynz/nbpr>.
         """

@@ -13,14 +13,14 @@ defmodule MyHiFi.Player.Skip do
   reaches the time, so a forward skip is one walk and it needs nothing else. The walk
   reads what it steps over, which is 480 KB for 30 seconds of a 128 kbit/s file.
 
-  A walk that meets the end of what the file holds stops there and reports the time
+  A walk that meets the end of what the file has stops there and reports the time
   that it did move. A whole file then ends the stream, and the source marks the track
   played. A file that still grows waits for the bytes, which is what
   `MyHiFi.Player.FileSource` already does when the network is slower than the audio.
 
   ## Backward is a measurement
 
-  A frame holds no pointer to the frame before it, so nothing walks backward. This
+  A frame has no pointer to the frame before it, so nothing walks backward. This
   therefore chooses a byte and then measures what it chose:
 
   1. `MyHiFi.Player.Mp3Frame.bytes_of_ms/4` gives a candidate byte, from the bitrate
@@ -46,14 +46,14 @@ defmodule MyHiFi.Player.Skip do
   # tenth of 15 seconds is 1.5 seconds.
   #
   # The second measurement is cheap, because it reads the bytes that the first one
-  # read and the operating system holds those pages already.
+  # read and the operating system keeps those pages already.
   @tolerance 10
 
   @doc """
   The byte to read next, and the time that the skip moved.
 
-  `from` is the byte that the reader holds now, and `limit` is the count of bytes that
-  the file holds: the size of a whole file, or the count that the download reports for
+  `from` is the byte that the reader is at now, and `limit` is the count of bytes that
+  the file has: the size of a whole file, or the count that the download reports for
   one that still grows.
 
   `ms` is signed, so a backward skip is a negative number. The `ms` of the answer
@@ -91,7 +91,7 @@ defmodule MyHiFi.Player.Skip do
   end
 
   # A second candidate reaches past the start of the file when the first measurement
-  # was much shorter than the request, so this holds it at the start.
+  # was much shorter than the request, so this keeps it at the start.
   defp measured(device, from, candidate, limit) do
     with {:ok, start} <- Mp3Frame.boundary_at(device, max(candidate, 0), limit),
          true <- start < from,
@@ -103,7 +103,7 @@ defmodule MyHiFi.Player.Skip do
     end
   end
 
-  # A span of no time gives no error to scale by, so this holds the first answer.
+  # A span of no time gives no error to scale by, so this keeps the first answer.
   defp nearer(_device, _from, _wanted, %{ms: 0} = place, _limit), do: {:ok, place}
 
   defp nearer(device, from, wanted, place, limit) do

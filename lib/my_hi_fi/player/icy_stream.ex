@@ -4,18 +4,18 @@ defmodule MyHiFi.Player.IcyStream do
 
   A Shoutcast server that gets the `Icy-MetaData: 1` request header answers with
   an `icy-metaint` header, and it then puts a block of text into the audio after
-  each `icy-metaint` bytes. The block starts with one byte that holds the length
+  each `icy-metaint` bytes. The block starts with one byte that gives the length
   in units of 16 bytes, and a length of zero means that the server has nothing new
   to say. Most blocks are empty, because the title changes once for each track.
 
       <-- 16384 bytes of audio --><4><StreamTitle='Coldplay - Hymn';\\0\\0\\0>...
 
   A decoder cannot read those bytes, so this module removes them and gives the
-  audio alone. It also gives the new title, and it gives it once only: a server
+  audio alone. It also returns the new title, and it returns it once only: a server
   repeats the same title in each block.
 
   The bytes arrive in chunks of any size, and a block can start in one chunk and
-  end in the next one. This module therefore holds the point that it reached.
+  end in the next one. This module therefore keeps the point that it reached.
 
   A station that sends no `icy-metaint` header needs `new(nil)`. Every byte is
   then audio, and the station gives no title.
@@ -27,7 +27,7 @@ defmodule MyHiFi.Player.IcyStream do
   Where the reader is in the stream.
 
   `{:audio, count}` waits for `count` more bytes of audio. `:length` waits for the
-  byte that holds the length of a block. `{:block, count, held}` waits for `count`
+  byte that gives the length of a block. `{:block, count, held}` waits for `count`
   more bytes of a block, and `held` is the part that arrived already.
   """
   @type phase ::
@@ -55,7 +55,7 @@ defmodule MyHiFi.Player.IcyStream do
   @doc """
   Read one chunk.
 
-  It gives the audio of that chunk, each new title in the order that the stream
+  It returns the audio of that chunk, each new title in the order that the stream
   gave them, and the reader for the next chunk.
   """
   @spec split(t(), binary()) :: {binary(), [String.t()], t()}

@@ -14,8 +14,8 @@ defmodule MyHiFi.Player.Pipeline do
       :http, :ogg,     :flac   -> HTTP source -> flac --ogg port -> sink
       :http, :none,    :flac   -> HTTP source -> flac port -> sink
 
-  An HTTP source holds the ring buffer, so the compressed bytes wait there and the
-  samples never do. An HLS source holds the segments of the playlist instead, and
+  An HTTP source owns the ring buffer, so the compressed bytes wait there and the
+  samples never do. An HLS source reads the segments of the playlist instead, and
   the playlist gives the buffer.
 
   The player starts one of these at a time, and it stops the old one first.
@@ -35,12 +35,12 @@ defmodule MyHiFi.Player.Pipeline do
   # to stop waits behind all of those samples. A person then presses stop and
   # hears several more seconds of music.
   #
-  # Eight buffers is under half a second. ALSA holds another half second, and the
+  # Eight buffers is under half a second. ALSA keeps another half second, and the
   # decoder runs much faster than the sound, so the sound stays smooth.
   @sink_queue_buffers 8
 
   # How many bytes of AAC may reach the decoder in one buffer. The field that
-  # holds the length of an ADTS frame is 13 bits, so 8191 bytes is the largest
+  # carries the length of an ADTS frame is 13 bits, so 8191 bytes is the largest
   # frame that the format allows, and this size therefore always carries a whole
   # frame. It is also well under the input buffer of libfdk-aac: a measurement of
   # a 128 kbps stream lost no audio at 16 KB and lost most of it at 32 KB. See
@@ -152,8 +152,8 @@ defmodule MyHiFi.Player.Pipeline do
     })
   end
 
-  # `Membrane.HLS.Source` reads the media playlist again and again, and it gives
-  # the bytes of each segment. The playlist therefore holds the buffer, and this
+  # `Membrane.HLS.Source` reads the media playlist again and again, and it returns
+  # the bytes of each segment. The playlist therefore is the buffer, and this
   # source needs none of its own.
   defp source(%{transport: :hls} = playable, _buffer_bytes) do
     child(:source, %Membrane.HLS.Source{
@@ -209,7 +209,7 @@ defmodule MyHiFi.Player.Pipeline do
     child(link, :mpeg_audio, MyHiFi.Player.MpegAudio)
   end
 
-  # libfdk-aac holds an input buffer of its own, and `aacDecoder_Fill` copies only
+  # libfdk-aac keeps an input buffer of its own, and `aacDecoder_Fill` copies only
   # what fits. It reports the count of the bytes that it did not take, and its
   # manual then says to refill only when that count is zero.
   # `Membrane.AAC.FDK.Decoder` refills on each buffer and removes the rest, so a
@@ -225,13 +225,13 @@ defmodule MyHiFi.Player.Pipeline do
     via_in(link, :input, auto_demand_size: @fdk_input_bytes)
   end
 
-  # **The queue of the decoder is the lead that the pipeline holds over the sound.**
+  # **The queue of the decoder is the lead that the pipeline runs ahead of the sound.**
   # Membrane gives a pad that counts bytes 1500 * 400 = 600,000 of them by default,
   # and that is 37.5 seconds of a 128 kbit/s episode. A read on the board on
   # 2026-08-24 measured the reader 14 seconds in front of what a person heard, so a
   # resume began 14 seconds past the place that they stopped at.
   #
-  # A live stream hid this. `MyHiFi.Player.HttpSource` holds its own ring buffer for
+  # A live stream hid this. `MyHiFi.Player.HttpSource` keeps its own ring buffer for
   # the jitter of a network, so a small queue here costs it nothing.
   defp adapter(link, %{format: :mp3}) do
     via_in(link, :input, auto_demand_size: @mad_input_bytes)
@@ -248,12 +248,12 @@ defmodule MyHiFi.Player.Pipeline do
 
   defp decoder(link, %{format: :aac}), do: child(link, :decoder, Membrane.AAC.FDK.Decoder)
 
-  # Membrane holds a decoder for neither Vorbis nor FLAC, so a program does the
+  # Membrane has a decoder for neither Vorbis nor FLAC, so a program does the
   # work through a port. See `MyHiFi.Player.PortDecoder`. Each program reads the
   # Ogg container itself, so neither needs a demultiplexer.
   #
   # One program cannot serve both. `ogg123` names FLAC and Vorbis among its codecs,
-  # and it reads a file to find out which one it holds. Reading from a pipe it
+  # and it reads a file to find out which one it is. Reading from a pipe it
   # cannot go back to the start, so it takes the first module that it tries and
   # stops on a FLAC stream.
   defp decoder(link, %{format: :vorbis}) do

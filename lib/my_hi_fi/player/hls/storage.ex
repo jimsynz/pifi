@@ -2,13 +2,13 @@ defmodule MyHiFi.Player.Hls.Storage do
   @moduledoc """
   Reads an HLS playlist and its segments over HTTP.
 
-  `kim_hls` holds `HLS.Storage.Req`, and this firmware does not use it. That
+  `kim_hls` ships `HLS.Storage.Req`, and this firmware does not use it. That
   module sits inside `if Code.ensure_loaded?(Req)`, and `kim_hls` names `req` as a
-  test dependency of its own. A build of this firmware therefore holds that module
+  test dependency of its own. A build of this firmware therefore has that module
   or does not, and the answer depends on the order that the dependencies compile
   in. A device must not depend on such an answer.
 
-  This module also holds the timeouts of this firmware, and it uses the one HTTP
+  This module also sets the timeouts of this firmware, and it uses the one HTTP
   client that the rest of the firmware uses. A test gives its own answers with
   `Req.Test`.
 

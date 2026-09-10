@@ -8,7 +8,7 @@ defmodule MyHiFi.Player.Download do
   queue of the element passed its limit and the guard dropped the oldest audio 1259
   times during one read of a 49.7 MB episode.
 
-  This process therefore holds no audio in memory. It writes each part to a file,
+  This process therefore keeps no audio in memory. It writes each part to a file,
   and `MyHiFi.Player.FileSource` reads that file while it grows. A file needs no
   flow control.
 
@@ -28,14 +28,14 @@ defmodule MyHiFi.Player.Download do
 
   **A stop of the playback does not end it.** The request is already in flight, and
   a content delivery network often sends the whole file before a person stops. It
-  therefore holds no link to the pipeline. It finishes the file, it puts the entry
+  therefore keeps no link to the pipeline. It finishes the file, it puts the entry
   in the cache, and it stops by itself. A later play of that episode then reads a
   whole local file, so it asks the network for nothing and it begins at once.
 
   A download that an interruption stops leaves a file that no row names, so no
   eviction can see it and the cache cannot reclaim it. `sweep/0` is what keeps those
   files from filling the partition, and `MyHiFi.Application` calls it at each boot.
-  A file of the last day stays, because a play of that episode reads what it holds
+  A file of the last day stays, because a play of that episode reads what it has
   and asks for the rest with a `range` header.
 
   ## What a watcher hears
@@ -88,7 +88,7 @@ defmodule MyHiFi.Player.Download do
   @doc """
   Everything that a reader needs to play one episode.
 
-  It gives the path of the whole file when the cache holds it, and it starts a
+  It returns the path of the whole file when the cache has it, and it starts a
   download when the cache does not. A second call for one episode finds the first
   download and starts no other.
 
@@ -118,14 +118,14 @@ defmodule MyHiFi.Player.Download do
     MyHiFi.Device.storage!().path |> Path.join(@directory) |> Path.expand()
   end
 
-  @doc "The namespace that the cache holds an episode under."
+  @doc "The namespace that the cache keeps an episode under."
   @spec namespace() :: String.t()
   def namespace, do: @namespace
 
   @doc """
   Let an eviction take the file of an episode.
 
-  A download holds `keep?`, because one file of 50 MB would otherwise remove 50
+  A download sets `keep?`, because one file of 50 MB would otherwise remove 50
   covers and a list of shows would remove the episode that a person is in the middle
   of. An episode that reached its end is no longer that, so it becomes the coldest
   thing in the cache and the eviction may take it.
@@ -145,8 +145,8 @@ defmodule MyHiFi.Player.Download do
   @doc """
   Remove each partial file that no download is going to continue.
 
-  It gives the number of files that it removed. A file of the last day stays,
-  because a play of that episode reads what it holds and asks for the rest.
+  It returns the number of files that it removed. A file of the last day stays,
+  because a play of that episode reads what it has and asks for the rest.
   """
   # Every path here comes from `directory/0` and from `Path.wildcard/1` of that
   # directory. No name of a request or of a service reaches it.
@@ -265,7 +265,7 @@ defmodule MyHiFi.Player.Download do
 
   # A download that finishes between the answer of `ensure/2` and the open of the
   # reader moves the file, so the reader gets both names and opens the one that is
-  # there. The cache holds the whole file, so it comes first.
+  # there. The cache has the whole file, so it comes first.
   defp paths(id) do
     %{
       paths: [Path.join([Cache.directory(), @namespace, id]), Path.join(directory(), id)],
@@ -283,8 +283,8 @@ defmodule MyHiFi.Player.Download do
   defp modes(0), do: [:write, :binary, :raw]
   defp modes(_from), do: [:append, :binary, :raw]
 
-  # Another process holds the request, because `Req.get/1` with `into: fun` answers
-  # only when the body ends. That process also owns the file: a `:raw` file holds the
+  # Another process owns the request, because `Req.get/1` with `into: fun` answers
+  # only when the body ends. That process also owns the file: a `:raw` file belongs to the
   # process that opened it, and any other one gets `:not_on_controlling_process`.
   # The audio therefore never reaches the mailbox of this process, and the count does.
   #
@@ -340,8 +340,8 @@ defmodule MyHiFi.Player.Download do
       {:data, data}, {request, %{status: 206} = response} ->
         write(server, device, data, {request, response})
 
-      # The server ignored the range, so this answer holds the whole file and not the
-      # rest of it. What the file holds is therefore of no use.
+      # The server ignored the range, so this answer carries the whole file and not the
+      # rest of it. What the file already has is therefore of no use.
       {:data, data}, {request, %{status: 200} = response} when from > 0 ->
         if :atomics.exchange(restarted, 1, 1) == 0 do
           {:ok, 0} = :file.position(device, :bof)
@@ -354,7 +354,7 @@ defmodule MyHiFi.Player.Download do
       {:data, data}, {request, %{status: 200} = response} ->
         write(server, device, data, {request, response})
 
-      # Any other status holds a message and not audio, so nothing writes it.
+      # Any other status carries a message and not audio, so nothing writes it.
       {:data, _data}, accumulator ->
         {:halt, accumulator}
     end
@@ -455,7 +455,7 @@ defmodule MyHiFi.Player.Download do
   # element that reads the file, and it needs each count to serve the next byte. A page
   # draws a share of a number that a person reads, and 2500 renders for a track of 40 MB
   # would spend the board on a figure that moves too fast to see.
-  # `MyHiFi.Event.Player.Progress` holds the same period for the same reason.
+  # `MyHiFi.Event.Player.Progress` keeps the same period for the same reason.
   defp announce(%State{} = state) do
     now = System.monotonic_time(:millisecond)
 

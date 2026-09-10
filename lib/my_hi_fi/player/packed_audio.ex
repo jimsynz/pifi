@@ -4,14 +4,14 @@ defmodule MyHiFi.Player.PackedAudio do
 
   Section 3.4 of RFC 8216 says that a packed audio segment starts with an ID3v2
   tag, and that tag carries the timestamp of the segment. 14 of the 44 New Zealand
-  HLS stations send packed AAC, so this holds for a large part of them.
+  HLS stations send packed AAC, so this covers a large part of them.
 
   A decoder reads the audio and not the tag. `Membrane.AAC.Parser` stops with
   `:invalid_adts_header` at the first tag, and a device then plays nothing. This
   element removes each tag and gives the audio alone.
 
   `membrane_hls_plugin` writes such a tag in `Membrane.HLS.AAC.Aggregator`, and it
-  holds nothing that reads one. That plugin packages a stream, and this firmware
+  has nothing that reads one. That plugin packages a stream, and this firmware
   plays one.
 
   A tag arrives at the start of a segment, so this element looks for one at the
@@ -19,8 +19,8 @@ defmodule MyHiFi.Player.PackedAudio do
   this element leaves them alone.
 
   A segment can hold more than one tag, one after the other. The stations of one
-  New Zealand network send two: the first holds the timestamp, and the second
-  holds the title of the track. This element therefore looks again after each tag.
+  New Zealand network send two: the first carries the timestamp, and the second
+  carries the title of the track. This element therefore looks again after each tag.
   """
 
   use Membrane.Filter
@@ -69,7 +69,7 @@ defmodule MyHiFi.Player.PackedAudio do
 
     case skip - drop do
       # A segment can hold more than one tag, one after the other. The stations of
-      # one network send two: the first holds the timestamp, and the second holds
+      # one network send two: the first carries the timestamp, and the second carries
       # the title of the track.
       0 -> consume(rest, 0)
       left -> {<<>>, <<>>, left}
@@ -105,7 +105,7 @@ defmodule MyHiFi.Player.PackedAudio do
     @header_bytes + size + footer_bytes(flags)
   end
 
-  # A tag with the footer flag holds ten more bytes at its end.
+  # A tag with the footer flag carries ten more bytes at its end.
   defp footer_bytes(flags) when Bitwise.band(flags, 0x10) != 0, do: @footer_bytes
   defp footer_bytes(_flags), do: 0
 end
