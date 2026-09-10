@@ -147,8 +147,14 @@ defmodule MyHiFi.Jellyfin.Fill do
   #
   # A track asks for none of its own. A list of tracks draws no picture, and the picture
   # of a track is the cover of its album far more often than not.
+  #
+  # **One query for a whole page, and not one read for each entry.**
+  # `MyHiFi.Artwork.Worker.enqueue/1` reads the cache for the address that it gets, so
+  # a page of 50 albums made 50 queries. `MyHiFi.Artwork.ensure/1` makes one.
   defp ask_for_pictures(entries, :container) do
-    Enum.each(entries, &Artwork.Worker.enqueue(&1.artwork_url))
+    entries
+    |> Enum.map(& &1.artwork_url)
+    |> Artwork.ensure()
   end
 
   defp ask_for_pictures(_entries, :track), do: :ok

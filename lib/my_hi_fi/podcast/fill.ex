@@ -25,6 +25,7 @@ defmodule MyHiFi.Podcast.Fill do
   later day. A show is a container, so it plays nothing and keeps nothing.
   """
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
 
@@ -50,6 +51,8 @@ defmodule MyHiFi.Podcast.Fill do
   """
   @spec show(map()) :: Item.t()
   def show(attributes) do
+    Artwork.ensure([attributes[:artwork_url]])
+
     attributes
     |> write_show()
     |> categorise(attributes[:categories] || [])

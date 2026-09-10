@@ -1,5 +1,6 @@
 defmodule MyHiFi.Radio.FillTest do
   use MyHiFi.DataCase, async: false
+  use Oban.Testing, repo: MyHiFi.Repo
 
   require Ash.Query
 
@@ -30,6 +31,34 @@ defmodule MyHiFi.Radio.FillTest do
 
   defp values_of(key) do
     key |> Playback.facets_of_key!() |> Enum.map(& &1.value.value) |> Enum.sort()
+  end
+
+  # **A station of a list draws its logo, and nothing else asks for one.** A page
+  # builds the address of a picture and reads nothing, so the read of the list is what
+  # asks. See `MyHiFi.Artwork.ensure/1`.
+  describe "the logos" do
+    test "it asks for the logo of each station that it wrote" do
+      Fill.stations([
+        station(%{remote_id: "one", artwork_url: "https://example.test/one.png"}),
+        station(%{remote_id: "two", artwork_url: "https://example.test/two.png"})
+      ])
+
+      assert_enqueued(
+        worker: MyHiFi.Artwork.Worker,
+        args: %{"url" => "https://example.test/one.png"}
+      )
+
+      assert_enqueued(
+        worker: MyHiFi.Artwork.Worker,
+        args: %{"url" => "https://example.test/two.png"}
+      )
+    end
+
+    test "a station that names no logo asks for nothing" do
+      Fill.stations([station(%{remote_id: "one", artwork_url: nil})])
+
+      refute_enqueued(worker: MyHiFi.Artwork.Worker)
+    end
   end
 
   describe "writing a station" do

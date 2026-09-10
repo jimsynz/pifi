@@ -1,5 +1,6 @@
 defmodule MyHiFi.Podcast.FillTest do
   use MyHiFi.DataCase, async: false
+  use Oban.Testing, repo: MyHiFi.Repo
 
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
@@ -69,6 +70,26 @@ defmodule MyHiFi.Podcast.FillTest do
       assert {:ok, read} = Playback.get_item(item.id)
       assert read.title == "A new title"
       assert read.favourite? == true
+    end
+  end
+
+  # **A list of shows draws the cover of each one, and nothing else asks for it.** A
+  # page builds the address of a picture and reads nothing, so the read of the index or
+  # of the feed is what asks. See `MyHiFi.Artwork.ensure/1`.
+  describe "the cover of a show" do
+    test "it asks for the cover that the show names" do
+      show(%{artwork_url: "https://example.test/cover.jpg"})
+
+      assert_enqueued(
+        worker: MyHiFi.Artwork.Worker,
+        args: %{"url" => "https://example.test/cover.jpg"}
+      )
+    end
+
+    test "a show that names no cover asks for nothing" do
+      show(%{artwork_url: nil})
+
+      refute_enqueued(worker: MyHiFi.Artwork.Worker)
     end
   end
 

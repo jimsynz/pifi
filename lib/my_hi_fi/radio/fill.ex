@@ -30,6 +30,7 @@ defmodule MyHiFi.Radio.Fill do
   `Ash.bulk_create/4` writes one statement for each batch.
   """
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Facet
   alias MyHiFi.Playback.Item
@@ -47,6 +48,7 @@ defmodule MyHiFi.Radio.Fill do
 
   def stations(attributes) do
     items = write_items(attributes)
+    ask_for_logos(attributes)
     by_ref = Map.new(items, &{&1.source_ref, &1.id})
 
     attributes
@@ -55,6 +57,21 @@ defmodule MyHiFi.Radio.Fill do
     |> link(attributes, by_ref)
 
     length(items)
+  end
+
+  # **A station of this list draws its logo, so the read of the list is what asks for
+  # one.** Nothing on the path of a page asks: `MyHiFi.Artwork.thumbnail_path/1` builds
+  # an address and reads nothing, and the address of a picture that the cache does not
+  # hold answers 404. `MyHiFi.Jellyfin.Fill` asks for the same reason.
+  #
+  # A country of 247 stations therefore asks for 247 logos, and one query decides which
+  # of them the cache already holds. A logo is small, the eviction of `MyHiFi.Cache`
+  # takes the coldest of them when the card fills, and the read of a library asks for
+  # 5205 pictures on the same rule.
+  defp ask_for_logos(attributes) do
+    attributes
+    |> Enum.map(& &1.artwork_url)
+    |> Artwork.ensure()
   end
 
   defp write_items(attributes) do
