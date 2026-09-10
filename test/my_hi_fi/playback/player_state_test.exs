@@ -28,6 +28,41 @@ defmodule MyHiFi.Playback.PlayerStateTest do
     end
   end
 
+  # **A screen asks this question when it starts, and the player is busy at that
+  # moment.** Every other field of the idle state is corrected by the next event, and
+  # standby sends nothing while it does not change, so a screen that read `false` here
+  # lit its panel on a device in standby and nothing put it back to sleep.
+  describe "the standby state of a busy player" do
+    test "it reads what the player stored, and not `false`" do
+      MyHiFi.Settings.put!("standby", "true")
+      on_exit(fn -> MyHiFi.Settings.put!("standby", "false") end)
+
+      instead_of_the_player(spawn(fn -> Process.sleep(:infinity) end))
+
+      assert %{standby?: true} = Playback.Player.state()
+    end
+
+    test "a device that is awake reads awake" do
+      MyHiFi.Settings.put!("standby", "false")
+
+      instead_of_the_player(spawn(fn -> Process.sleep(:infinity) end))
+
+      assert %{standby?: false} = Playback.Player.state()
+    end
+
+    # A device that no person has ever put in standby holds no such setting.
+    test "a device that stored nothing reads awake" do
+      case MyHiFi.Settings.fetch("standby") do
+        {:ok, setting} -> MyHiFi.Settings.delete!(setting)
+        {:error, _reason} -> :ok
+      end
+
+      instead_of_the_player(spawn(fn -> Process.sleep(:infinity) end))
+
+      assert %{standby?: false} = Playback.Player.state()
+    end
+  end
+
   # `MyHiFi.Player` is registered by its module name, so a test puts another process
   # under that name. `on_exit` gives the real one back however the test ends: a test
   # that stopped in the middle would otherwise leave every test after it with no

@@ -335,6 +335,21 @@ defmodule MyHiFi.Playback.Player do
 
   A page draws this while the player is busy, and the next event of the player
   corrects it.
+
+  **`standby?` comes from the settings, and every other field is the empty one.** The
+  player publishes an event for each thing that changes, so a reader that took the
+  empty answer for the truth is corrected within a second: a track that plays sends
+  `MyHiFi.Event.Player.Progress`. **Standby sends nothing while it does not change**,
+  so a reader that took `false` here would hold that answer for as long as the device
+  stayed in standby.
+
+  A screen is the reader that paid for it. `MyHiFi.Peripheral.PirateAudio` asks this
+  question when it starts, to know whether to light the panel, and the player is busy
+  at that moment: it is restoring the last track from the card, which takes longer
+  than the second that `state/0` waits. The screen therefore woke on a device that was
+  in standby, and nothing ever put it back to sleep. A device at 192.168.3.186 on
+  2026-09-11 held a lit panel for as long as it stood in standby, and its log carried
+  `The player did not say what it is doing` at each boot.
   """
   @spec idle() :: map()
   def idle do
@@ -345,7 +360,7 @@ defmodule MyHiFi.Playback.Player do
       artwork_path: nil,
       playing?: false,
       paused?: false,
-      standby?: false,
+      standby?: MyHiFi.Player.stored_standby?(),
       position_ms: 0
     }
   end

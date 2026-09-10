@@ -790,7 +790,18 @@ defmodule MyHiFi.Player do
     state
   end
 
-  defp stored_standby?, do: stored_value(@standby_key) == {:ok, "true"}
+  @doc """
+  Whether the device was in standby when it last wrote that state.
+
+  **This reads the settings and not the process**, so it answers while the player is
+  busy and it answers before the player has started. `MyHiFi.Playback.Player.idle/0`
+  is the caller, and it says why.
+
+  The player writes this each time that it enters standby and each time that it
+  leaves, so the two never disagree for longer than one write.
+  """
+  @spec stored_standby?() :: boolean()
+  def stored_standby?, do: stored_value(@standby_key) == {:ok, "true"}
 
   defp stored_value(key) do
     case Settings.fetch(key) do
