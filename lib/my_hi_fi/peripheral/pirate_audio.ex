@@ -25,7 +25,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   ## Two buttons, and not four
 
-  The board holds four, at GPIO 5, 6, 16 and 24, one at each corner of the screen. **Two
+  The board has four, at GPIO 5, 6, 16 and 24, one at each corner of the screen. **Two
   of them work on this board and the other two are broken**, so this reads 5 and 6 alone.
 
   A measurement on 2026-09-02 found that. Twelve free lines held an interrupt, a person
@@ -38,7 +38,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   ## It draws the progress of a track
 
-  `Player.Progress` arrives one time each second, and the screen holds a bar and a
+  `Player.Progress` arrives one time each second, and the screen draws a bar and a
   clock, so each one of them draws a frame. A frame costs 26 ms to render and 35 ms to
   write on this board, which is 6 percent of one of the four cores. A draw that arrives
   while another one runs is not possible at that rate, so this module needs no rule for
@@ -50,7 +50,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   ## A cell that is nearly flat
 
   The screen says `LOW BATTERY CHARGE NOW` over a rose band, and it says it over the
-  track, the artwork and every other state. This device holds no way to turn its own
+  track, the artwork and every other state. This device has no way to turn its own
   power off, so charging it is the one thing that a person can do about a flat cell, and
   a title beside that warning would hide it.
 
@@ -67,7 +67,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   would show the frame that the panel held before. A panel that sleeps under a light
   that is on shows white, so the light goes off first.
 
-  **Standby holds the view, and it does not clear it.** A person who paused a track and
+  **Standby keeps the view, and it does not clear it.** A person who paused a track and
   then pressed standby gets no event on the way back, because the player leaves that
   track paused. A view that this cleared would show the name of the device and not the
   track that waits.
@@ -95,13 +95,13 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # of the screen. See the moduledoc for the measurement that found them.
   @lines [5, 6]
 
-  # **Two buttons hold three controls, so one of them holds two.** A person who holds the
+  # **Two buttons carry three controls, so one of them carries two.** A person who holds the
   # first button for this long asks for standby, and a tap of it plays or pauses. See
   # `MyHiFi.DeviceUi` for what each one means, and `MyHiFi.Peripheral.Buttons` for why a
   # tap still answers at once.
   @hold_ms 600
 
-  # How long the screen holds `SAFE TO SWITCH OFF` before it sleeps again. A person
+  # How long the screen shows `SAFE TO SWITCH OFF` before it sleeps again. A person
   # reads three words in far less, and a screen that stayed lit would use the cell that
   # they are about to stop using.
   @show_ms :timer.seconds(20)
@@ -165,14 +165,14 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   end
 
   # **A device that a person gave no picture draws the one that the firmware ships.**
-  # `MyHiFi.Device.Identity.shipped_splash/1` holds a file for each size of screen, so
+  # `MyHiFi.Device.Identity.shipped_splash/1` names a file for each size of screen, so
   # this screen names its own size and needs no knowledge of what the file is.
   defp splash(address) do
     artwork_disk_path(address) || Identity.shipped_splash(Screen.size())
   end
 
   # A person can turn the screen on while the device is in standby, and a device that
-  # lost its power in standby comes back in standby. The player holds that state and it
+  # lost its power in standby comes back in standby. The player keeps that state and it
   # publishes no event for a state that did not change, so this asks one time.
   defp first_frame(state) do
     if Playback.state!().standby? do
@@ -235,7 +235,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   Say that a person pressed a button.
 
   **This module says which button and not what the button does.** `MyHiFi.DeviceUi`
-  holds that, because a pad of two and a row of four do not mean the same thing.
+  decides that, because a pad of two and a row of four do not mean the same thing.
   """
   @impl MyHiFi.Peripheral
   def handle_info(:sleep_again, state) do
@@ -244,7 +244,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   # **A person who is still moving the level scheduled a later message than this one.**
   # Each event schedules its own, so the last one decides when the level goes, and this
-  # clause draws nothing for a view that already holds no level.
+  # clause draws nothing for a view that already shows no level.
   def handle_info(:clear_volume, %{view: %{volume_percent: nil}} = state), do: {:ok, state}
 
   def handle_info(:clear_volume, state) do
@@ -277,9 +277,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   @doc """
   What Emerge may read from the disk while it draws.
 
-  The cache holds the thumbnails, and `MyHiFi.Artwork` names each one
+  The cache keeps the thumbnails, and `MyHiFi.Artwork` names each one
   `<hash>.thumbnail`, because a name of the cache carries no type. Emerge refuses a
-  runtime path by its extension and reads no byte to decide, and its default list holds
+  runtime path by its extension and reads no byte to decide, and its default list names
   `.jpg` and six other names, so it would refuse every thumbnail and draw the mark that
   it draws for a picture it cannot read.
   """
@@ -353,7 +353,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   # event is normal. See `MyHiFi.Peripheral`.
   defp view(_event, view), do: view
 
-  # A live stream holds no duration, and the first `Progress` event gives none either,
+  # A live stream has no duration, and the first `Progress` event gives none either,
   # so the screen draws the time and no bar until one arrives.
   defp duration(%{duration_ms: duration_ms}), do: duration_ms
   defp duration(_track), do: nil
@@ -414,7 +414,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
 
   defp artwork_disk_path(_url), do: nil
 
-  # A track holds a title and a subtitle. A source that gives less is normal, and the
+  # A track has a title and a subtitle. A source that gives less is normal, and the
   # screen then shows less.
   defp track_title(%{title: title}), do: title
   defp track_title(_track), do: nil

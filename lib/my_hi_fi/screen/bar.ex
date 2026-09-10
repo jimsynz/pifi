@@ -11,7 +11,7 @@ defmodule MyHiFi.Screen.Bar do
 
   **The caller gives the width in pixels.** Emerge takes a share of the parent for the
   width of an element, and the fill of a bar is a share of the bar and not of the row
-  that holds it, so the caller works the number out from the width of its own layout.
+  around it, so the caller works the number out from the width of its own layout.
   """
 
   use Emerge.UI

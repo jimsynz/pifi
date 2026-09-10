@@ -4,7 +4,7 @@ defmodule MyHiFi.Peripheral.Server do
 
   It subscribes to the topics of `c:MyHiFi.Peripheral.subscriptions/0`, and it calls
   `c:MyHiFi.Peripheral.handle_event/2` for each event that arrives. A peripheral
-  module therefore holds no PubSub code and no process code, and a test of a
+  module therefore needs no PubSub code and no process code, and a test of a
   peripheral calls the callbacks and needs no process at all.
 
   ## How to start one
@@ -29,7 +29,7 @@ defmodule MyHiFi.Peripheral.Server do
   ## What else arrives
 
   Trapping exits also brings the end of every linked port and process here, and a
-  peripheral holds hardware that opens both. None of that stops this process. The
+  peripheral owns hardware that opens both. None of that stops this process. The
   hardware speaks through the callbacks: a bus that is gone gives `{:error, reason}`
   on the next event, and the log then names the event that failed. An exit message
   says much less than that, and a screen must never stop the music.
@@ -99,7 +99,7 @@ defmodule MyHiFi.Peripheral.Server do
   end
 
   # Every event of this firmware is a struct, so a message of another shape belongs to
-  # the hardware that the peripheral holds and not to a topic. A GPIO line that a
+  # the hardware that the peripheral owns and not to a topic. A GPIO line that a
   # person presses is one of those. See `MyHiFi.Event` and `c:MyHiFi.Peripheral.handle_info/2`.
   def handle_info(message, %{module: module} = server) do
     if function_exported?(module, :handle_info, 2) do

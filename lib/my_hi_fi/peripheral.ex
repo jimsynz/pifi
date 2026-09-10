@@ -10,7 +10,7 @@ defmodule MyHiFi.Peripheral do
   **The rule is the bus, and not the finger.** An earlier version of this sentence said
   "a piece of hardware that a person sees or touches", which fits a screen and a knob and
   not `MyHiFi.Peripheral.Battery`. What every one of them shares is the reason for
-  `enabled?/1`: the same image runs on a board that holds the part and on a board that
+  `enabled?/1`: the same image runs on a board that has the part and on a board that
   does not, and a bus with nothing on it gives an error at each start.
 
   One behaviour, and not one for a screen and one for a control, has a hardware
@@ -33,11 +33,11 @@ defmodule MyHiFi.Peripheral do
 
   **A layout is its own, and the parts of it are not.** A battery, a bar and the
   black band under a mark read the same way on every screen of this device, so
-  `MyHiFi.Screen` holds them and a screen composes them where it wants. A screen that
+  `MyHiFi.Screen` keeps them, and a screen composes them where it wants. A screen that
   drew its own battery would give a person two devices to read.
 
-  `MyHiFi.Peripheral.Server` holds the process and the subscriptions, so a
-  peripheral module holds no PubSub code and no process code.
+  `MyHiFi.Peripheral.Server` owns the process and the subscriptions, so a
+  peripheral module needs no PubSub code and no process code.
 
   ## Which events arrive
 
@@ -45,7 +45,7 @@ defmodule MyHiFi.Peripheral do
   hint topic only. It must not wake one time each second for a `Player.Progress`
   event that it cannot use.
 
-  A peripheral ignores an event that it cannot use, and it gives `{:ok, state}` for
+  A peripheral ignores an event that it cannot use, and it returns `{:ok, state}` for
   it. A screen ignores the hints, and a knob ignores the view events. Nothing
   reports an error for this, because an ignored event is normal.
 
@@ -58,12 +58,12 @@ defmodule MyHiFi.Peripheral do
   it comes from the configuration. `enabled?/1` says whether the part is wired to
   this board, and it comes from the settings, because a person answers it.
 
-  **A firmware cannot know what a board holds.** The same image runs on a board with
+  **A firmware cannot know what a board has.** The same image runs on a board with
   a screen and on a board with none, and a bus with nothing on it gives an error at
   each start. A peripheral is therefore out of use until a person says otherwise, and
   the settings page is where they say it.
 
-  `MyHiFi.Peripheral.Supervisor` holds the processes, and `start/1` and `stop/1` move
+  `MyHiFi.Peripheral.Supervisor` owns the processes, and `start/1` and `stop/1` move
   one in and out of it. A change therefore reaches the hardware at once, and it also
   survives a restart.
   """
@@ -72,13 +72,13 @@ defmodule MyHiFi.Peripheral do
 
   alias MyHiFi.Settings
 
-  @typedoc "What one peripheral holds between events. The module chooses the shape."
+  @typedoc "What one peripheral keeps between events. The module chooses the shape."
   @type state :: term()
 
   @doc """
   The name of this peripheral, for a person to read.
 
-  The settings page draws this, and it holds no list of the peripherals.
+  The settings page draws this, and it needs no list of the peripherals.
   """
   @callback title() :: String.t()
 
@@ -107,12 +107,12 @@ defmodule MyHiFi.Peripheral do
   @doc """
   Do something with a message that is not an event.
 
-  Hardware speaks to the process that holds it, and a button of a GPIO line sends
+  Hardware speaks to the process that owns it, and a button of a GPIO line sends
   `{:circuits_gpio, pin, timestamp, value}` for each change of level. A peripheral
   that reads such a message names this callback, and it usually turns the message
   into an event of the `:input` topic. See `MyHiFi.Peripheral.PiTft`.
 
-  A peripheral that holds nothing that speaks by itself names none, and
+  A peripheral with nothing that speaks by itself names none, and
   `MyHiFi.Peripheral.Server` then writes the message in the log and continues.
   """
   @callback handle_info(message :: term(), state()) :: {:ok, state()} | {:error, term()}
@@ -123,7 +123,7 @@ defmodule MyHiFi.Peripheral do
   The peripherals that this device can hold.
 
   `config/target.exs` names them, in the way that `:output` and `:sources` name
-  theirs. Each entry holds the module and the options that reach `c:init/1`.
+  theirs. Each entry names the module and the options that reach `c:init/1`.
 
       config :my_hi_fi, peripherals: [{MyHiFi.Peripheral.PiTft, rotation: :landscape}]
 
@@ -171,7 +171,7 @@ defmodule MyHiFi.Peripheral do
   `MyHiFi.Source.enabled?/1`. The hardware is the reason. A source that no person
   asked for reads a service and shows a list, and it costs nothing. A screen that no
   person wired cannot answer, and a firmware that opens a bus with nothing on it
-  holds a fault at each start. A person therefore says that the part is there.
+  gives a fault at each start. A person therefore says that the part is there.
   """
   @spec enabled?(module()) :: boolean()
   def enabled?(module) do
@@ -197,7 +197,7 @@ defmodule MyHiFi.Peripheral do
   end
 
   @doc """
-  Whether this peripheral holds its hardware now.
+  Whether this peripheral has its hardware now.
 
   A peripheral that a person put in use and that did not start gives `false`, so a
   settings page can say the difference.
@@ -227,7 +227,7 @@ defmodule MyHiFi.Peripheral do
   @doc """
   Start one peripheral now.
 
-  It gives `{:error, reason}` for hardware that does not answer, and a settings page
+  It returns `{:error, reason}` for hardware that does not answer, and a settings page
   shows that sentence to the person who asked. See `MyHiFi.Peripheral.Server`.
   """
   @spec start(module()) :: :ok | {:error, term()}
@@ -268,7 +268,7 @@ defmodule MyHiFi.Peripheral do
   end
 
   # The options of `all/0` reach `c:init/1`, and the identifier of the child is the
-  # module, so one supervisor holds a screen and a knob together.
+  # module, so one supervisor runs a screen and a knob together.
   defp spec(module) do
     Supervisor.child_spec({__MODULE__.Server, [{:module, module} | options(module)]}, id: module)
   end

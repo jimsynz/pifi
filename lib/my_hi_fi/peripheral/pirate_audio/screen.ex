@@ -2,9 +2,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   @moduledoc """
   The now playing view of the Pirate Audio, as an Emerge tree.
 
-  This module holds the layout of a 240 by 240 screen and nothing else. It reads a
+  This module owns the layout of a 240 by 240 screen and nothing else. It reads a
   `t:view/0`, which is what `MyHiFi.Peripheral.PirateAudio` builds from the events of
-  the `:player` topic, and it gives a tree. It talks to no hardware and it holds no
+  the `:player` topic, and it returns a tree. It talks to no hardware and it runs no
   process, so a test draws it to a PNG and a person looks at the file.
 
   **The artwork fills the screen, and the words sit on top of it.** That is the whole
@@ -14,7 +14,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   ## How the words stay readable
 
   A colour that a picture gives cannot be trusted here, and this is the part that reads
-  wrong at first. `MyHiFi.Artwork.Accent` gives the colour that a picture holds **most**
+  wrong at first. `MyHiFi.Artwork.Accent` gives the colour that a picture has **most**
   of, and over that same picture it is therefore the colour most likely to disappear.
   The accent belongs on the slate of the web page and of the PiTFT, where it has a known
   background. It has none here.
@@ -26,7 +26,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
 
   This draws a scrim instead, which is a band that fades from nothing to near black down
   the foot of the screen. It flattens the mean and the variance together, so light text
-  on it reads over every picture and one code path serves them all. Emerge holds no
+  on it reads over every picture and one code path serves them all. Emerge has no
   shadow for text, so a shadow was never an answer here: `Emerge.UI.Border` gives
   `shadow/1` and `glow/2`, and those draw around the frame of an element and not around
   a letter.
@@ -37,9 +37,9 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   second, and each draw of this screen decodes a JPEG and scales it to cover 240 by 240.
   An earlier version of this module drew no bar for that reason and named no measurement.
 
-  A measurement on the board on 2026-09-09 gives 26 ms to render a frame that holds a
+  A measurement on the board on 2026-09-09 gives 26 ms to render a frame with a
   cover, and 35 ms to write it over SPI. One draw each second is therefore 6 percent of
-  one of the four cores, and the screen holds the bar.
+  one of the four cores, and the screen therefore draws the bar.
 
   **A live stream draws no bar**, because it has no end. It shows the time from the
   start of the stream, which is what `MyHiFi.Event.Player.Progress` gives it.
@@ -64,7 +64,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   What the screen draws.
 
   `state` decides the words. `artwork_path` is the disk path of a thumbnail, or `nil`
-  for a track that holds no picture, and the screen then draws a plain dark field.
+  for a track with no picture, and the screen then draws a plain dark field.
 
   `device_name` is the name that a person gave the device, and the screen shows it when
   the player plays nothing. `splash_path` is the disk path of the picture for that
@@ -72,7 +72,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   `MyHiFi.Device.Identity`.
 
   `position_ms` is where the track is now, and `duration_ms` is how long it runs. A
-  live stream holds `nil` for the second one, and the screen then draws the time and no
+  live stream gives `nil` for the second one, and the screen then draws the time and no
   bar.
 
   `network` is what the interfaces of the device are doing, and the screen says nothing
@@ -192,7 +192,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # The picture takes every row that the words leave.
   defp spacer, do: el([width(fill()), height(fill())], none())
 
-  # The top row holds what the hardware says, over the artwork, because the foot of the
+  # The top row draws what the hardware says, over the artwork, because the foot of the
   # screen belongs to the words. The network sits on the left and the battery on the
   # right, so neither one moves when the other goes.
   #
@@ -200,7 +200,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # that the scrim keeps the words readable.
   defp top_row(view), do: Row.ends([network(view)], [battery(view)], padding: {10, 8})
 
-  # **A device on the mains draws no battery at all.** It holds no gauge, so it publishes
+  # **A device on the mains draws no battery at all.** It has no gauge, so it publishes
   # no charge, and a battery at 0 would be a lie. See `MyHiFi.Peripheral.Battery`.
   defp battery(%{battery_percent: nil}), do: none()
 
@@ -213,7 +213,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # `MyHiFi.Screen.Network` gives nothing for that state, so this needs no test
   # of its own.
   #
-  # The band behind it is the one that the battery holds, because the mark sits over the
+  # The band behind it is the one that the battery gets, because the mark sits over the
   # artwork and a bright picture would take it away.
   defp network(%{network: :internet}), do: none()
   defp network(%{network: nil}), do: none()
@@ -235,7 +235,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # and reached 0.6 where it wanted 0.88.
   #
   # 0.72 over white leaves 71 of 255. The title is `slate 50`, which is 248, so the two
-  # stand about 9 to 1 apart whatever the picture holds.
+  # stand about 9 to 1 apart whatever the picture is.
   defp scrim(view) do
     column(
       [
@@ -248,7 +248,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
     )
   end
 
-  # `paragraph/2` wraps and `el/2` with `text/1` does not. A podcast episode holds a long
+  # `paragraph/2` wraps and `el/2` with `text/1` does not. A podcast episode has a long
   # title, and one that does not wrap goes past the edge of the glass.
   defp title(view) do
     paragraph([width(fill()), Font.size(19), Font.color(color(:slate, 50))], [
@@ -257,8 +257,8 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   end
 
   # A warning reads as a warning by its colour before a person reads the words, and rose
-  # is what `MyHiFi.Peripheral.PiTft.Screen` already gives a fault. The band holds more
-  # of it than the scrim holds of black, because the words must win over the artwork.
+  # is what `MyHiFi.Peripheral.PiTft.Screen` already gives a fault. The band takes more
+  # of it than the scrim takes of black, because the words must win over the artwork.
   defp band(%{low_battery?: true}), do: color_rgba(136, 19, 55, 0.88)
   # Green says that a person may act, where rose says that they must.
   defp band(%{safe_to_switch_off?: true}), do: color_rgba(6, 78, 59, 0.9)
@@ -285,7 +285,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   # to show, and a fault has none that means anything.
   # **The level takes the place of the timeline while a person sets it.** A person
   # holding a button is looking for the number, and the two cannot both sit in a band
-  # that holds 240 pixels. The timeline comes back when the level goes.
+  # that is 240 pixels wide. The timeline comes back when the level goes.
   defp timeline(%{volume_percent: percent}) when is_integer(percent) do
     column([width(fill()), spacing(5)], [volume_words(percent), volume_bar(percent)])
   end
@@ -322,7 +322,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.Screen do
   defp bar(view), do: bar(played(view), color(:slate, 50))
 
   # The bar sits inside the padding of the scrim, so it is that much narrower than the
-  # glass. `MyHiFi.Screen.Bar` holds the two rectangles and the least width of the
+  # glass. `MyHiFi.Screen.Bar` draws the two rectangles and it sets the least width of the
   # part that is full.
   defp bar(part, colour) do
     Bar.render(part,

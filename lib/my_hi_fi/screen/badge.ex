@@ -11,7 +11,7 @@ defmodule MyHiFi.Screen.Badge do
   measurement of a picture says whether a mark over it reads, because it is the
   variance of the pixels that hides one and a mean says nothing about variance.
 
-  A screen that holds a dark field of its own needs no band at all, and it draws the
+  A screen with a dark field of its own needs no band at all, and it draws the
   mark and not this. See `MyHiFi.Screen`.
   """
 

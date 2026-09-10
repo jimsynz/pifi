@@ -21,8 +21,8 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   It takes the `:player` topic only. The `:view` and `:hint` topics need more of
   `MyHiFi.DeviceUi` than is written, so this screen shows the now playing view and
-  holds no list. It publishes the four buttons of the board, and it publishes no
-  touch: the STMPE610 holds the panel as well as the light, and reading the panel is
+  draws no list. It publishes the four buttons of the board, and it publishes no
+  touch: the STMPE610 owns the panel as well as the light, and reading the panel is
   the work that comes next.
 
   ## Standby
@@ -37,7 +37,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   panel that sleeps under a light that stays on shows white, which is what this board
   did while the firmware wrote to pin 18. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
 
-  **Standby holds the view, and it does not clear it.** A person who paused a track
+  **Standby keeps the view, and it does not clear it.** A person who paused a track
   and then pressed standby gets no event on the way back, because the player leaves
   that track paused. A view that this cleared would show the name of the device and
   not the track that waits.
@@ -51,8 +51,8 @@ defmodule MyHiFi.Peripheral.PiTft do
   plus the time to write. If a frame is still going out when the next event arrives,
   a second draw would queue behind the first and the screen would fall further
   behind for as long as the music plays. This module therefore draws the newest view
-  and lets the older one go: the state holds the view, and a draw uses whatever the
-  view holds when it runs. Section 5.5 of the specification allows this, and it says
+  and lets the older one go: the state keeps the view, and a draw uses whatever the
+  view says when it runs. Section 5.5 of the specification allows this, and it says
   that a slow screen may drop what it cannot draw in time.
   """
 
@@ -86,7 +86,7 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   Every option goes to `MyHiFi.Peripheral.PiTft.Ili9341.open/1`. The touch
   controller takes the defaults of `MyHiFi.Peripheral.PiTft.Stmpe610.open/1`, and it
-  holds the backlight of this board.
+  drives the backlight of this board.
   """
   @impl MyHiFi.Peripheral
   def init(opts) do
@@ -131,14 +131,14 @@ defmodule MyHiFi.Peripheral.PiTft do
   end
 
   # **A device that a person gave no picture draws the one that the firmware ships.**
-  # `MyHiFi.Device.Identity.shipped_splash/1` holds a file for each size of screen, so
+  # `MyHiFi.Device.Identity.shipped_splash/1` names a file for each size of screen, so
   # this screen names its own size and needs no knowledge of what the file is.
   defp splash(address) do
     artwork_disk_path(address) || Identity.shipped_splash(Screen.size())
   end
 
   # A person can turn the screen on while the device is in standby, and a device that
-  # lost its power in standby comes back in standby. The player holds that state and it
+  # lost its power in standby comes back in standby. The player keeps that state and it
   # publishes no event for a state that did not change, so this asks one time. A page
   # does the same when a person opens it.
   defp first_frame(state) do
@@ -186,7 +186,7 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   The lines of the buttons send a message for each change of level, and this turns a
   press into `MyHiFi.Event.Input.ButtonPressed`. **This module says which button and
-  not what the button does.** `MyHiFi.DeviceUi` holds that.
+  not what the button does.** `MyHiFi.DeviceUi` decides that.
   """
   @impl MyHiFi.Peripheral
   def handle_info(:clear_volume, %{view: %{volume_percent: nil}} = state), do: {:ok, state}
@@ -222,11 +222,11 @@ defmodule MyHiFi.Peripheral.PiTft do
   @doc """
   What Emerge may read from the disk while it draws.
 
-  The cache holds the thumbnails, and `MyHiFi.Artwork` names each one
+  The cache keeps the thumbnails, and `MyHiFi.Artwork` names each one
   `<hash>.thumbnail`, because a name of the cache carries no type.
 
   **Emerge refuses a runtime path by its extension, and it reads no byte to decide.**
-  The default list holds `.jpg` and six other names, so it refused every thumbnail,
+  The default list names `.jpg` and six other types, so it refused every thumbnail,
   and the screen showed the mark that Emerge draws for a picture that it cannot read.
   Skia reads the bytes and finds the JPEG, so the name of the file is all that this
   changes.
@@ -310,7 +310,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   # normal. See `MyHiFi.Peripheral`.
   defp view(_event, view), do: view
 
-  # Standby holds the view. A person who paused a track and pressed standby gets no
+  # Standby keeps the view. A person who paused a track and pressed standby gets no
   # event on the way back, because the player leaves that track paused, so a view that
   # this cleared would show the name of the device and not the track that waits.
   defp doze(%{awake?: false} = state), do: {:ok, state}
@@ -370,7 +370,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp artwork_disk_path(_url), do: nil
 
   # The screen draws in red, green and blue, so the colour of the artwork becomes that
-  # here and `MyHiFi.Peripheral.PiTft.Screen` holds no knowledge of OKLab.
+  # here and `MyHiFi.Peripheral.PiTft.Screen` needs no knowledge of OKLab.
   defp accent(nil), do: nil
 
   defp accent("/artwork/" <> name) do
@@ -382,7 +382,7 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   defp accent(_url), do: nil
 
-  # A track holds a title, a subtitle and a duration. A source that gives less is
+  # A track has a title, a subtitle and a duration. A source that gives less is
   # normal, and the screen then shows less.
   defp title(%{title: title}), do: title
   defp title(_track), do: nil
@@ -391,7 +391,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp subtitle(_track), do: nil
 
   # The duration comes from the track when the source knows it, so the bar appears
-  # with the title. A live stream holds none, and the first `Progress` gives none
+  # with the title. A live stream has none, and the first `Progress` gives none
   # either, so the screen shows the time from the start and no bar.
   defp duration(%{duration_ms: duration_ms}), do: duration_ms
   defp duration(_track), do: nil

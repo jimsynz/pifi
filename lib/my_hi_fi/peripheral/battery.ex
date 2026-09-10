@@ -2,7 +2,7 @@ defmodule MyHiFi.Peripheral.Battery do
   @moduledoc """
   The fuel gauge of the UPS-Lite pHAT, over I2C.
 
-  The board holds a MAX17040, which reports the voltage of the cell and the charge of it
+  The board has a MAX17040, which reports the voltage of the cell and the charge of it
   as a percentage. `max1704x` is the driver, and `wafer` is the layer between it and
   `circuits_i2c`. This module reads the two numbers on a timer and publishes
   `MyHiFi.Event.Device.BatteryChanged` when the percentage moves.
@@ -11,8 +11,8 @@ defmodule MyHiFi.Peripheral.Battery do
 
   `MyHiFi.Peripheral` says "a piece of hardware that a person sees or touches", and a
   fuel gauge is neither. **That sentence describes the parts that came first, and not
-  the rule.** The rule is the one that `MyHiFi.Peripheral.enabled?/1` holds: the same
-  image runs on a board that holds this part and on a board that does not, and a bus
+  the rule.** The rule is the one that `MyHiFi.Peripheral.enabled?/1` names: the same
+  image runs on a board that has this part and on a board that does not, and a bus
   with nothing on it gives an error at each start. That is exactly true of a gauge. One
   of these two devices runs on a battery and the other one sits on a stereo.
 
@@ -22,7 +22,7 @@ defmodule MyHiFi.Peripheral.Battery do
 
   ## The point where a person must charge it
 
-  `low_percent/0` holds that number, and the event carries the answer as `low?`. **Three
+  `low_percent/0` names that number, and the event carries the answer as `low?`. **Three
   parts act on it**: `MyHiFi.AutoStandby` puts the device in standby,
   `MyHiFi.Peripheral.ActivityLed` flashes the light that shows through the case, and the
   screen of `MyHiFi.Peripheral.PirateAudio` says to charge it. The number is here so that
@@ -39,13 +39,13 @@ defmodule MyHiFi.Peripheral.Battery do
 
   `Max1704x.quickstart!/1` tells the chip to throw its model away and guess again from
   the voltage that it reads at that moment. An earlier version of this module did that at
-  every `init/1`, on the reasoning that a device which lost its power holds a gauge that
+  every `init/1`, on the reasoning that a device which lost its power has a gauge that
   kept counting. **That reasoning is backwards, and a measurement on the board on
   2026-09-01 showed it.**
 
   The gauge takes its power from the cell and not from the Raspberry Pi, so it keeps
   counting through every boot, every upgrade and every hour that the device spends
-  switched off. Its model is therefore the best answer that this device holds, and a
+  switched off. Its model is therefore the best answer that this device has, and a
   quickstart replaces it with a worse one.
 
   It also gives a wrong number at the worst moment. A read straight after a quickstart
@@ -90,15 +90,15 @@ defmodule MyHiFi.Peripheral.Battery do
   def title, do: "UPS-Lite battery gauge"
 
   @doc """
-  The last reading of the gauge, or `nil` for a device that holds none.
+  The last reading of the gauge, or `nil` for a device with none.
 
   **An event says that a number changed, and it says nothing to a reader that arrives
   after it.** A page that a person opens, and a screen that starts, both need the number
-  that the device holds now, and this gauge reports a change once a minute at most. A
+  that the device reads now, and this gauge reports a change once a minute at most. A
   reader that waited for an event would therefore draw nothing for a minute, or for an
   hour if the cell is steady.
 
-  A device that holds no gauge gives `nil`, and so does one whose gauge a person turned
+  A device with no gauge returns `nil`, and so does one whose gauge a person turned
   off. **A reader draws nothing for `nil`, and never a battery at 0.**
 
   **The reading carries the process that took it, and this asks whether that process
@@ -121,7 +121,7 @@ defmodule MyHiFi.Peripheral.Battery do
     end
   end
 
-  @doc "The settings key that holds the point where the cell counts as low."
+  @doc "The settings key of the point where the cell counts as low."
   @spec low_key() :: String.t()
   def low_key, do: @low_key
 
@@ -167,7 +167,7 @@ defmodule MyHiFi.Peripheral.Battery do
   - `:driver` - the Wafer driver of the bus. `Wafer.Driver.Circuits.I2C` by default. A
     test gives `Wafer.Driver.Fake`, which answers zero to every read.
 
-  **A board that holds no gauge gives an error here, and it needs no code of ours.**
+  **A board with no gauge gives an error here, and it needs no code of ours.**
   `Wafer.Driver.Circuits.I2C.acquire/1` reads the devices of the bus and refuses an
   address that nothing answers at, so the settings page shows "No device detected at
   address" to the person who asked. That is the whole reason a peripheral stays out of
@@ -204,7 +204,7 @@ defmodule MyHiFi.Peripheral.Battery do
   @doc """
   Give the bus back, and forget the last reading.
 
-  A person who turns the gauge off holds a device that reports no charge, so every
+  A person who turns the gauge off has a device that reports no charge, so every
   reader must stop drawing one. See `last_reading/0`.
   """
   @impl MyHiFi.Peripheral
@@ -225,7 +225,7 @@ defmodule MyHiFi.Peripheral.Battery do
   end
 
   # A gauge that does not answer must never stop this process. A cell that is charging
-  # holds the bus for a moment on some boards, and a device that plays music through a
+  # takes the bus for a moment on some boards, and a device that plays music through a
   # screen that works is worth more than an exact percentage.
   defp report(state, reason) do
     Logger.warning("The battery gauge did not answer: #{inspect(reason)}")
@@ -271,7 +271,7 @@ defmodule MyHiFi.Peripheral.Battery do
 
   **The gauge reports more than 100 for a cell that is full and charging**, and it can
   report less than nothing for one that is flat. A person reads no such number on any
-  other device, so this holds it inside the range that they expect.
+  other device, so this keeps it inside the range that they expect.
 
       iex> MyHiFi.Peripheral.Battery.percent(71.4)
       71

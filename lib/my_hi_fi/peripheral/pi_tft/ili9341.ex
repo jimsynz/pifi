@@ -2,7 +2,7 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   @moduledoc """
   The ILI9341 screen of the PiTFT, over SPI.
 
-  The screen holds 320 by 240 pixels and it takes 16 bits for each one. It has no
+  The screen has 320 by 240 pixels and it takes 16 bits for each one. It has no
   MISO line that this driver reads, so every exchange writes and the answer goes
   nowhere.
 
@@ -18,7 +18,7 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   A full frame is 153 600 bytes. `spidev` takes 4096 bytes in one transfer by
   default, and the limit is a module parameter of the driver, so this asks
   `Circuits.SPI.max_transfer_size/1` and writes the frame in parts of that size. It
-  holds no constant for the limit.
+  names no constant for the limit.
 
   ## The init sequence
 
@@ -53,7 +53,7 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   # Bit 5 turns the rows and the columns around, which is what makes the panel 320
   # by 240 and not 240 by 320. Bit 6 and bit 7 mirror the two axes, and which one a
   # board needs depends on the way that the screen sits in its case. Bit 3 says that
-  # the colour filter of the panel is BGR, which is what this panel holds.
+  # the colour filter of the panel is BGR, which is what this panel has.
   @row_column_exchange 0x20
   @column_mirror 0x40
   @row_mirror 0x80
@@ -141,7 +141,7 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   @doc """
   Wake the panel, or put it to sleep.
 
-  A panel that sleeps draws nothing and holds no frame, and it needs 120 ms to wake.
+  A panel that sleeps draws nothing and keeps no frame, and it needs 120 ms to wake.
   `MyHiFi.Peripheral.PiTft` does this for standby, because a screen that stayed lit
   would tell a person that the device is awake.
 

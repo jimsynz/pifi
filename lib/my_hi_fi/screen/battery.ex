@@ -5,7 +5,7 @@ defmodule MyHiFi.Screen.Battery do
   `MyHiFi.Peripheral.PiTft.Screen` and `MyHiFi.Peripheral.PirateAudio.Screen` both draw
   one, and the shape of a battery belongs to neither of them. **This is a component and
   not a layout**: each screen still decides where the battery sits and how large it is,
-  which is the rule that `MyHiFi.Peripheral` holds.
+  which is the rule that `MyHiFi.Peripheral` names.
 
   ## Why it is drawn and not an image
 
@@ -15,7 +15,7 @@ defmodule MyHiFi.Screen.Battery do
   file, no allowlist and no decode, and they stay sharp at 11 pixels tall where a scaled
   image does not.
 
-  Heroicons holds `battery-0`, `battery-50` and `battery-100` and nothing between them,
+  Heroicons has `battery-0`, `battery-50` and `battery-100` and nothing between them,
   so the web page cannot use those either and draws its own.
 
   ## The fill says the charge, and the colour says the warning
@@ -85,7 +85,7 @@ defmodule MyHiFi.Screen.Battery do
     )
   end
 
-  # The body holds a border of 1 and a padding of 2 on each side, so 6 pixels of it are
+  # The body draws a border of 1 and a padding of 2 on each side, so 6 pixels of it are
   # not the bar.
   defp fill_width(percent, width) do
     inside = width - 6

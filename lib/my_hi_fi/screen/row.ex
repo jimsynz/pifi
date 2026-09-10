@@ -3,7 +3,7 @@ defmodule MyHiFi.Screen.Row do
   A row that puts one thing at each end, drawn for a screen that Emerge renders.
 
   The time of a track and the time that is left, the word `VOLUME` and the level, the
-  network and the battery: each screen of this device holds several rows of that
+  network and the battery: each screen of this device draws several rows of that
   shape. See `MyHiFi.Screen`.
 
   **A child that fills the middle, and not `Emerge.UI.align_right/0` on the last one.**

@@ -2,12 +2,12 @@ defmodule MyHiFi.Peripheral.PiTft.Stmpe610 do
   @moduledoc """
   The STMPE610 of the PiTFT, over SPI.
 
-  The chip reads the resistive touch panel, and it holds two GPIO lines of its own.
+  The chip reads the resistive touch panel, and it has two GPIO lines of its own.
   **The backlight of this board is on GPIO 2 of this chip, and GPIO 18 of the
   Raspberry Pi reaches it on no board that this firmware drives.** The Adafruit
-  PiTFT holds a solder jumper named `Lite #18` that joins the two, and the STMPE
+  PiTFT has a solder jumper named `Lite #18` that joins the two, and the STMPE
   line takes precedence over that pin in any case. The clone that this firmware
-  drives (Jaycar XC9022) holds no such jumper, so a write to pin 18 changes nothing
+  drives (Jaycar XC9022) has no such jumper, so a write to pin 18 changes nothing
   at all: standby turned that pin low, the light stayed on, and the panel then slept
   and showed white under it.
 
@@ -15,7 +15,7 @@ defmodule MyHiFi.Peripheral.PiTft.Stmpe610 do
   `spidev0.1`, and a clear of GPIO 2 turned the light off.
 
   **Every clock of this chip is off until something turns them on.** `SYS_CTRL2`
-  holds `0x0F` after a reset, and a write to a GPIO register then changes nothing.
+  reads `0x0F` after a reset, and a write to a GPIO register then changes nothing.
   `open/1` writes `0x00` there before it touches a pin.
 
   The screen is on `spidev0.0` and this chip is on `spidev0.1`. The two share SPI0,
@@ -24,7 +24,7 @@ defmodule MyHiFi.Peripheral.PiTft.Stmpe610 do
 
   ## The exchanges
 
-  Each exchange holds two bytes. A read sends the address with the high bit set and
+  Each exchange takes two bytes. A read sends the address with the high bit set and
   a byte for the answer to arrive in. A write sends the address and the value.
   """
 
@@ -47,12 +47,12 @@ defmodule MyHiFi.Peripheral.PiTft.Stmpe610 do
   @soft_reset 0x02
   @clocks_on 0x00
 
-  # GPIO 2 of the chip, as the bit that each GPIO register holds for it.
+  # GPIO 2 of the chip, as the bit that each GPIO register keeps for it.
   @backlight 0x04
 
   @reset_delay_ms 10
 
-  @typedoc "One STMPE610 that a caller holds."
+  @typedoc "One STMPE610 that a caller owns."
   @type t :: %__MODULE__{bus: SPI.Bus.t()}
 
   defstruct [:bus]
@@ -67,8 +67,8 @@ defmodule MyHiFi.Peripheral.PiTft.Stmpe610 do
     speed, and nothing here needs more.
 
   A bus that answers with another chip identifier gives
-  `{:error, {:not_an_stmpe610, id}}` and holds no bus, because a board that answers
-  something else holds its backlight somewhere else as well.
+  `{:error, {:not_an_stmpe610, id}}` and opens no bus, because a board that answers
+  something else drives its backlight somewhere else as well.
   """
   @spec open(keyword()) :: {:ok, t()} | {:error, term()}
   def open(opts \\ []) do
@@ -93,7 +93,7 @@ defmodule MyHiFi.Peripheral.PiTft.Stmpe610 do
     SPI.close(chip.bus)
   end
 
-  @doc "The identifier that the chip holds, which is `0x0811` for an STMPE610."
+  @doc "The identifier that the chip reports, which is `0x0811` for an STMPE610."
   @spec chip_id(t()) :: {:ok, 0..0xFFFF} | {:error, term()}
   def chip_id(chip) do
     with {:ok, high} <- read(chip, @chip_id_high),
@@ -122,14 +122,14 @@ defmodule MyHiFi.Peripheral.PiTft.Stmpe610 do
     {:error, reason}
   end
 
-  # Each of these registers holds one bit for each pin, and the touch panel needs the
+  # Each of these registers keeps one bit for each pin, and the touch panel needs the
   # other pins, so this changes the bit of the backlight and leaves the rest as they
   # are. In `GPIO_ALT_FUNCT` the bit says that the pin is a GPIO, and in `GPIO_DIR` it
   # says that the pin drives a level.
   #
-  # **The level goes in before the direction does.** The pin holds the light high
+  # **The level goes in before the direction does.** The pin drives the light high
   # through a resistor of the board until this chip drives it, and the register of the
-  # level holds 0 after a reset, so a direction that went first would turn the light
+  # level reads 0 after a reset, so a direction that went first would turn the light
   # off for as long as the two writes take.
   defp take_pin(chip, register) do
     with {:ok, value} <- read(chip, register) do

@@ -2,7 +2,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.St7789 do
   @moduledoc """
   The ST7789 screen of the Pimoroni Pirate Audio, over SPI.
 
-  The screen holds 240 by 240 pixels and it takes 16 bits for each one. It has no MISO
+  The screen has 240 by 240 pixels and it takes 16 bits for each one. It has no MISO
   line that this driver reads, so every exchange writes and the answer goes nowhere. A
   separate GPIO line says whether a byte is a command or the data of a command, and it
   is low for a command and high for data.
@@ -25,7 +25,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.St7789 do
 
   ## The backlight
 
-  It is GPIO 13 of the Raspberry Pi, and this module holds it, because nothing else on
+  It is GPIO 13 of the Raspberry Pi, and this module owns it, because nothing else on
   this board wants that pin. That is the difference from the PiTFT, where the light is a
   pin of the touch controller and `MyHiFi.Peripheral.PiTft.Stmpe610` owns it for that
   reason.
@@ -61,7 +61,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.St7789 do
   value therefore says nothing about the value that belongs here.
 
   **180 and 270 need a row offset that this driver does not hold.** Both set the row
-  mirror bit, and the controller holds 320 rows while the panel shows 240 of them, so a
+  mirror bit, and the controller has 320 rows while the panel shows 240 of them, so a
   mirrored row 0 lands at row 319 and the picture sits 80 rows away from the glass. 0
   and 90 leave that bit clear and need no offset. Add the offset before you use the
   other two.
@@ -89,7 +89,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.St7789 do
 
   # 16 bits for each pixel on the interface that the processor writes. The ILI9341 of
   # the PiTFT takes 0x55 for the same thing, which sets the parallel interface as well,
-  # and this panel holds none.
+  # and this panel has none.
   @sixteen_bits_per_pixel 0x05
 
   # Bit 5 exchanges the rows and the columns, and bit 6 and bit 7 mirror the two axes.
@@ -190,7 +190,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.St7789 do
   @doc """
   Wake the panel, or put it to sleep.
 
-  A panel that sleeps draws nothing and holds no frame, and it needs 120 ms to wake.
+  A panel that sleeps draws nothing and keeps no frame, and it needs 120 ms to wake.
   `MyHiFi.Peripheral.PirateAudio` does this for standby, because a screen that stayed
   lit would tell a person that the device is awake.
 

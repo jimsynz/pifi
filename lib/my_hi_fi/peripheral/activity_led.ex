@@ -2,13 +2,13 @@ defmodule MyHiFi.Peripheral.ActivityLed do
   @moduledoc """
   The activity light of the board, as a warning that the cell is nearly flat.
 
-  The Raspberry Pi holds one light that software can drive, and the case of the portable
+  The Raspberry Pi has one light that software can drive, and the case of the portable
   device lets a person see it. This peripheral flashes it while
   `MyHiFi.Event.Device.BatteryChanged` says that the charge is low, and it leaves the
   light dark at every other time.
 
   **The kernel does the flashing, and this process does not.** `/sys/class/leds/ACT`
-  holds a `timer` trigger: a write of `timer` to `trigger` makes `delay_on` and
+  offers a `timer` trigger: a write of `timer` to `trigger` makes `delay_on` and
   `delay_off` appear, and the light then flashes on its own until something writes
   `none`. A process that wrote the brightness on a timer of its own would wake four
   times a second for as long as the cell stayed low, and it would stop flashing the
@@ -16,7 +16,7 @@ defmodule MyHiFi.Peripheral.ActivityLed do
 
   ## Why this is a peripheral
 
-  Every Raspberry Pi holds this light, so the part is not the question. **The case is.**
+  Every Raspberry Pi has this light, so the part is not the question. **The case is.**
   A person sees it through the case of the portable device, and the light of the device
   on the stereo is inside a box where it says nothing to anybody. That is the same
   question that `MyHiFi.Peripheral.enabled?/1` answers for a screen, so it belongs here.
@@ -121,7 +121,7 @@ defmodule MyHiFi.Peripheral.ActivityLed do
   end
 
   # A light that does not answer must never stop this process. A person who cannot see a
-  # warning light still holds a device that plays music and a screen that says the same
+  # warning light still stands on a device that plays music and holds a screen that says the same
   # thing in words.
   defp report(state, reason) do
     Logger.warning("The activity light did not answer: #{inspect(reason)}")

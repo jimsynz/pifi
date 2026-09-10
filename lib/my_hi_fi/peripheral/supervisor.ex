@@ -13,7 +13,7 @@ defmodule MyHiFi.Peripheral.Supervisor do
   own, and `MyHiFi.Peripheral.start/1` gives the error of that start to the caller.
 
   The identifier of each child is the module of the peripheral, so one supervisor
-  holds a screen and a knob together, and `MyHiFi.Peripheral.stop/1` names one of
+  runs a screen and a knob together, and `MyHiFi.Peripheral.stop/1` names one of
   them.
   """
 

@@ -7,10 +7,10 @@ defmodule MyHiFi.Screen.Clock do
   other reads one device, so `1:37:12` on the large screen cannot be `97:12` on the
   small one.
 
-  This is a component in the way that `MyHiFi.Screen.Battery` is one: it gives
+  This is a part in the way that `MyHiFi.Screen.Battery` is one: it returns
   the words, and each screen decides the place, the size and the colour of them.
 
-  The web page holds its own, and it stays there. A browser has room for a label beside
+  The web page has its own, and it stays there. A browser has room for a label beside
   a time, and it names the hours in a way that 240 pixels cannot.
   """
 

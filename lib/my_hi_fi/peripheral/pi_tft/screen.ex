@@ -2,9 +2,9 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   @moduledoc """
   The now playing view of the PiTFT, as an Emerge tree.
 
-  This module holds the layout of a 320 by 240 screen and nothing else. It reads a
+  This module owns the layout of a 320 by 240 screen and nothing else. It reads a
   `t:view/0`, which is what `MyHiFi.Peripheral.PiTft` builds from the events of the
-  `:player` topic, and it gives a tree. It talks to no hardware and it holds no
+  `:player` topic, and it returns a tree. It talks to no hardware and it runs no
   process, so a test draws it to a PNG and a person looks at the file.
 
   The layout is deliberately plain. A person reads this screen from a chair, across
@@ -30,7 +30,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   because a person who sees nothing else needs to know that the device is awake.
 
   `device_name` is that name, and `splash_path` is the disk path of the picture that a
-  person chose for that moment, or `nil` for a device that holds none. A device with a
+  person chose for that moment, or `nil` for a device with none. A device with a
   picture draws it over the whole screen, and the name sits in a band at the foot of
   it. See `MyHiFi.Device.Identity`.
 
@@ -139,7 +139,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   def status_text(%{live?: true}), do: "Live"
   def status_text(_view), do: "Playing"
 
-  # **The picture fills the screen, and a band at the foot holds the name.** That is the
+  # **The picture fills the screen, and a band at the foot carries the name.** That is the
   # layout of `MyHiFi.Peripheral.PirateAudio.Screen`, and the reason is the same one: no
   # measurement of a picture says whether text over it reads, because the variance of
   # the pixels hides letters and a mean says nothing about variance. A flat band
@@ -162,7 +162,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
 
   # The status row is absent from this layout, so what the hardware says sits over the
   # picture, on a band that keeps it readable. **The row draws for a device on the mains
-  # as well**, because a device that holds no gauge can still hold a router that is off.
+  # as well**, because a device with no gauge can still stand beside a router that is off.
   defp splash_battery(view) do
     Row.ends([network(view)], [splash_gauge(view)], padding: {12, 10})
   end
@@ -215,7 +215,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
     el([center_y()], Network.render(view.network))
   end
 
-  # **A device on the mains draws no battery at all.** It holds no gauge, so it publishes
+  # **A device on the mains draws no battery at all.** It has no gauge, so it publishes
   # no charge, and a battery at 0 would be a lie. See `MyHiFi.Peripheral.Battery`.
   defp battery(%{battery_percent: nil}), do: none()
 
@@ -233,7 +233,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
     ])
   end
 
-  # The artwork is a square thumbnail, 120 pixels on each side. A track that holds
+  # The artwork is a square thumbnail, 120 pixels on each side. A track that has
   # no artwork shows nothing in that place, and the text takes the full width.
   defp artwork(%{artwork_path: nil}), do: none()
 
@@ -286,7 +286,7 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   end
 
   # The bar sits inside the padding of the body, so it is that much narrower than the
-  # glass. `MyHiFi.Screen.Bar` holds the two rectangles and the least width of the
+  # glass. `MyHiFi.Screen.Bar` draws the two rectangles and it sets the least width of the
   # part that is full.
   defp bar(part, colour) do
     Bar.render(part,

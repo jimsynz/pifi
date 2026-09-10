@@ -5,19 +5,19 @@ defmodule MyHiFi.Peripheral.Buttons do
   Each button joins its line to ground, and this opens the line with the pull up of
   the chip, so a line reads 1 while nothing presses it and 0 while a finger does.
 
-  **Two boards use this, and each one names its own lines.** The PiTFT holds four in a
-  row on 18, 27, 22 and 23, and the Pirate Audio holds two that answer on 5 and 6. This
+  **Two boards use this, and each one names its own lines.** The PiTFT has four in a
+  row on 18, 27, 22 and 23, and the Pirate Audio has two that answer on 5 and 6. This
   module says which button of the list a person pressed, and it says nothing about what
-  the press means: `MyHiFi.DeviceUi` holds that, because a row of four and a pad of two
+  the press means: `MyHiFi.DeviceUi` decides that, because a row of four and a pad of two
   do not mean the same thing.
 
   **Read the order of a row one button at a time**: a person who presses four buttons in
-  one go gives a list of events that holds no place, and two builds of this firmware
+  one go gives a list of events with no order of place, and two builds of this firmware
   named the wrong order from such a list. A person pressed each button alone, and
   `MyHiFi.Event.Input.ButtonPressed` named the line each time. **On the PiTFT, line 18 is
   a button and not the backlight.**
   The Adafruit PiTFT joins that line to the light through a solder jumper, and the
-  clone that this firmware drives holds no such jumper, so an earlier version of this
+  clone that this firmware drives has no such jumper, so an earlier version of this
   firmware held the line for a light that it could not turn off and the fourth button
   could not be read. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
 
@@ -26,8 +26,8 @@ defmodule MyHiFi.Peripheral.Buttons do
   A press of one of these gave six changes of level in a measurement, and each one
   would be a press to a reader that counted them.
 
-  **This module holds the level of each line, and it reads both edges to keep it.** A
-  press is a change to 0 of a line that this module holds as up, and the line then
+  **This module keeps the level of each line, and it reads both edges to keep it.** A
+  press is a change to 0 of a line that this module reads as up, and the line then
   stays down until a change to 1 that lasts. A change that arrives inside 50 ms of the
   last one that counted is bounce, and it changes nothing.
 
@@ -44,7 +44,7 @@ defmodule MyHiFi.Peripheral.Buttons do
   require Logger
 
   # The lines of the PiTFT, in the order that the buttons sit, so the first one is
-  # button 1. A board that holds others names them. See `open/1`.
+  # button 1. A board with other lines names them. See `open/1`.
   @lines [18, 27, 22, 23]
 
   @debounce_ms 50
@@ -71,9 +71,9 @@ defmodule MyHiFi.Peripheral.Buttons do
   - `:lines` - the GPIO lines, in the order that the buttons sit. `#{inspect(@lines)}`
     by default.
   - `:hold_ms` - how long a person holds a button before it counts as a long press.
-    `nil` by default, and a board that gives no value holds no long press at all.
+    `nil` by default, and a board that gives no value has no long press at all.
 
-  A line that another part of the system holds gives no button, and the rest still
+  A line that another part of the system owns gives no button, and the rest still
   work. The log then names it, because a board that gives no button at all is a fault
   that a person needs to see, and one that gives three is worth reading about.
   """
@@ -88,7 +88,7 @@ defmodule MyHiFi.Peripheral.Buttons do
   @doc """
   Which button a message of `Circuits.GPIO` names, if it is a press.
 
-  It gives `{:ok, button, buttons}` for a press and `{:none, buttons}` for anything
+  It returns `{:ok, button, buttons}` for a press and `{:none, buttons}` for anything
   else: a release, a bounce, and a message that belongs to something other than these
   lines. **Both answers hold the buttons again**, because a release arms the next
   press, so a caller that kept the answer of a press alone would take one press and
@@ -102,7 +102,7 @@ defmodule MyHiFi.Peripheral.Buttons do
     end
   end
 
-  # The timer of a hold, which `holding/2` started. A press that already answered holds
+  # The timer of a hold, which `holding/2` started. A press that already answered keeps
   # `:done` for its line, and a release that arrived first cancelled this.
   def press(buttons, {__MODULE__, :held, line, ref}) do
     with %{^line => ^ref} <- buttons.holding,
@@ -144,10 +144,10 @@ defmodule MyHiFi.Peripheral.Buttons do
   defp line({_chip, line}), do: line
   defp line(line), do: line
 
-  # A line holds the pull up of the chip, so 0 is a finger on the button and 1 is the
+  # A line reads the pull up of the chip, so 0 is a finger on the button and 1 is the
   # button at rest.
   #
-  # **A board that holds no `hold_ms` answers at the press, and one that holds a value
+  # **A board with no `hold_ms` answers at the press, and one with a value
   # answers at the release.** A stereo does its work when a person presses a button, and
   # that stays true of the PiTFT. A board that reads a long press cannot: the press alone
   # says nothing about which of the two a person meant.
@@ -186,7 +186,7 @@ defmodule MyHiFi.Peripheral.Buttons do
     end
   end
 
-  # The timer belongs to this process, because `press/2` runs in the one that holds the
+  # The timer belongs to this process, because `press/2` runs in the one that owns the
   # lines. A reference tells one press from the one before it, so a timer that fired late
   # answers for no press at all.
   defp holding(buttons, line) do
@@ -213,9 +213,9 @@ defmodule MyHiFi.Peripheral.Buttons do
     end
   end
 
-  # A change counts when the line holds the other level and the level before it
+  # A change counts when the line reads the other level and the level before it
   # lasted. The timestamp of `Circuits.GPIO` is in nanoseconds, from the same clock
-  # for each message. A line that this has not seen yet is up, because nothing holds
+  # for each message. A line that this has not seen yet is up, because nothing presses
   # the button down.
   defp settled?(buttons, line, level, timestamp) do
     case Map.fetch(buttons.levels, line) do

@@ -5,7 +5,7 @@ defmodule MyHiFi.Screen.Network do
   `MyHiFi.Peripheral.PiTft.Screen` and `MyHiFi.Peripheral.PirateAudio.Screen` both draw
   one, and the shape of it belongs to neither of them. **This is a component and not a
   layout**: each screen still decides where the mark sits and how large it is, which is
-  the rule that `MyHiFi.Peripheral` holds. It is `MyHiFi.Screen.Battery` for the
+  the rule that `MyHiFi.Peripheral` names. It is `MyHiFi.Screen.Battery` for the
   network.
 
   **A screen draws this only when the network cannot carry the music.** A person whose
@@ -14,7 +14,7 @@ defmodule MyHiFi.Screen.Network do
   test of its own.
 
   `connection/1` reduces what `MyHiFi.Device.network!/0` gives to the one state that
-  decides the mark. **A screen holds that atom and not the report**, because the report
+  decides the mark. **A screen keeps that atom and not the report**, because the report
   carries the strength of the signal and that number moves all the time: a view that
   held it would draw a frame each time it did.
 
@@ -26,7 +26,7 @@ defmodule MyHiFi.Screen.Network do
   need no file, no allowlist and no decode, and they stay sharp at 11 pixels tall where
   a scaled image does not.
 
-  **The arcs of the usual Wi-Fi mark are the reason that this draws bars.** Emerge holds
+  **The arcs of the usual Wi-Fi mark are the reason that this draws bars.** Emerge has
   no arc, and three rectangles of rising height read as a network at this size where a
   ring of rounded rectangles reads as nothing.
 
@@ -43,7 +43,7 @@ defmodule MyHiFi.Screen.Network do
   - **`:lan` draws amber**, which is the colour of a device that is working on
     something. The radio link works and the network stops beyond it, so a person looks
     at their router and not at this device.
-  - **`:disconnected` draws rose**, which is the colour of a fault. Nothing holds the
+  - **`:disconnected` draws rose**, which is the colour of a fault. Nothing carries the
     link at all, and rose is the worse of the two colours for the worse of the two
     states.
 
@@ -63,7 +63,7 @@ defmodule MyHiFi.Screen.Network do
   @typedoc "What VintageNet says one interface is doing."
   @type connection :: :internet | :lan | :disconnected
 
-  # Best first. `connection/1` reads this order, so a device that holds a cable and
+  # Best first. `connection/1` reads this order, so a device with a cable and
   # Wi-Fi takes the better of the two.
   @order [:internet, :lan, :disconnected]
 
@@ -78,7 +78,7 @@ defmodule MyHiFi.Screen.Network do
   @doc """
   Draw the mark for one state of the network.
 
-  It gives nothing at all for a network that carries the music, so a caller needs no
+  It returns nothing at all for a network that carries the music, so a caller needs no
   test of its own: the screens draw whatever this gives.
 
   ## Options
@@ -105,7 +105,7 @@ defmodule MyHiFi.Screen.Network do
   because VintageNet is a target dependency, and a screen that knows nothing about the
   network must say nothing about it.
 
-  **A device holds more than one interface**, and Wi-Fi and a cable both count, so the
+  **A device has more than one interface**, and Wi-Fi and a cable both count, so the
   best state of any of them is the state of the device.
 
       iex> MyHiFi.Screen.Network.connection([%{connection: :lan}, %{connection: :internet}])
