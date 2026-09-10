@@ -48,6 +48,22 @@ defmodule MyHiFi.Playback do
       define :destroy_item, action: :destroy
     end
 
+    resource MyHiFi.Playback.Playlist do
+      define :list_playlists, action: :in_order
+      define :get_playlist, action: :read, get_by: [:id]
+      define :create_playlist, action: :create, args: [:name]
+      define :rename_playlist, action: :rename, args: [:name]
+      define :destroy_playlist, action: :destroy
+      define :add_to_playlist, action: :add, args: [:playlist_id, :item_ids]
+      define :playlist_item_ids, action: :item_ids, args: [:playlist_id]
+    end
+
+    resource MyHiFi.Playback.PlaylistEntry do
+      define :playlist_entries, action: :in_order, args: [:playlist_id]
+      define :remove_playlist_entry, action: :remove, args: [:id]
+      define :reorder_playlist_entry, action: :reorder, args: [:id, :position]
+    end
+
     resource MyHiFi.Playback.Queue do
       define :queue, action: :in_order
       # An empty queue plays nothing, and that is a normal state and not an error, so

@@ -30,7 +30,7 @@ defmodule MyHiFiWeb.SearchLive do
   alias MyHiFi.Source
   alias MyHiFiWeb.ItemList
 
-  import MyHiFiWeb.ItemList, only: [row: 1]
+  import MyHiFiWeb.ItemList, only: [playlist_sheet: 1, row: 1]
 
   on_mount(MyHiFiWeb.ItemList)
 
@@ -114,6 +114,8 @@ defmodule MyHiFiWeb.SearchLive do
   def render(assigns) do
     ~H"""
     <div id="search">
+      <.playlist_sheet adding={@adding} playlists={@playlists} />
+
       <nav aria-label="Where you are" class="mb-4 flex items-center gap-1 text-sm">
         <.link
           navigate={~p"/browse/#{@current_source}"}

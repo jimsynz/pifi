@@ -66,6 +66,7 @@ defmodule MyHiFiWeb.BrowseLive do
       favourite: 1,
       place_cell: 1,
       play_cell: 1,
+      playlist_sheet: 1,
       title_cell: 1
     ]
 
@@ -240,6 +241,8 @@ defmodule MyHiFiWeb.BrowseLive do
           collection?={not is_nil(@here)}
           refreshable?={@refreshable?}
         />
+
+        <.playlist_sheet adding={@adding} playlists={@playlists} />
 
         <.finder :if={is_nil(@here) and @searchable?} source={@source} />
 

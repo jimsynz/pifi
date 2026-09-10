@@ -1104,6 +1104,72 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   # This is the point of the queue: a person presses one track of a list, and next and
   # previous then move through the list that they were looking at.
+  # **A person puts one track in a playlist from the list that they found it in.** The
+  # panel is one for the whole page, and `:adding` carries the track that they pressed.
+  # See `MyHiFiWeb.ItemList.playlist_sheet/1` and `MyHiFiWeb.PlaylistLive`.
+  describe "a track goes in a playlist" do
+    setup %{conn: conn} do
+      Stations.create(%{country_code: "NZ", title: "Alpha"})
+
+      {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ")
+      render_async(view, @async_wait)
+
+      %{view: view, station: station_called("Alpha")}
+    end
+
+    test "the panel draws nothing until a person asks for it", %{view: view, station: station} do
+      refute has_element?(view, "#playlist-sheet")
+
+      view |> element("#playlist-#{station.id}") |> render_click()
+
+      assert has_element?(view, "#playlist-sheet")
+    end
+
+    test "a person makes a playlist of the track that they pressed", %{
+      view: view,
+      station: station
+    } do
+      view |> element("#playlist-#{station.id}") |> render_click()
+      html = view |> form("#add-to-new-form", %{"name" => "Friday"}) |> render_submit()
+
+      assert html =~ "Friday has Alpha"
+      refute has_element?(view, "#playlist-sheet")
+
+      assert [made] = Playback.list_playlists!()
+      assert Playback.playlist_item_ids!(made.id) == [station.id]
+    end
+
+    test "a person puts the track in a playlist that they already made", %{
+      view: view,
+      station: station
+    } do
+      made = Playback.create_playlist!("Friday")
+
+      view |> element("#playlist-#{station.id}") |> render_click()
+      html = view |> element("#add-here-#{made.id}") |> render_click()
+
+      assert html =~ "Alpha is in Friday"
+      assert Playback.playlist_item_ids!(made.id) == [station.id]
+    end
+
+    test "a name that another playlist has says so", %{view: view, station: station} do
+      Playback.create_playlist!("Friday")
+
+      view |> element("#playlist-#{station.id}") |> render_click()
+      html = view |> form("#add-to-new-form", %{"name" => "Friday"}) |> render_submit()
+
+      assert html =~ "Another playlist has that name"
+    end
+
+    test "a person leaves the panel, and nothing goes in", %{view: view, station: station} do
+      view |> element("#playlist-#{station.id}") |> render_click()
+      view |> element("#cancel-add") |> render_click()
+
+      refute has_element?(view, "#playlist-sheet")
+      assert Playback.list_playlists!() == []
+    end
+  end
+
   describe "the list that a person sees goes in the queue" do
     test "pressing a track queues the whole list, and marks the row", %{conn: conn} do
       Stations.create(%{country_code: "NZ", title: "Alpha", click_count: 3})

@@ -85,6 +85,8 @@ defmodule MyHiFiWeb.ItemList do
       |> Phoenix.Component.assign(:playing, playing(Playback.state!()))
       |> Phoenix.Component.assign(:reading, %{})
       |> Phoenix.Component.assign(:stale?, false)
+      |> Phoenix.Component.assign(:adding, nil)
+      |> Phoenix.Component.assign(:playlists, [])
       |> attach_hook(:item_list_events, :handle_event, &event/3)
       |> attach_hook(:item_list_info, :handle_info, &info/2)
 
@@ -543,6 +545,7 @@ defmodule MyHiFiWeb.ItemList do
     <span class="flex items-center justify-end gap-1">
       <.audio_mark row={@row} reading={@reading} />
       <.add_to_queue row={@row} />
+      <.add_to_playlist row={@row} />
       <.played row={@row} />
       <.favourite row={@row} />
     </span>
@@ -566,6 +569,95 @@ defmodule MyHiFiWeb.ItemList do
     >
       <.icon name="hero-plus" class="size-5" />
     </button>
+    """
+  end
+
+  attr :row, :any, required: true
+
+  # A container has no audio of its own, and a playlist carries tracks, so a person
+  # adds the tracks of an album one at a time or keeps the queue. See
+  # `MyHiFiWeb.PlaylistLive`.
+  defp add_to_playlist(assigns) do
+    ~H"""
+    <button
+      :if={@row.kind != :container}
+      type="button"
+      id={"playlist-#{@row.id}"}
+      phx-click="add_to_playlist"
+      phx-value-id={@row.id}
+      aria-label={"Put #{@row.title} in a playlist"}
+      class="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-faint hover:text-ink"
+    >
+      <.icon name="hero-list-bullet" class="size-5" />
+    </button>
+    """
+  end
+
+  attr :adding, :any, required: true
+  attr :playlists, :list, required: true
+
+  @doc """
+  The panel that asks which playlist a track goes in.
+
+  **One panel for the whole page, and not one for each row.** A list draws 25 rows and
+  a menu inside each one would be 25 copies of the same names. `:adding` carries the
+  track that a person pressed, and this draws nothing while it is `nil`.
+
+  A page that draws a list therefore draws this one time. See `MyHiFiWeb.BrowseLive`.
+  """
+  def playlist_sheet(assigns) do
+    ~H"""
+    <div
+      :if={@adding}
+      id="playlist-sheet"
+      class="glass sheen fixed inset-x-3 bottom-24 z-50 mx-auto max-w-md rounded-xl p-4 sm:inset-x-5"
+    >
+      <div class="mb-3 flex items-center gap-2">
+        <h2 class="grow text-xs uppercase tracking-[0.18em] text-ink-faint">Put this in</h2>
+
+        <button
+          type="button"
+          id="cancel-add"
+          phx-click="cancel_add"
+          aria-label="Leave this"
+          class="control rounded-lg p-1.5"
+        >
+          <.icon name="hero-x-mark" class="size-4" />
+        </button>
+      </div>
+
+      <ul :if={@playlists != []} class="mb-3 divide-y divide-edge">
+        <li :for={playlist <- @playlists}>
+          <button
+            type="button"
+            id={"add-here-#{playlist.id}"}
+            phx-click="add_here"
+            phx-value-playlist={playlist.id}
+            class="flex w-full items-center gap-3 py-2 text-left hover:text-accent"
+          >
+            <.icon name="hero-list-bullet" class="size-5 shrink-0 text-ink-faint" />
+            <span class="min-w-0 grow truncate text-ink">{playlist.name}</span>
+          </button>
+        </li>
+      </ul>
+
+      <form id="add-to-new-form" phx-submit="add_to_new" class="flex items-center gap-2">
+        <input
+          type="text"
+          id="new-playlist-name"
+          name="name"
+          maxlength="100"
+          required
+          autocomplete="off"
+          placeholder="A new playlist"
+          aria-label="The name of a new playlist"
+          class="control grow rounded-lg px-3 py-2 text-sm"
+        />
+        <button type="submit" id="add-to-new" class="control rounded-lg px-3 py-2 text-sm">
+          Make it
+        </button>
+      </form>
+    </div>
     """
   end
 
@@ -930,6 +1022,56 @@ defmodule MyHiFiWeb.ItemList do
     else
       {:error, reason} ->
         {:halt, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+    end
+  end
+
+  # **The panel reads the playlists one time, when it opens.** A person who presses
+  # this asks a question, and the answer is a list of a few names. A page that read
+  # them on each render would read them for every event of the player.
+  defp event("add_to_playlist", %{"id" => id}, socket) do
+    {:halt,
+     socket
+     |> Phoenix.Component.assign(:adding, id)
+     |> Phoenix.Component.assign(:playlists, Playback.list_playlists!())}
+  end
+
+  defp event("cancel_add", _params, socket) do
+    {:halt, Phoenix.Component.assign(socket, :adding, nil)}
+  end
+
+  defp event("add_here", %{"playlist" => playlist_id}, socket) do
+    with {:ok, playlist} <- Playback.get_playlist(playlist_id),
+         {:ok, item} <- Playback.get_item(socket.assigns.adding),
+         {:ok, _entries} <- Playback.add_to_playlist(playlist.id, [item.id]) do
+      {:halt,
+       socket
+       |> Phoenix.Component.assign(:adding, nil)
+       |> put_flash(:info, "#{item.title} is in #{playlist.name}.")}
+    else
+      {:error, reason} ->
+        {:halt,
+         socket
+         |> Phoenix.Component.assign(:adding, nil)
+         |> put_flash(:error, "Could not do that: #{inspect(reason)}")}
+    end
+  end
+
+  defp event("add_to_new", %{"name" => name}, socket) do
+    with {:ok, playlist} <- Playback.create_playlist(name),
+         {:ok, item} <- Playback.get_item(socket.assigns.adding),
+         {:ok, _entries} <- Playback.add_to_playlist(playlist.id, [item.id]) do
+      {:halt,
+       socket
+       |> Phoenix.Component.assign(:adding, nil)
+       |> put_flash(:info, "#{playlist.name} has #{item.title}.")}
+    else
+      {:error, _reason} ->
+        {:halt,
+         put_flash(
+           socket,
+           :error,
+           "Another playlist has that name, or the name is empty."
+         )}
     end
   end
 

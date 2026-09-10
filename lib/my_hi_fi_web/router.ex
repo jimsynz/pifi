@@ -46,6 +46,8 @@ defmodule MyHiFiWeb.Router do
     live("/browse/:source/*path", BrowseLive)
     live("/search/:source", SearchLive)
     live("/queue", QueueLive)
+    live("/playlists", PlaylistLive, :index)
+    live("/playlists/:id", PlaylistLive, :show)
     live("/settings", SettingsLive, :menu)
     live("/settings/device", SettingsLive, :device)
     live("/settings/output", SettingsLive, :output)
