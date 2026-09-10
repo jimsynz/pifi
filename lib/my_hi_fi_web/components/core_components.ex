@@ -5,7 +5,7 @@ defmodule MyHiFiWeb.CoreComponents do
   The components in this module use function components and can be used
   in both regular views and LiveView.
 
-  The interface draws a dark faceplate. `assets/css/app.css` holds the tokens and
+  The interface draws a dark faceplate. `assets/css/app.css` declares the tokens and
   the surfaces, and `assets/js/accent.js` reads `--color-accent` from the artwork
   that plays. A component therefore names `accent` and never a fixed colour.
   """
@@ -185,7 +185,7 @@ defmodule MyHiFiWeb.CoreComponents do
   Renders an icon that `MyHiFi.Source` names.
 
   A source names its own icon, and each settings control of a source names one as
-  well. `MyHiFi.Source` gives the name, and this holds the drawing of it. A name
+  well. `MyHiFi.Source` names the mark, and this module draws it. A name
   that this interface does not know gives a musical note, so a new source shows
   before this list learns it.
   """

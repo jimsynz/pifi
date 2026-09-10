@@ -1,6 +1,6 @@
 defmodule MyHiFiWeb.SettingsLive do
   @moduledoc """
-  What the device holds, and what a person can change.
+  What the device is, and what a person can change.
 
   The page is a menu, and each row of it opens one section. The address names the
   section, so a person can keep the address of one and the back control of the
@@ -16,7 +16,7 @@ defmodule MyHiFiWeb.SettingsLive do
       /settings/network                a report
       /settings/storage                a report
 
-  **This page holds no knowledge of any source.** A source names its own settings
+  **This page needs no knowledge of any source.** A source names its own settings
   with `c:MyHiFi.Source.settings/0`, and its own controls with
   `c:MyHiFi.Source.settings_actions/0`. The countries of the station list belong to
   internet radio, and the key of the Podcast Index belongs to podcasts. A new
@@ -25,7 +25,7 @@ defmodule MyHiFiWeb.SettingsLive do
   The page never sends the secret of an index back to a browser. A source marks
   such a field `write_only?`, and it then gives no value for it.
 
-  It holds no knowledge of any peripheral either. A peripheral names itself with
+  It needs no knowledge of any peripheral either. A peripheral names itself with
   `c:MyHiFi.Peripheral.title/0`, and this page draws that name and one control. A
   peripheral is out of use until a person says that the part is wired, because the same
   image runs on a board with a screen and on a board with none. See
@@ -33,7 +33,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
   The name of the device and the picture of the idle screen are the two things on this
   page that reach the hardware and the network together, and `MyHiFi.Device.Identity`
-  holds both. This page gives the name to that module and it draws what comes back.
+  declares both. This page gives the name to that module, and it draws what comes back.
 
   The network state and the storage state are reports, and a person changes neither
   one here. The Wi-Fi details belong to the setup wizard. See `MyHiFi.Setup`.
@@ -67,11 +67,11 @@ defmodule MyHiFiWeb.SettingsLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: Event.subscribe(:device)
 
-    # One picture, and 4 MB, which is the limit that `MyHiFi.Artwork` holds for a
+    # One picture, and 4 MB, which is the limit that `MyHiFi.Artwork` sets for a
     # picture of any kind. A GIF and a WebP are absent because libvips in this firmware
     # writes neither, so a screen could never draw one. See `MyHiFi.Artwork.put/1`.
     #
-    # **The upload starts when a person chooses the file, and `progress` holds it when
+    # **The upload starts when a person chooses the file, and `progress` receives it when
     # the last byte lands.** A control that a person presses cannot do this work: the
     # board reads 4 MB over Wi-Fi in more time than a person waits, and
     # `Phoenix.LiveView.consume_uploaded_entries/3` raises `cannot consume uploaded
@@ -146,7 +146,7 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   # A file input needs a change event of its own, and the answer is the upload that
-  # LiveView already holds. Nothing here reads the parameters.
+  # LiveView already has. Nothing here reads the parameters.
   @impl Phoenix.LiveView
   def handle_event("validate_splash", _params, socket), do: {:noreply, socket}
 
@@ -351,7 +351,7 @@ defmodule MyHiFiWeb.SettingsLive do
       <div class="mt-4 border-t border-edge pt-4">
         <p class="mb-3 text-sm text-ink-dim">
           The screen of the device shows this picture when it plays nothing. Choose a
-          JPEG or a PNG of 4096 KB or less, and the device holds it when it arrives.
+          JPEG or a PNG of 4096 KB or less, and the device keeps it when it arrives.
         </p>
 
         <img
@@ -363,7 +363,7 @@ defmodule MyHiFiWeb.SettingsLive do
         />
 
         <p :if={is_nil(@splash_path)} id="no-splash" class="mb-3 text-sm text-ink-dim">
-          This device holds no picture, so each screen shows its name.
+          This device has no picture, so each screen shows its name.
         </p>
 
         <.form for={@splash_form} id="splash-form" phx-change="validate_splash">
@@ -459,7 +459,7 @@ defmodule MyHiFiWeb.SettingsLive do
         </p>
 
         <p :if={not @volume.supported?} id="no-volume-control" class="mt-1 text-sm text-ink-dim">
-          This card holds no level that the device can set. Most DACs of a stereo give
+          This card has no level that the device can set. Most DACs of a stereo give
           a fixed output on purpose. Set the level on your amplifier.
         </p>
       </div>
@@ -477,7 +477,7 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   # A DAC on the I2S pins answers to nothing until the bootloader loads an overlay for
-  # it, so no list of cards holds one and no control of this page finds one. A person
+  # it, so no list of cards names one and no control of this page finds one. A person
   # names what they added instead. See `MyHiFi.Hardware`.
   @impl Phoenix.LiveView
   def render(%{live_action: :hardware} = assigns) do
@@ -654,7 +654,7 @@ defmodule MyHiFiWeb.SettingsLive do
     <.section id="settings-peripherals" title="Peripherals" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
         This firmware runs on a board with a screen and on a board with none, so it
-        cannot know what yours holds. Name the parts that you wired.
+        cannot know what yours has. Name the parts that you wired.
       </p>
 
       <p :if={@peripheral_list == []} id="no-peripherals" class="text-sm text-ink-dim">
@@ -707,7 +707,7 @@ defmodule MyHiFiWeb.SettingsLive do
     <.section id="settings-standby" title="Standby" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
         The device enters standby when it plays nothing for this long and no person
-        presses a control. A track that plays holds the period off, so an episode of
+        presses a control. A track that plays keeps the period off, so an episode of
         two hours reaches its end.
       </p>
 
@@ -734,7 +734,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
         <p class="mt-1 text-sm text-ink-dim">
           A device that runs on a battery is switched off by hand. This stops the
-          background work when the device enters standby, puts what it holds on the
+          background work when the device enters standby, writes what it holds on to the
           card, and says on the screen that it is safe to switch off. Leave it off
           for a device on the mains, whose background work runs while it stands in
           standby.
@@ -845,7 +845,7 @@ defmodule MyHiFiWeb.SettingsLive do
   # The rows under the bar carry the numbers, because a kind of 1 percent is a few
   # pixels wide and no person can measure that.
   #
-  # A kind holds a colour and a row, so identity never rests on the colour alone. The
+  # A kind has a colour and a row, so identity never rests on the colour alone. The
   # segments hold a gap of 2 pixels in the colour of the surface, which is what
   # separates two of them: a border around each one would draw six lines on a bar 12
   # pixels tall.
@@ -875,7 +875,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
   # **A colour follows the kind, and never the size of it.** A person who removed the
   # episodes of one source must not find that every other colour moved.
-  # `MyHiFi.Device.Storage.Usage` gives the kinds in a fixed order, and this map holds
+  # `MyHiFi.Device.Storage.Usage` returns the kinds in a fixed order, and this map keeps
   # one colour for each key of it.
   #
   # The four chromatic values are slots 1, 2, 3 and 4 of the categorical palette that
@@ -905,7 +905,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
   defp colour(key), do: Map.get(@colours, key, @unnamed_colour)
 
-  # A kind of a few bytes still holds a row, and the bar gives it 3 pixels so a person
+  # A kind of a few bytes still draws a row, and the bar gives it 3 pixels so a person
   # sees that it is there. The number in the row is what says how much it is.
   defp share(bytes, used), do: Float.round(bytes * 100 / used, 3)
 
@@ -1045,7 +1045,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
   defp title(socket), do: assign(socket, :page_title, "Settings")
 
-  # A source reads its own current values, and a description of one holds a count
+  # A source reads its own current values, and a description of one carries a count
   # or a state, so both come again after each change. See `MyHiFi.Source`.
   defp load_source(socket, module) do
     fields = Source.settings(module)
@@ -1063,7 +1063,7 @@ defmodule MyHiFiWeb.SettingsLive do
     })
   end
 
-  # The top row of the faceplate holds the sources in use, and a change here must
+  # The top row of the faceplate draws the sources in use, and a change here must
   # reach it at once. See `MyHiFiWeb.Shell`.
   defp reload(socket, module) do
     socket = MyHiFiWeb.Shell.assign_sources(socket)
@@ -1099,7 +1099,7 @@ defmodule MyHiFiWeb.SettingsLive do
   end
 
   # **The storage page reads this, and no other page does.** It sums the cache and it
-  # reads every item that holds audio, where `MyHiFi.Device.storage!/0` runs `df` and
+  # reads every item whose audio the card keeps, where `MyHiFi.Device.storage!/0` runs `df` and
   # nothing else, so a page that draws no bar must not pay for one.
   defp assign_usage(%{assigns: %{live_action: :storage}} = socket),
     do: assign(socket, :usage, Device.storage_usage!())
@@ -1171,7 +1171,7 @@ defmodule MyHiFiWeb.SettingsLive do
   defp standby_flash(minutes), do: "The device enters standby after #{minutes} minutes of quiet."
 
   # `:sources` belongs to `MyHiFiWeb.Shell`, and the top row of the faceplate draws
-  # it. That list holds the sources in use, and this one holds every source and the
+  # it. That list names the sources in use, and this one names every source and the
   # state of it, so the two cannot share one name.
   defp source_list do
     Enum.map(Source.all(), fn module ->
@@ -1225,7 +1225,7 @@ defmodule MyHiFiWeb.SettingsLive do
   defp state(true), do: "In use"
   defp state(false), do: "Out of use"
 
-  # A write-only field shows nothing that the device holds, so the control says
+  # A write-only field shows nothing that the device keeps, so the control says
   # what a person must type instead.
   defp placeholder(%{write_only?: true, title: title}), do: title
   defp placeholder(_field), do: nil

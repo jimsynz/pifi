@@ -3,7 +3,7 @@ defmodule MyHiFiWeb.PlayerLive do
   The display of the faceplate.
 
   `MyHiFiWeb.Layouts` renders this LiveView inside the top of each page, and it
-  renders it with `sticky: true`. The player therefore holds one process for a
+  renders it with `sticky: true`. The player therefore runs one process for a
   browser tab, and a move to another page keeps it. That is why the controls stay
   on the screen all the time.
 
@@ -20,7 +20,7 @@ defmodule MyHiFiWeb.PlayerLive do
   no bar. See `MyHiFi.Source` for the reason: `duration_ms` is `nil` for a live
   stream.
 
-  A track that holds a length draws a timeline in the large view, and a person moves
+  A track with a length draws a timeline in the large view, and a person moves
   the thumb of it to move inside the track. **The player takes a skip and not a
   place**, so the page sends the difference between the two. A track that a person
   cannot move inside draws the timeline dead, because the bar still says how far
@@ -29,16 +29,16 @@ defmodule MyHiFiWeb.PlayerLive do
   A touch on the artwork opens the large view, which fills the screen. The state
   of that view belongs to this process, because a browser tab is its own session.
 
-  The faceplate holds the standby control, the play control and the stop control.
-  The large view holds the whole transport row as well: previous, back 15 seconds,
+  The faceplate draws the standby control, the play control and the stop control.
+  The large view draws the whole transport row as well: previous, back 15 seconds,
   play or pause, forward 30 seconds, and next. Seven round controls do not fit the
   screen of a telephone.
 
   A control that the source does not hold is dead. `MyHiFi.Source.capabilities/0`
   gives that list, and a radio station therefore shows the two skip controls disabled.
   Previous and next belong to the queue and not to a source, so a track that plays
-  always holds them, and the player answers `:no_more` at the end of the list. This
-  page holds no knowledge of any particular service.
+  always has them, and the player answers `:no_more` at the end of the list. This
+  page needs no knowledge of any particular service.
   """
 
   use MyHiFiWeb, :live_view
@@ -78,7 +78,7 @@ defmodule MyHiFiWeb.PlayerLive do
     # an event would draw no battery for a minute, or for an hour if the cell is steady.
     if connected?(socket), do: Event.subscribe(:device)
 
-    # The faceplate holds this LiveView, and `MyHiFiWeb.Layouts` renders the
+    # The faceplate carries this LiveView, and `MyHiFiWeb.Layouts` renders the
     # faceplate. The layout of the page therefore must not wrap it again.
     {:ok, socket, layout: false}
   end
@@ -197,7 +197,7 @@ defmodule MyHiFiWeb.PlayerLive do
 
   # **The slider is the source of truth and the event does not move it back.** A person
   # dragging one sends an event for each step, and a re-render that set the value from
-  # the state would fight the hand that is moving it. `MyHiFi.Output.Volume` holds the
+  # the state would fight the hand that is moving it. `MyHiFi.Output.Volume` keeps the
   # number, so the assign follows the person and the event of another page corrects it.
   @impl Phoenix.LiveView
   def handle_event("set_volume", %{"percent" => percent}, socket) do
@@ -254,7 +254,7 @@ defmodule MyHiFiWeb.PlayerLive do
   # **The player takes a skip and not a place**, so this sends the difference between
   # where the track is and where the person put the thumb. `MyHiFi.Player.Skip`
   # measures what it really moved and the player reports that, so the next event of
-  # the progress corrects the number that the page holds.
+  # the progress corrects the number that the page shows.
   @impl Phoenix.LiveView
   def handle_event("scrub", %{"position_ms" => value}, socket) do
     case Integer.parse(value) do
@@ -503,7 +503,7 @@ defmodule MyHiFiWeb.PlayerLive do
     """
   end
 
-  # A stream with no end holds no length and no position of its own, so the display
+  # A stream with no end has no length and no position of its own, so the display
   # says what it is. See `MyHiFi.Event.Player.Started`.
   #
   # The faceplate and the large view both draw this, and each element of a page needs
@@ -581,7 +581,7 @@ defmodule MyHiFiWeb.PlayerLive do
 
   attr(:battery, :map, required: true)
 
-  # **Heroicons holds `battery-0`, `battery-50` and `battery-100` and nothing between
+  # **Heroicons has `battery-0`, `battery-50` and `battery-100` and nothing between
   # them**, so a cell at 30 percent would read as half full. Three elements draw the
   # exact charge, and the width of the bar is the one thing that a style attribute can
   # say and a class cannot.
@@ -620,7 +620,7 @@ defmodule MyHiFiWeb.PlayerLive do
     """
   end
 
-  # The body is 24 pixels wide and it holds a border of 1 and a gap of 2 on each side, so
+  # The body is 24 pixels wide, and it draws a border of 1 and a gap of 2 on each side, so
   # 18 of them are the bar. A cell with any charge left never draws nothing.
   defp bar_width(percent) do
     "#{percent |> Kernel./(100) |> Kernel.*(18) |> round() |> max(1) |> min(18)}px"
@@ -657,7 +657,7 @@ defmodule MyHiFiWeb.PlayerLive do
     """
   end
 
-  # The display holds one line under the title. A failure needs that line, because
+  # The display draws one line under the title. A failure needs that line, because
   # the large view is not open, and a person must read the reason.
   defp second_line(%{status: :failed, reason: reason}) when not is_nil(reason) do
     Events.Failed.message(reason)
@@ -678,7 +678,7 @@ defmodule MyHiFiWeb.PlayerLive do
   # A restored track is a paused track, so a boot shows the station and a play control.
   # See `MyHiFi.Player`.
   # The colour of the artwork comes from the device, which read the picture when it
-  # made the thumbnail. A page that opens in the middle of a track therefore holds the
+  # made the thumbnail. A page that opens in the middle of a track therefore reads the
   # colour before the picture arrives, and a page that shows no artwork keeps the
   # colour that the stylesheet names. See `MyHiFi.Artwork.Accent`.
   defp accent(socket, "/artwork/" <> name) do
@@ -694,8 +694,8 @@ defmodule MyHiFiWeb.PlayerLive do
   defp status(%{paused?: true}), do: :paused
   defp status(_state), do: :idle
 
-  # A source names what it holds, and this page draws a dead control for the rest. A
-  # started event of a test holds no source, so an absent one holds nothing.
+  # A source names the controls that it offers, and this page draws a dead control for
+  # the rest. A started event of a test names no source, so an absent one offers none.
   defp capabilities(nil), do: []
   defp capabilities(source), do: source.capabilities()
 

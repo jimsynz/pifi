@@ -4,7 +4,7 @@ defmodule MyHiFiWeb.CinderTheme do
 
   The web interface of this firmware looks like the front of a stereo component: a dark
   brushed fascia, recessed panels, and one accent colour that follows the artwork of the
-  track. `assets/css/app.css` holds that vocabulary as Tailwind utilities, and this
+  track. `assets/css/app.css` declares that vocabulary as Tailwind utilities, and this
   module gives it to Cinder. The utilities are `control`, `control-on`, `recess`,
   `glass`, `sheen` and `numerals`, and the colours are `shell`, `panel`, `edge`, `ink`
   and `accent`.
@@ -49,11 +49,11 @@ defmodule MyHiFiWeb.CinderTheme do
   set :filter_inputs_class, "flex flex-col gap-2"
 
   # The label stands before the input, and not above it, so one filter takes one row.
-  # `[&>div]:grow` reaches the group that holds the input, which is the second child of
+  # `[&>div]:grow` reaches the group around the input, which is the second child of
   # this element and carries a class of its own from Cinder.
   set :filter_input_wrapper_class, "flex items-center gap-3 [&>div]:grow"
 
-  # `min-w-28` holds this label and the label of the sort in one column. It is wide
+  # `min-w-28` keeps this label and the label of the sort in one column. It is wide
   # enough for `Subscriptions`, which is the longest branch name of this firmware.
   set :filter_label_class,
       "min-w-28 shrink-0 text-[0.65rem] uppercase tracking-[0.18em] text-ink-faint"
@@ -90,7 +90,7 @@ defmodule MyHiFiWeb.CinderTheme do
   set :filter_select_empty_class, "px-2 py-1.5 text-sm text-ink-faint"
 
   # Sort. Each field is a control of the fascia, and the one in use lights up. A hairline
-  # holds it apart from the filters above it.
+  # keeps it apart from the filters above it.
   set :sort_container_class, "mt-3 border-t border-edge pt-3"
   set :sort_controls_class, "flex flex-wrap items-center gap-2"
 
@@ -105,7 +105,7 @@ defmodule MyHiFiWeb.CinderTheme do
 
   # The table. A row of it draws its own cells, so these hold the rules between the rows
   # and the head of each column, and nothing else. `whitespace-nowrap` of Cinder goes,
-  # because the column of the title holds the longest text on the page and it must wrap.
+  # because the column of the title carries the longest text on the page and it must wrap.
   set :table_wrapper_class, "overflow-x-auto"
   set :table_class, "w-full border-collapse"
   set :thead_class, "border-b border-edge"
@@ -116,14 +116,14 @@ defmodule MyHiFiWeb.CinderTheme do
   set :tbody_class, "divide-y divide-edge"
   set :td_class, "px-1 py-1.5 align-middle text-ink"
 
-  # The grid. **A card is for the picture**, so the card itself holds no frame and no
+  # The grid. **A card is for the picture**, so the card itself draws no frame and no
   # background: a frame around a cover reads as a second border beside the rounded
   # corners of the picture. The gap between two cards is what separates them.
   set :grid_container_class, "grid gap-4"
   set :grid_item_class, "min-w-0"
   set :grid_item_clickable_class, "cursor-pointer"
 
-  # The list. Each row draws itself, so this holds the line between two rows and nothing
+  # The list. Each row draws itself, so this draws the line between two rows and nothing
   # else.
   set :list_container_class, "divide-y divide-edge"
   set :list_item_class, "px-1 py-1.5 text-ink"

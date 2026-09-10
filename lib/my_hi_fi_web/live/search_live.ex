@@ -2,7 +2,7 @@ defmodule MyHiFiWeb.SearchLive do
   @moduledoc """
   Find an item by its name.
 
-  `MyHiFiWeb.BrowseLive` walks a tree, and this page holds no tree at all. It is one
+  `MyHiFiWeb.BrowseLive` moves through a tree, and this page has no tree at all. It is one
   collection of the items that `c:MyHiFi.Source.search/1` names, and Cinder matches the
   text against them.
 
@@ -14,14 +14,14 @@ defmodule MyHiFiWeb.SearchLive do
 
   ## The control that chooses a kind
 
-  A source that holds more than one kind of item gets a control to choose between them,
-  and `c:MyHiFi.Source.kinds/0` gives the word for each one. Podcasts holds shows and
-  episodes, so a person narrows the list to one or the other. Internet radio holds
+  A source with more than one kind of item gets a control to choose between them, and
+  `c:MyHiFi.Source.kinds/0` names each one. Podcasts has shows and episodes, so a
+  person narrows the list to one or the other. Internet radio has
   stations and nothing else, and it therefore gets no such control.
 
   ## The matching is ours and not the one that Cinder gives
 
-  `MyHiFiWeb.ItemList.search_title/3` holds the expression, and it says why. The browse
+  `MyHiFiWeb.ItemList.search_title/3` builds the expression, and it says why. The browse
   page reads the same one.
   """
 
@@ -79,13 +79,13 @@ defmodule MyHiFiWeb.SearchLive do
   end
 
   # A source names what a person calls its items, and the control to choose between them
-  # is worth drawing only for a source that holds more than one kind. Internet radio
-  # holds stations and nothing else, so it gets no control at all.
+  # is worth drawing only for a source with more than one kind. Internet radio has
+  # stations and nothing else, so it gets no control at all.
   defp options_of(module) do
     Enum.map(module.kinds(), fn {kind, name} -> {name, to_string(kind)} end)
   end
 
-  # A container never plays, so it opens. This page holds no tree, and the browse page
+  # A container never plays, so it opens. This page has no tree, and the browse page
   # addresses a container by its identifier, with no branch above it. See
   # `MyHiFiWeb.BrowseLive`.
   @impl Phoenix.LiveView

@@ -593,7 +593,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/output")
 
       assert has_element?(view, "#no-volume-control")
-      assert render(view) =~ "holds no level that the device can set"
+      assert render(view) =~ "has no level that the device can set"
     end
   end
 

@@ -3,7 +3,7 @@ defmodule MyHiFiWeb.ItemList do
   What a page needs to draw a list of `MyHiFi.Playback.Item` and play from it.
 
   `MyHiFiWeb.BrowseLive` and `MyHiFiWeb.SearchLive` both draw such a list, and a row of
-  one is the same row on both. This module holds the rows and the controls, so a change
+  one is the same row on both. This module draws the rows and the controls, so a change
   to a row reaches each page.
 
   ## How a page uses it
@@ -15,9 +15,9 @@ defmodule MyHiFiWeb.ItemList do
 
   `on_mount/1` subscribes to the sources, assigns `:playing`, and answers the `play`,
   the `favourite` and the `played` events and every event of the player. A page
-  therefore holds none of that.
+  therefore needs none of that.
 
-  **`MyHiFiWeb.Shell` holds the subscription to the `:player` topic**, and this hook
+  **`MyHiFiWeb.Shell` owns the subscription to the `:player` topic**, and this hook
   takes it again for nothing: two subscriptions of one process give two copies of each
   event, and a page then reads a `MyHiFi.Event.Player.Progress` twice each second. A
   hook reads every message of the process that it runs in, whichever part asked for the
@@ -25,14 +25,14 @@ defmodule MyHiFiWeb.ItemList do
 
   ## A list that changed while nobody looked
 
-  A source reads a service behind the page, so what a container holds changes while a
+  A source reads a service behind the page, so what a container contains changes while a
   person is elsewhere. `MyHiFi.Event.Source.Changed` says so, and this hook reads the
   list again for it.
 
   **A device in standby reads nothing.** `MyHiFiWeb.Layouts` draws no list at all in
   standby, so a read then costs the card and the cores and gives no person anything.
   One query of a browse page touched 38 MB of page cache on this board, which is why
-  `config/target.exs` holds the SQLite cache down, and standby is the moment that the
+  `config/target.exs` keeps the SQLite cache small, and standby is the moment that the
   device is quiet in. This hook keeps `:stale?` instead, and it reads the list on the
   way out of standby.
 
@@ -51,11 +51,11 @@ defmodule MyHiFiWeb.ItemList do
   ## What a page must hold
 
   `:source` names the source that the rows belong to, and `:collection_id` names the
-  collection that a mark refreshes. A page that draws no collection holds `nil` there,
+  collection that a mark refreshes. A page that draws no collection sets `nil` there,
   and this hook then reads nothing.
 
   `:opened` is the container that a person is inside, and a page that is inside none
-  holds `nil`. A mark on that container reads it again, so the head of it draws the
+  is `nil`. A mark on that container reads it again, so the head of it draws the
   star that the person just pressed.
   """
 
@@ -92,7 +92,7 @@ defmodule MyHiFiWeb.ItemList do
   end
 
   @doc """
-  The rows whose title holds the text of a person, in any case.
+  The rows whose title carries the text of a person, in any case.
 
   Cinder gives the columns that hold `search` and the text that a person typed. This
   is the `fn` of the `search` of `Cinder.collection`, and `filter_title/2` is the one
@@ -113,9 +113,9 @@ defmodule MyHiFiWeb.ItemList do
   def search_title(query, _columns, text), do: matching(query, text)
 
   @doc """
-  The rows of a text filter of Cinder, which holds the text and the way to match it.
+  The rows of a text filter of Cinder, which carries the text and the way to match it.
 
-  Cinder holds one filter for each column, and it gives the whole filter here.
+  Cinder keeps one filter for each column, and it passes the whole filter here.
   `contains` is the operator that a column of this firmware asks for, and it is the
   one that this reads: a column that asked for another one would need another
   expression, and this raises rather than match the wrong rows. See `search_title/3`
@@ -141,7 +141,7 @@ defmodule MyHiFiWeb.ItemList do
   that the cache does not hold answers 404, the browser takes the image away, and the
   folder behind it stays.
 
-  `loading="lazy"` is what holds the cost down on a long list: a browser asks for the
+  `loading="lazy"` is what keeps the cost down on a long list: a browser asks for the
   rows that a person can see, and not for the hundred of a page.
 
   `data-cover` is what `assets/js/cover.js` reads to take a broken picture away. **An
@@ -183,7 +183,7 @@ defmodule MyHiFiWeb.ItemList do
   A facet opens and never plays. An item opens when it is a container, and it plays when
   it is a track.
 
-  **The source says what a row draws beside its title**, and this holds the drawing of
+  **The source says what a row draws beside its title**, and this module draws
   each fact. See `c:MyHiFi.Source.listing/1`. A row of an album reads
 
       1-01 · Original Bedroom Rockers · Kruder & Dorfmeister · 6:07
@@ -528,7 +528,7 @@ defmodule MyHiFiWeb.ItemList do
   What a person can do with one row, for a cell of a table.
 
   **A facet is a way into a list and not a thing.** A person cannot play a country, mark
-  it, or put it in the queue, so its row holds the count and nothing else.
+  it, or put it in the queue, so its row draws the count and nothing else.
   """
   def controls_cell(%{kind: :facet} = assigns) do
     ~H"""
@@ -551,8 +551,8 @@ defmodule MyHiFiWeb.ItemList do
 
   attr :row, :any, required: true
 
-  # **A container holds no audio, so it goes in no queue.** A person adds an album by
-  # the control at the head of it, which takes every track that the list holds.
+  # **A container has no audio of its own, so it goes in no queue.** A person adds an
+  # album by the control at the head of it, which takes every track of the list.
   defp add_to_queue(assigns) do
     ~H"""
     <button
@@ -572,7 +572,7 @@ defmodule MyHiFiWeb.ItemList do
   attr :row, :any, required: true
   attr :reading, :map, required: true
 
-  # **What this device holds of the audio of one row.** A person reads it to know what
+  # **How much of the audio of one row this device keeps.** A person reads it to know what
   # plays with no network, and a file that is arriving says how far it has come.
   defp audio_mark(assigns) do
     assigns = assign(assigns, :audio, audio(assigns.reading, assigns.row))
@@ -594,7 +594,7 @@ defmodule MyHiFiWeb.ItemList do
   @doc """
   What a row says about the audio of its item.
 
-  It gives `:held` for a file that the card holds, a share such as `"42%"` for one that
+  It returns `:held` for a file that the card holds, a share such as `"42%"` for one that
   is arriving, and `nil` for an item that this device does not hold.
 
   **The map wins over the row.** `audio_held?` of the row is what the read that drew the
@@ -623,12 +623,12 @@ defmodule MyHiFiWeb.ItemList do
     end
   end
 
-  # A row that named no calculation holds `%Ash.NotLoaded{}`, and a list that draws no
+  # A row that named no calculation carries `%Ash.NotLoaded{}`, and a list that draws no
   # such mark must not fail for it.
   defp held?(%{audio_held?: true}), do: true
   defp held?(_row), do: false
 
-  # **A share needs the size of the file, and the item holds it.** A source that names
+  # **A share needs the size of the file, and the item carries it.** A source that names
   # none leaves a person with a mark that turns and no number, which still says that the
   # device is reading it.
   defp share(bytes, %{byte_size: total}) when is_integer(total) and total > 0 do
@@ -655,7 +655,7 @@ defmodule MyHiFiWeb.ItemList do
   @doc """
   The place of one item inside its container, for a person to read.
 
-  It gives `nil` for an item that holds no place. `place` of `MyHiFi.Playback.Item` is
+  It returns `nil` for an item with no place. `place` of `MyHiFi.Playback.Item` is
   the same fact as one number, which is what a list sorts on.
 
   A set of more than one disc names the disc, because track 1 of disc 2 comes after
@@ -683,7 +683,7 @@ defmodule MyHiFiWeb.ItemList do
   One fact of a row, as a person reads it.
 
   Each name is a field of `MyHiFi.Playback.Item`, and `{:text, "…"}` says something
-  that no field holds. A fact of no value gives `nil`, and the row then draws neither
+  that no field carries. A fact of no value returns `nil`, and the row then draws neither
   it nor a separator for it.
 
       iex> MyHiFiWeb.ItemList.fact(:duration_ms, %{duration_ms: 367_000})
@@ -752,9 +752,9 @@ defmodule MyHiFiWeb.ItemList do
   attr :of, :integer, required: true
 
   @doc """
-  How many rows a container holds.
+  How many rows a container contains.
 
-  It tells a person whether the row is worth opening. A container that holds nothing
+  It tells a person whether the row is worth opening. An empty container
   shows no badge, because 0 is a thing that a person reads and then acts on, and there
   is nothing to act on.
   """
@@ -808,8 +808,8 @@ defmodule MyHiFiWeb.ItemList do
 
   **A track that keeps its place draws it, and no other row does.** An episode of a
   show and a chapter of an audiobook are the tracks that a person hears over several
-  days, so they are the tracks that a person leaves unfinished. A song holds no place
-  at all, and a station holds none either. See `keeps_place?` of
+  days, so they are the tracks that a person leaves unfinished. A song has no place at
+  all, and a station has none either. See `keeps_place?` of
   `MyHiFi.Playback.Item`.
 
   A track that reaches its end takes the same mark from `MyHiFi.Player`, so this
@@ -864,7 +864,7 @@ defmodule MyHiFiWeb.ItemList do
   end
 
   # **The list that a person sees is the queue that they get**, in the order that they
-  # see it. `:list_query` holds the sort and the filters that Cinder read, so a person
+  # see it. `:list_query` carries the sort and the filters that Cinder read, so a person
   # who sorted an album by date hears it that way. The head of the collection is not a
   # row of the list, so this takes no identifier: the whole list goes in, and the first
   # track plays.
@@ -949,7 +949,7 @@ defmodule MyHiFiWeb.ItemList do
   end
 
   # Cinder gives the query that it read, with the sort and the filters of the person on
-  # it, and a page keeps that in `:list_query`. A page that holds none, such as the
+  # it, and a page keeps that in `:list_query`. A page with none, such as the
   # branches of a source, queues the one row that a person pressed.
   defp queue_ids(socket, pressed) do
     case socket.assigns[:list_query] do
@@ -973,9 +973,9 @@ defmodule MyHiFiWeb.ItemList do
     end
   end
 
-  # **A row draws what the card holds, and this keeps that state in memory.** The read
+  # **A row draws what the card keeps, and this holds that state in memory.** The read
   # that drew the list gave `audio_held?` of each row, and a file that arrives after it
-  # would need a whole read of the list to show. This map holds what moved since, so a
+  # would need a whole read of the list to show. This map keeps what moved since, so a
   # row that was empty fills while a person watches and no query runs for it. See
   # `MyHiFi.Event.Source.AudioChanged`.
   defp info(%Event.Source.AudioChanged{state: :reading} = event, socket) do
@@ -990,7 +990,7 @@ defmodule MyHiFiWeb.ItemList do
     {:halt, Phoenix.Component.assign(socket, :reading, reading)}
   end
 
-  # A device in standby draws no list, so this holds the mark and reads nothing. See the
+  # A device in standby draws no list, so this keeps the mark and reads nothing. See the
   # module documentation.
   defp info(%Event.Source.Changed{}, %{assigns: %{standby?: true}} = socket) do
     {:halt, Phoenix.Component.assign(socket, :stale?, true)}
@@ -998,7 +998,7 @@ defmodule MyHiFiWeb.ItemList do
 
   defp info(%Event.Source.Changed{}, socket), do: {:halt, read_again(socket)}
 
-  # `MyHiFiWeb.Shell` holds this event as well, and it passes it on, so the value of
+  # `MyHiFiWeb.Shell` receives this event as well, and it passes it on, so the value of
   # `standby?` above is the new one by the time that this runs.
   defp info(%Events.Standby{entered?: false}, %{assigns: %{stale?: true}} = socket) do
     {:cont, socket |> Phoenix.Component.assign(:stale?, false) |> read_again()}
@@ -1018,7 +1018,7 @@ defmodule MyHiFiWeb.ItemList do
   defp info(_message, socket), do: {:cont, socket}
 
   # **A mark on the container that a person is inside redraws the head of it.** The
-  # control of that head marks the same item as a row does, and the page holds the item
+  # control of that head marks the same item as a row does, and the page keeps the item
   # of it in an assign, so a mark that changed nothing there would draw a star that is
   # empty on a container that a person just marked.
   defp opened(%{assigns: %{opened: %{id: id}}} = socket, %{id: id} = marked) do
@@ -1027,8 +1027,8 @@ defmodule MyHiFiWeb.ItemList do
 
   defp opened(socket, _marked), do: socket
 
-  # A page that draws no collection holds no identifier, and `MyHiFiWeb.BrowseLive`
-  # draws none while it says that this firmware holds no source.
+  # A page that draws no collection has no identifier, and `MyHiFiWeb.BrowseLive`
+  # draws none while it says that this firmware knows no source.
   defp read_again(socket) do
     case socket.assigns[:collection_id] do
       nil -> socket

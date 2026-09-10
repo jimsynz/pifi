@@ -28,7 +28,7 @@ defmodule MyHiFiWeb.QueueLive do
 
   They can remove a row, move a row, and empty the queue.
 
-  **A person moves a row by dragging its handle**, and the page holds no control that
+  **A person moves a row by dragging its handle**, and the page draws no control that
   moves a row one place. A row of a long queue needs many presses of such a control,
   and a finger on a small screen hits the wrong one of a pair. The `DragToReorder` hook
   of `assets/js/drag_to_reorder.js` reorders the list in the page and sends one `move`

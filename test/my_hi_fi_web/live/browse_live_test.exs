@@ -768,11 +768,11 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       {:ok, view, html} = live(conn, "/")
 
-      assert html =~ "This firmware holds no source"
+      assert html =~ "This firmware knows no source"
 
       changed(view)
 
-      assert render(view) =~ "This firmware holds no source"
+      assert render(view) =~ "This firmware knows no source"
     end
   end
 
@@ -1426,7 +1426,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     {:ok, _view, html} = live(conn, @radio)
 
-    assert html =~ "This firmware holds no source."
+    assert html =~ "This firmware knows no source."
   end
 
   describe "the picture of a collection" do

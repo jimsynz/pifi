@@ -7,7 +7,7 @@ defmodule MyHiFiWeb.Shell do
   and each LiveView then names the one that it shows.
 
   A source gives its own title and its own icon, so a new source reaches the row
-  without a change here. The row holds the sources that a person left in use, so a
+  without a change here. The row draws the sources that a person left in use, so a
   source that they took out of use leaves it. See `MyHiFi.Source`.
 
   `MyHiFiWeb.SettingsLive` calls `assign_sources/1` again, because a person changes
@@ -17,7 +17,7 @@ defmodule MyHiFiWeb.Shell do
 
   A device in standby offers one control, and the control is the power button. The
   source row is dead, the settings control is dead, and the area under the faceplate
-  holds nothing. `MyHiFiWeb.Layouts` draws that, and it needs `standby?` to do it.
+  plays nothing. `MyHiFiWeb.Layouts` draws that, and it needs `standby?` to do it.
 
   **This hook owns the subscription to the `:player` topic for every LiveView**,
   including `MyHiFiWeb.PlayerLive`. Two subscriptions of one process give two copies
@@ -43,7 +43,7 @@ defmodule MyHiFiWeb.Shell do
   The `:handle_params` hook is what covers a page that a person loads and a link that
   patches the address. It runs for the disconnected render as well, so the publish
   reads `connected?/1` and a page load therefore sends one event and not two.
-  `MyHiFiWeb.PlayerLive` holds no such hook, because `MyHiFiWeb.Layouts` renders it
+  `MyHiFiWeb.PlayerLive` needs no such hook, because `MyHiFiWeb.Layouts` renders it
   inside the page and LiveView allows `handle_params/3` at the root alone. Its
   controls send `:handle_event` in the same way as every other page.
   """

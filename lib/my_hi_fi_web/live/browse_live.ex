@@ -2,9 +2,9 @@ defmodule MyHiFiWeb.BrowseLive do
   @moduledoc """
   Find something to play.
 
-  The address names the source, and the top row of the faceplate holds one control for
+  The address names the source, and the top row of the faceplate draws one control for
   each source. `MyHiFi.Source.roots/0` gives the branches of that source, and
-  everything below them is generic: this page holds no knowledge of internet radio and
+  everything below them is generic: this page needs no knowledge of internet radio and
   none of podcasts.
 
   ## Two rules make the whole tree
@@ -13,14 +13,14 @@ defmodule MyHiFiWeb.BrowseLive do
   kind `:container` opens into the items whose `parent_id` names it. A source takes no
   part in either one, which is what one catalogue is for.
 
-  ## What Cinder holds, and what this page holds
+  ## What Cinder owns, and what this page owns
 
-  `Cinder` runs the query. It holds the loading state, the sort, the filters and the
-  page controls, so this page holds none of that: no cursor, no page of entries, and no
+  `Cinder` runs the query. It owns the loading state, the sort, the filters and the
+  page controls, so this page owns none of that: no cursor, no page of entries, and no
   read of a list inside `handle_event`. A slow read draws a loading state, which the
   page before this one did not.
 
-  This page holds the breadcrumbs and the marker of the track that plays, because
+  This page owns the breadcrumbs and the marker of the track that plays, because
   neither one belongs to a list.
 
   ## The address says where a person is
@@ -41,7 +41,7 @@ defmodule MyHiFiWeb.BrowseLive do
 
   ## The letter bar
 
-  `letter` is this page and not Cinder, and `?letter=G` holds it. A press narrows the
+  `letter` is this page and not Cinder, and `?letter=G` carries it. A press narrows the
   list to the titles that begin with that letter. See `letters/1` for why it narrows the
   list and does not move to a page of it, and why the bar draws every letter.
   """
@@ -104,7 +104,7 @@ defmodule MyHiFiWeb.BrowseLive do
       :ok = Source.choose(module)
 
       # `Cinder.UrlSync.handle_params/3` gives the socket, and it writes `:url_state`
-      # on it. Do not put what it gives into an assign.
+      # on it. Do not put what it returns into an assign.
       {:noreply,
        socket
        |> assign(:finding?, params["find"] == "1")
@@ -133,7 +133,7 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   # A facet opens into the items that hold it, and a container opens into what it
-  # holds. Neither rule needs the source.
+  # names. Neither rule needs the source.
   def handle_event("open", %{"id" => id}, socket) do
     case here(socket.assigns) do
       %{kind: :facet} -> {:noreply, open_facet(socket, id)}
@@ -144,9 +144,9 @@ defmodule MyHiFiWeb.BrowseLive do
 
   # **A person reaches an album from the list of albums, from the favourites and from a
   # search, and no crumb of those paths names the artist.** The head of the collection
-  # therefore draws the container that holds this one, and this opens it.
+  # therefore draws the container above this one, and this opens it.
   #
-  # The address holds that identifier and nothing above it, because a container opens
+  # The address carries that identifier and nothing above it, because a container opens
   # by its identifier under no branch. See `step/3`.
   def handle_event("open_parent", %{"id" => id}, socket) do
     {:noreply, go(socket, [id])}
@@ -160,7 +160,7 @@ defmodule MyHiFiWeb.BrowseLive do
     {:noreply, go(socket, socket.assigns.segments)}
   end
 
-  # **A press of the letter that is on takes the narrowing away**, because the bar holds
+  # **A press of the letter that is on takes the narrowing away**, because the bar keeps
   # no control for "every letter" and a person who pressed G must be able to go back.
   def handle_event("letter", %{"letter" => letter}, socket) do
     chosen = if socket.assigns.letter == letter, do: nil, else: chosen_letter(letter)
@@ -229,7 +229,7 @@ defmodule MyHiFiWeb.BrowseLive do
     ~H"""
     <div id="browse">
       <p :if={is_nil(@source)} id="no-source" class="text-ink-dim">
-        This firmware holds no source.
+        This firmware knows no source.
       </p>
 
       <div :if={@source}>
@@ -316,16 +316,16 @@ defmodule MyHiFiWeb.BrowseLive do
   attr :letter, :string, default: nil
 
   # **A press narrows the list to the titles that begin with one letter.** A library of
-  # this device holds 4377 albums and the list reads 25 of them in a page, so a person
+  # this device keeps 4377 albums and the list reads 25 of them in a page, so a person
   # who wanted one that begins with G moved through 176 pages one press at a time.
   #
-  # **Every letter draws, and the bar says nothing about what the list holds.** A count
+  # **Every letter draws, and the bar says nothing about what the list contains.** A count
   # for each letter reads `substr` of every row, and no index of this table serves that,
   # so a library of 68,273 rows would build a temporary tree for each draw of the page.
-  # A letter that holds nothing gives "Nothing here.", and one more press takes it away.
+  # A letter that matches nothing gives "Nothing here.", and one more press takes it away.
   #
   # It draws beside the filter and the sort, and not over the list, because a list of an
-  # album holds 12 tracks and a bar of 27 controls above it is noise.
+  # album has 12 tracks and a bar of 27 controls above it is noise.
   defp letters(assigns) do
     assigns = assign(assigns, :letters, @letters)
 
@@ -436,7 +436,7 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   # A branch is counted when a person looks at the branches, and never below them. Each
-  # one is one query, and a source holds three.
+  # one is one query, and a source has three.
   defp root_counts(_module, [_segment | _rest]), do: %{}
 
   defp root_counts(module, []) do
@@ -446,7 +446,7 @@ defmodule MyHiFiWeb.BrowseLive do
   attr :source, :any, required: true
 
   # A person who knows the name of a station or of a show does not want to walk a tree
-  # for it. The tree holds the browsing, and `MyHiFiWeb.SearchLive` holds the finding.
+  # for it. The tree is for browsing, and `MyHiFiWeb.SearchLive` is for finding.
   defp finder(assigns) do
     ~H"""
     <form id="finder" phx-submit="search" class="mb-4 flex items-center gap-2">
@@ -475,7 +475,7 @@ defmodule MyHiFiWeb.BrowseLive do
 
   # The head of one collection: its picture, its name, and what the publisher says.
   #
-  # **A collection that holds collections holds no play control.** A press on it would
+  # **A collection of collections draws no play control.** A press on it would
   # mean "play every track of every album of this artist", and a person who opened an
   # artist asked to read the albums. `tracks_only?/1` answers that with one count.
   #
@@ -638,13 +638,13 @@ defmodule MyHiFiWeb.BrowseLive do
   # no page to jump to. A list of one letter is what a person who pressed G asked for in
   # any case, and it reads in the same order under the same sort.
   #
-  # A facet holds a value of a union, which SQLite keeps as JSON text, so the bar draws
+  # A facet carries a value of a union, which SQLite keeps as JSON text, so the bar draws
   # for the items alone. See `MyHiFi.Playback.Item`.
   defp starting_with(listing, nil), do: listing
   defp starting_with(%{kind: :facet} = listing, _letter), do: listing
 
   # `lower` of SQLite moves the letters of ASCII and no others, so `Ä` reads as a title
-  # that begins with something that is not a letter. `title COLLATE NOCASE` holds the
+  # that begins with something that is not a letter. `title COLLATE NOCASE` gives the
   # same rule, which is what the order of this list already uses.
   defp starting_with(%{query: query} = listing, "#") do
     %{
@@ -682,7 +682,7 @@ defmodule MyHiFiWeb.BrowseLive do
   defp opened_item(%{path: path}), do: Map.get(List.last(path), :item)
   defp opened_item(_assigns), do: nil
 
-  # **A collection holds a play control when every row of it plays.** An artist holds
+  # **A collection draws a play control when every row of it plays.** An artist contains
   # albums, and `Playback.play/2` would then take a whole discography, which is not what
   # a person who opened an artist asked for.
   #
@@ -705,7 +705,7 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   # See `MyHiFi.Source.refresh/2`. The source says whether it reads a service, so this
-  # page holds no knowledge of podcasts.
+  # page needs no knowledge of podcasts.
   defp refreshable?(%{source: nil}), do: false
 
   defp refreshable?(assigns) do
@@ -714,19 +714,19 @@ defmodule MyHiFiWeb.BrowseLive do
 
   # Cinder keeps the sort and the filters of one collection, and a level of facets and a
   # level of items are two resources. One identifier for both gives a sort of `title` to
-  # a query of `MyHiFi.Playback.Facet`, which holds no such field. Each level therefore
+  # a query of `MyHiFi.Playback.Facet`, which has no such field. Each level therefore
   # gets an identifier of its own, and a new list starts with no sort and no filter.
   defp collection_id(segments), do: Enum.map_join([@collection | segments], "-", &slug/1)
 
   # A facet is named by its value, and an item by its title. `sorted_title` is the
-  # title in the order of the letters, and `title` holds the order of the bytes. See
+  # title in the order of the letters, and `title` gives the order of the bytes. See
   # `MyHiFi.Playback.Item`.
   defp field(:facet), do: "value"
   defp field(:item), do: "sorted_title"
 
   # **The text filter of Cinder matches the case on AshSqlite**, so a person who typed
-  # `rock` found no `Rock`. `MyHiFiWeb.ItemList.filter_title/2` holds the expression
-  # that the search page reads as well, and it says why. A facet holds a value of a
+  # `rock` found no `Rock`. `MyHiFiWeb.ItemList.filter_title/2` builds the expression
+  # that the search page reads as well, and it says why. A facet carries a value of a
   # union and not a title, so it keeps the filter that Cinder gives.
   defp filter(:facet), do: true
   defp filter(:item), do: [type: :text, fn: &ItemList.filter_title/2]
@@ -737,9 +737,9 @@ defmodule MyHiFiWeb.BrowseLive do
   defp counts(:item), do: :child_count
 
   # A row of a container draws its picture, and `artwork` is the calculation that gives
-  # the address: the picture of the item, or the picture of the container that holds it.
+  # the address: the picture of the item, or the picture of the container above it.
   # One call of Ash serves the whole page, so this costs one expression and no query for
-  # each row. A facet is a value and it holds no picture.
+  # each row. A facet is a value and it has no picture.
   defp loads(:facet), do: [counts(:facet)]
 
   # **A fact of a row is a field or a calculation, and a read that does not name a
@@ -749,7 +749,7 @@ defmodule MyHiFiWeb.BrowseLive do
   defp loads(:item), do: [counts(:item), :artwork, :remaining_ms, :audio_held?]
 
   # The filter and the sort name what a person looks at. `Value` is the field of the
-  # facet, and it says nothing to somebody who opened Countries. A list of artists holds
+  # facet, and it says nothing to a person who opened Countries. A list of artists draws
   # names and not titles, so a listing names the word for its own rows. See
   # `t:MyHiFi.Source.listing/0`.
   defp label(path, %{kind: :facet}), do: List.last(path).title
@@ -764,7 +764,7 @@ defmodule MyHiFiWeb.BrowseLive do
     end
   end
 
-  # An item holds no name that an address can use, so its identifier is the segment.
+  # An item has no name that an address can use, so its identifier is the segment.
   defp open_item(socket, id) do
     case Playback.get_item(id) do
       {:ok, %{kind: :container}} -> go(socket, socket.assigns.segments ++ [id])
@@ -797,7 +797,7 @@ defmodule MyHiFiWeb.BrowseLive do
 
   # **A press of a letter keeps the sort and the filter of the person.** The bar draws
   # beside those two controls, so a person who sorted by date and then pressed G asked
-  # for the G of that order. `address/2` builds the address of a level and it holds
+  # for the G of that order. `address/2` builds the address of a level and it keeps
   # neither, so this one changes the address that the page is on.
   #
   # The cursor of the page goes, because it names a row of the list before the letter
@@ -862,7 +862,7 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   # A branch, or a container by its identifier. `MyHiFiWeb.SearchLive` finds a show
-  # that no branch of this source holds, so the address of a container cannot need one.
+  # that no branch of this source names, so the address of a container cannot need one.
   defp step(source, nil, segment) do
     case Enum.find(source.roots(), fn {name, _listing} -> slug(name) == segment end) do
       {name, listing} -> %{title: name, listing: listing}
@@ -871,8 +871,8 @@ defmodule MyHiFiWeb.BrowseLive do
   end
 
   # **The source names the order of these rows and the facts that they draw**, and this
-  # page holds no knowledge of any source. `nil` is what a list under a facet is: no
-  # container holds it. See `c:MyHiFi.Source.listing/1`.
+  # page needs no knowledge of any source. `nil` is what a list under a facet is: no
+  # container is above it. See `c:MyHiFi.Source.listing/1`.
   defp step(source, %{listing: %{kind: :facet}}, segment) do
     inside = Source.inside(source, nil)
 
@@ -889,8 +889,8 @@ defmodule MyHiFiWeb.BrowseLive do
   # A container opens into the items whose `parent_id` names it. The source must match,
   # so an identifier of one source cannot open under another one.
   #
-  # **The source names the order and the facts.** An album holds its tracks by number
-  # and a show holds its episodes by date, and this page cannot hold either rule: it
+  # **The source names the order and the facts.** An album reads its tracks by number
+  # and a show reads its episodes by date, and this page cannot carry either rule: it
   # sorted every container by date, so every album of a Jellyfin library listed
   # alphabetically. See `c:MyHiFi.Source.listing/1`.
   #
@@ -901,8 +901,8 @@ defmodule MyHiFiWeb.BrowseLive do
     slug = Source.slug(source)
 
     # `artwork` is a calculation, and the head of the collection draws it. A read that
-    # does not name it gives `%Ash.NotLoaded{}`, and the head then drew a folder for a
-    # container that holds a picture. The head names the container that holds this one
+    # does not name it returns `%Ash.NotLoaded{}`, and the head then drew a folder for a
+    # container that has a picture. The head names the container above this one
     # as well, so `parent` comes with it.
     case Playback.get_item(id, load: [:artwork, :parent]) do
       {:ok, %{kind: :container, source: ^slug} = item} ->
@@ -925,7 +925,7 @@ defmodule MyHiFiWeb.BrowseLive do
     end
   end
 
-  # The container that holds this one, when the catalogue holds one. An album names its
+  # The container above this one, when the catalogue has one. An album names its
   # artist, and a show at the top of its source names nothing.
   defp parent(%{parent: %Item{kind: :container} = parent}), do: parent
   defp parent(_item), do: nil
