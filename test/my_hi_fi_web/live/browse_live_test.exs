@@ -29,6 +29,10 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
   defp open(view, name), do: view |> element("#entries button", name) |> render_click()
 
+  defp station_called(title) do
+    Enum.find(Playback.items_of_source!("internet-radio"), &(&1.title == title))
+  end
+
   # A render after the event, because a message of one process arrives in order: the
   # page has read the event by the time that it answers.
   defp changed(view) do
@@ -1107,7 +1111,9 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       Stations.create(%{country_code: "NZ", title: "Charlie", click_count: 1})
 
       {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ")
-      [_alpha, bravo, _charlie] = Playback.items_of_source!("internet-radio")
+      render_async(view, @async_wait)
+
+      bravo = station_called("Bravo")
 
       view |> element("#play-#{bravo.id}") |> render_click()
 
@@ -1121,12 +1127,19 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     # A filter is what a person chose to look at, so the queue holds that and not the
     # whole country.
+    #
+    # **The row must be on the page before a test presses it.** Cinder reads its query
+    # in a task, so a press that came before the read found no row and the test failed
+    # on a machine under load. The read of the stations names the one that it wants for
+    # the same reason: `items_of_source!/1` gives them in the order that SQLite likes.
     test "a filtered list queues what the filter left", %{conn: conn} do
       Stations.create(%{country_code: "NZ", title: "Alpha"})
       Stations.create(%{country_code: "NZ", title: "Bravo"})
 
       {:ok, view, _html} = live(conn, "#{@radio}/countries/NZ?find=1&sorted_title=Alpha")
-      [alpha, _bravo] = Playback.items_of_source!("internet-radio")
+      render_async(view, @async_wait)
+
+      alpha = station_called("Alpha")
 
       view |> element("#play-#{alpha.id}") |> render_click()
 
