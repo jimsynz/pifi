@@ -486,8 +486,8 @@ defmodule MyHiFi.Source.Podcasts do
   defp index_description do
     held =
       if Index.configured?(),
-        do: "The device holds a key.",
-        else: "The device holds no key."
+        do: "This device has a key.",
+        else: "This device has no key."
 
     "#{held} Podcasts need a key, and a key costs no money. No other device " <>
       "shares it, and your subscriptions play without it."

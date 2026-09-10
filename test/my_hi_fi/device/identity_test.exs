@@ -75,7 +75,7 @@ defmodule MyHiFi.Device.IdentityTest do
 
     test "a control character reads as nothing, so it is not a name" do
       assert {:error, message} = Identity.put_name("Kitchen\nRadio")
-      assert message =~ "characters that a person reads"
+      assert message =~ "characters that a person can read"
     end
 
     test "it tells the screens and the pages" do

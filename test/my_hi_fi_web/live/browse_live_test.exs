@@ -1062,7 +1062,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
       html = view |> element("#refresh") |> render_click()
 
-      assert html =~ "The device reads this again now."
+      assert html =~ "The device is reading this list again."
       assert_enqueued(worker: MyHiFi.Podcast.Show.Workers.Refresh)
     end
   end

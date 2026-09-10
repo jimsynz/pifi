@@ -155,7 +155,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       html = view |> element("#remove-splash") |> render_click()
 
-      assert html =~ "Each screen shows the picture of the firmware again."
+      assert html =~ "Each screen shows the picture that came with the firmware again."
       assert has_element?(view, "#no-splash")
       assert Identity.splash_path() == nil
     end
@@ -347,7 +347,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       html = view |> element("#enable-peripheral-lamp") |> render_click()
 
       assert html =~ "That did not start: :no_such_device"
-      assert html =~ "In use, and it did not start"
+      assert html =~ "In use, but it did not start"
     end
 
     test "the menu says how many run", %{conn: conn} do
@@ -456,7 +456,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       html = view |> element("#toggle-switch-off") |> render_click()
 
-      assert html =~ "says when a hand can reach the switch"
+      assert html =~ "says when it is safe to switch off"
       assert MyHiFi.SwitchOff.enabled?()
     end
 
@@ -466,7 +466,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/standby")
       html = view |> element("#toggle-switch-off") |> render_click()
 
-      assert html =~ "keeps its work going in standby"
+      assert html =~ "continues its work in standby"
       refute MyHiFi.SwitchOff.enabled?()
     end
   end
@@ -570,7 +570,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       html = view |> element("#toggle-volume") |> render_click()
 
-      assert html =~ "This device sets the level of the card"
+      assert html =~ "This device sets the level of the sound card"
       assert %{enabled?: true} = MyHiFi.Playback.volume!()
     end
 
@@ -737,7 +737,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       {:ok, _view, html} = live(conn, ~p"/settings/sources/#{@radio}")
 
-      assert html =~ "holds 2 stations"
+      assert html =~ "has 2 stations"
     end
 
     test "a change of the countries stays, and the sync job reads it", %{conn: conn} do
@@ -868,7 +868,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, view, html} = live(conn, ~p"/settings/sources/#{@podcasts}")
 
       assert html =~ "api.podcastindex.org/signup"
-      assert html =~ "The device holds no key"
+      assert html =~ "This device has no key"
       refute has_element?(view, "#source-action-remove_key")
     end
 
@@ -882,7 +882,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
         |> render_submit()
 
       assert html =~ "The key works"
-      assert html =~ "The device holds a key"
+      assert html =~ "This device has a key"
       assert Index.configured?()
       assert has_element?(view, "#source-action-remove_key")
     end
@@ -920,7 +920,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
 
       refute html =~ "THESECRET"
       refute html =~ "THEKEY"
-      assert html =~ "The device holds a key"
+      assert html =~ "This device has a key"
     end
 
     test "the fields are empty after a save, so the secret goes nowhere", %{conn: conn} do

@@ -156,7 +156,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
     {:noreply,
      socket
-     |> put_flash(:info, "Each screen shows the picture of the firmware again.")
+     |> put_flash(:info, "Each screen shows the picture that came with the firmware again.")
      |> refresh()}
   end
 
@@ -340,7 +340,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
         <p class="mt-1 text-sm text-ink-dim">
           This device answers at <span class="numerals">{@device_slug}.local</span>,
-          and at the name that the board came with. A name holds 32 characters or less.
+          and at the name that the board came with. A name takes 32 characters or less.
         </p>
 
         <button type="submit" id="save-device-name" class="control mt-3 rounded-lg px-4 py-2 text-sm">
@@ -459,7 +459,7 @@ defmodule MyHiFiWeb.SettingsLive do
         </p>
 
         <p :if={not @volume.supported?} id="no-volume-control" class="mt-1 text-sm text-ink-dim">
-          This card holds no level that the device can set. Many a DAC of a stereo gives
+          This card holds no level that the device can set. Most DACs of a stereo give
           a fixed output on purpose. Set the level on your amplifier.
         </p>
       </div>
@@ -526,7 +526,8 @@ defmodule MyHiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-sources" title="Sources" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
-        A source out of use leaves the top row, and it asks the network for nothing.
+        A source that is out of use leaves the top row, and it asks the network for
+        nothing.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -568,7 +569,7 @@ defmodule MyHiFiWeb.SettingsLive do
       </div>
 
       <p :if={@source.fields == [] and @source.actions == []} id="no-source-settings" class="text-sm text-ink-dim">
-        {@source.title} holds nothing else to change.
+        {@source.title} has nothing else to change.
       </p>
 
       <.form :if={@source.fields != []} for={@source.form} id="source-form" phx-submit="save_source">
@@ -734,7 +735,7 @@ defmodule MyHiFiWeb.SettingsLive do
         <p class="mt-1 text-sm text-ink-dim">
           A device that runs on a battery is switched off by hand. This stops the
           background work when the device enters standby, puts what it holds on the
-          card, and says on the screen that a hand can reach the switch. Leave it off
+          card, and says on the screen that it is safe to switch off. Leave it off
           for a device on the mains, whose background work runs while it stands in
           standby.
         </p>
@@ -775,7 +776,7 @@ defmodule MyHiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-network" title="Network" back={~p"/settings"}>
       <p :if={@interfaces == []} id="no-network" class="text-sm text-ink-dim">
-        The network state comes from the device.
+        This device reports no network interface.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -1157,14 +1158,14 @@ defmodule MyHiFiWeb.SettingsLive do
   defp standby_summary(minutes), do: period_title(minutes)
 
   defp switch_off_flash(true),
-    do: "The device stops its work in standby, and it says when a hand can reach the switch."
+    do: "The device stops its work in standby, and it says when it is safe to switch off."
 
-  defp switch_off_flash(false), do: "The device keeps its work going in standby."
+  defp switch_off_flash(false), do: "The device continues its work in standby."
 
-  defp volume_flash(true), do: "This device sets the level of the card."
+  defp volume_flash(true), do: "This device sets the level of the sound card."
 
   defp volume_flash(false),
-    do: "The card plays at its loudest. Set the level on your amplifier."
+    do: "The sound card plays at its loudest. Set the level on your amplifier."
 
   defp standby_flash("0"), do: "The device stays awake."
   defp standby_flash(minutes), do: "The device enters standby after #{minutes} minutes of quiet."
@@ -1201,7 +1202,7 @@ defmodule MyHiFiWeb.SettingsLive do
 
   defp peripheral_state(%{enabled?: false}), do: "Out of use"
   defp peripheral_state(%{running?: true}), do: "In use"
-  defp peripheral_state(_peripheral), do: "In use, and it did not start"
+  defp peripheral_state(_peripheral), do: "In use, but it did not start"
 
   defp peripheral_in_use(module) do
     if Peripheral.enabled?(module),
@@ -1209,7 +1210,7 @@ defmodule MyHiFiWeb.SettingsLive do
       else: "#{module.title()} is out of use."
   end
 
-  defp peripherals_summary([]), do: "This firmware knows none"
+  defp peripherals_summary([]), do: "This firmware knows no peripheral"
 
   defp peripherals_summary(peripherals) do
     "#{Enum.count(peripherals, & &1.running?)} of #{length(peripherals)} running"
@@ -1253,7 +1254,7 @@ defmodule MyHiFiWeb.SettingsLive do
     "#{Enum.count(sources, & &1.enabled?)} of #{length(sources)} in use"
   end
 
-  defp network_summary([]), do: "The network state comes from the device"
+  defp network_summary([]), do: "This device reports no network interface"
 
   defp network_summary(interfaces) do
     Enum.map_join(interfaces, ", ", &connection(&1.connection))

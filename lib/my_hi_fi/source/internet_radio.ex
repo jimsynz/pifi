@@ -161,7 +161,7 @@ defmodule MyHiFi.Source.InternetRadio do
         title: "Station countries",
         description:
           "Name each country by its two letter code, and put a comma between them. " <>
-            "The station list holds #{stations(count())}.",
+            "The station list has #{stations(count())}.",
         link: nil,
         type: :text,
         value: Enum.join(FromRemote.configured_countries(), ", "),

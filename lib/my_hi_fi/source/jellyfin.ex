@@ -418,7 +418,7 @@ defmodule MyHiFi.Source.Jellyfin do
 
   defp state_description do
     if Server.configured?() do
-      "The device holds a link. #{tracks(count())}."
+      "This device is linked to a server. #{tracks(count())}."
     else
       unlinked_description(Server.address(), pending_code())
     end
@@ -427,10 +427,10 @@ defmodule MyHiFi.Source.Jellyfin do
   defp unlinked_description({:error, :no_address}, _code),
     do: "Give the address of your server, such as http://jellyfin.local:8096."
 
-  defp unlinked_description({:ok, _address}, nil), do: "The device holds no link yet."
+  defp unlinked_description({:ok, _address}, nil), do: "This device is not linked yet."
 
   defp unlinked_description({:ok, _address}, code) do
-    "The device waits. Open Settings and then Quick Connect in a Jellyfin client " <>
+    "This device is waiting. Open Settings and then Quick Connect in a Jellyfin client " <>
       "that you already use, type the code #{code}, and press Finish linking."
   end
 
@@ -459,8 +459,8 @@ defmodule MyHiFi.Source.Jellyfin do
     Ash.count!(Ash.Query.filter(Item, source == ^@source and kind == :track))
   end
 
-  defp tracks(1), do: "The library holds 1 track"
-  defp tracks(count), do: "The library holds #{count} tracks"
+  defp tracks(1), do: "The library has 1 track"
+  defp tracks(count), do: "The library has #{count} tracks"
 
   # A person may type a name with no scheme, and a browser takes one of those. The
   # address goes into a request, so it needs a scheme, and a separator at the end

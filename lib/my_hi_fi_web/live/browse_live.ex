@@ -174,10 +174,10 @@ defmodule MyHiFiWeb.BrowseLive do
   def handle_event("refresh", _params, socket) do
     case Source.refresh(socket.assigns.source, opened_item(socket.assigns)) do
       :ok ->
-        {:noreply, put_flash(socket, :info, "The device reads this again now.")}
+        {:noreply, put_flash(socket, :info, "The device is reading this list again.")}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "The device could not read this again.")}
+        {:noreply, put_flash(socket, :error, "The device could not read this list again.")}
     end
   end
 
@@ -410,7 +410,7 @@ defmodule MyHiFiWeb.BrowseLive do
           type="button"
           id="refresh"
           phx-click="refresh"
-          aria-label="Read this again"
+          aria-label="Read this list again"
           class="control flex size-8 shrink-0 items-center justify-center rounded-lg"
         >
           <.icon name="hero-arrow-path" class="size-4" />
@@ -570,8 +570,8 @@ defmodule MyHiFiWeb.BrowseLive do
 
   defp layouts do
     [
-      {:table, "rows", "hero-bars-3", "Read this as rows"},
-      {:grid, "cards", "hero-squares-2x2", "Read this as cards"}
+      {:table, "rows", "hero-bars-3", "Show this as rows"},
+      {:grid, "cards", "hero-squares-2x2", "Show this as cards"}
     ]
   end
 

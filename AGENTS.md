@@ -327,6 +327,11 @@ line below is a mistake that this project has already made and corrected.
 - **Use the active voice, the present tense, and the imperative** for each
   instruction. Give one instruction in each sentence.
 - **Use articles.** Write "the device", and not "device".
+- **Write a plain sentence, and not a clipped one.** STE asks for short active
+  sentences in ordinary words. It does not ask for an aphorism. Give each
+  sentence a subject and a verb, and write "returns" for a function that
+  returns something. Do not write "holds" for every verb: a module makes a
+  decision, a row carries a number, and a cache keeps a file.
 
 A code identifier, a product name, and a protocol name are technical names. Use
 them as they are, even when the word is not on the approved list. `aplay`,

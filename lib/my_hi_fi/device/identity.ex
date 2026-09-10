@@ -136,7 +136,7 @@ defmodule MyHiFi.Device.Identity do
       publish()
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
-      {:error, reason} -> {:error, "The device kept its name: #{inspect(reason)}"}
+      {:error, reason} -> {:error, "The device did not change its name: #{inspect(reason)}"}
     end
   end
 
@@ -295,8 +295,8 @@ defmodule MyHiFi.Device.Identity do
 
     cond do
       name == "" -> {:error, "A device needs a name."}
-      byte_size(name) > @max_bytes -> {:error, "A name holds #{@max_bytes} characters or less."}
-      not readable?(name) -> {:error, "A name holds characters that a person reads."}
+      byte_size(name) > @max_bytes -> {:error, "A name takes #{@max_bytes} characters or less."}
+      not readable?(name) -> {:error, "A name needs characters that a person can read."}
       true -> {:ok, name}
     end
   end
@@ -331,7 +331,7 @@ defmodule MyHiFi.Device.Identity do
   defp refusal({:not_an_image, _type}), do: "That file is not a JPEG and not a PNG."
 
   defp refusal({:too_large, bytes}),
-    do: "That file holds #{div(bytes, 1024)} KB, and a picture takes 4096 KB or less."
+    do: "That file is #{div(bytes, 1024)} KB, and a picture takes 4096 KB or less."
 
   # The first bytes of the file say JPEG or PNG, and the rest of it says something else.
   # `vipsthumbnail` is what reads the rest, so a file that is broken or that is not a
@@ -339,7 +339,7 @@ defmodule MyHiFi.Device.Identity do
   defp refusal({:vipsthumbnail_failed, _status, _output}),
     do: "That file is not a picture that this device can read."
 
-  defp refusal(reason), do: "The device kept the picture that it had: #{inspect(reason)}"
+  defp refusal(reason), do: "The device did not change its picture: #{inspect(reason)}"
 
   if Mix.target() == :host do
     defp do_announce, do: :ok

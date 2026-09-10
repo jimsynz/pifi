@@ -431,13 +431,13 @@ defmodule MyHiFi.Source.JellyfinTest do
 
       put_address()
       assert [address | _rest] = Jellyfin.settings()
-      assert address.description =~ "holds no link yet"
+      assert address.description =~ "is not linked yet"
       assert address.value == @address
 
       put_link()
       track()
       assert [address | _rest] = Jellyfin.settings()
-      assert address.description =~ "The device holds a link. The library holds 1 track."
+      assert address.description =~ "This device is linked to a server. The library has 1 track."
     end
 
     # The doc of the callback says that a source reads its own state here, and a
