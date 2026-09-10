@@ -6,18 +6,18 @@ The device connects to a home stereo. It behaves like a normal stereo component.
 A person can operate it without a computer and without a phone.
 
 The device gets audio from a network source. It sends the audio to a USB digital
-to analogue converter (DAC). It gives a Phoenix LiveView web interface for setup
+to analogue converter (DAC). It serves a Phoenix LiveView web interface for setup
 and for control. A later version adds a 2.8 inch PiTFT screen and a knob with
 dynamic detents.
 
 ## State
 
-The firmware plays internet radio and podcasts. It holds a web interface to browse,
+The firmware plays internet radio and podcasts. It serves a web interface to browse,
 to search and to control what plays. The device screen and the knob are not built
 yet.
 
 The code is the specification. Each module says what it does and why, and
-`MyHiFi.Source`, `MyHiFi.Output` and `MyHiFi.Peripheral` hold the rules that a new
+`MyHiFi.Source`, `MyHiFi.Output` and `MyHiFi.Peripheral` name the rules that a new
 source, a new output and a new piece of hardware follow.
 
 ## Design
