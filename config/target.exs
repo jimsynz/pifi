@@ -254,6 +254,8 @@ config :my_hi_fi, MyHiFiWeb.Endpoint,
   # check therefore rejects the LiveView socket.
   check_origin: false
 
+config :nbpr, registry: "harton.dev/mypihifiguy/myhifi", publish_after_build: true
+
 # Import target specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 # Uncomment to use target specific configurations
