@@ -6,13 +6,13 @@ defmodule MyHiFi.Podcast do
   finds a show, and the feed of the publisher gives the episodes. See
   `MyHiFi.Podcast.Feed`.
 
-  This domain holds no episode and no title. `MyHiFi.Playback.Item` holds every
+  This domain stores no episode and no title. `MyHiFi.Playback.Item` keeps every
   playable thing of this firmware, and `MyHiFi.Podcast.Fill` writes the shows and the
   episodes into it. What stays here belongs to the reading of a feed alone: the address
   of the feed, the identifier of the index, and what the last read gave.
 
   The two sources of a show carry different weight. The feed wins, because the
-  publisher owns it. The index fills a show that no feed read yet, and it gives
+  publisher owns it. The index fills a show that no feed read yet, and it returns
   nothing to a show that a feed already described.
   """
 

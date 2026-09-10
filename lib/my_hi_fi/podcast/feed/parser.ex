@@ -3,7 +3,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
   Reads a podcast feed, one chunk at a time.
 
   A caller gives the bytes as they arrive and gets a show and its episodes. It
-  holds no copy of the document, so a large feed needs little memory. Of the 50
+  keeps no copy of the document, so a large feed needs little memory. Of the 50
   most popular New Zealand podcasts, the median feed is 1.6 MB and the largest is
   13.6 MB.
 
@@ -11,7 +11,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
       {:cont, parser} = Parser.feed(parser, chunk)
       {:ok, feed} = Parser.finish(parser)
 
-  `feed/2` gives `{:done, feed}` when it holds enough episodes. A caller then stops
+  `feed/2` returns `{:done, feed}` when it has enough episodes. A caller then stops
   the download and calls `finish/1` no more.
 
   This reads RSS 2.0 alone, because Apple asks each publisher for RSS 2.0 and
@@ -36,10 +36,10 @@ defmodule MyHiFi.Podcast.Feed.Parser do
 
   @default_max_items 200
 
-  # A description holds text that a person wrote, and 32 KB is far more than a
+  # A description carries text that a person wrote, and 32 KB is far more than a
   # person writes. Some feeds hold an image inside the description as base64, and
   # 200 of those would end the firmware. The reader therefore stops at this size
-  # and keeps what it holds.
+  # and keeps what it has.
   @max_text_bytes 32 * 1024
 
   @months %{
@@ -127,7 +127,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
 
   `:max_items` is how many episodes to keep, and it becomes 200. A feed writes the
   newest episode first, so the reader keeps the newest ones. One feed of the
-  measurement holds 2955 episodes, and no person moves through that with a knob.
+  measurement has 2955 episodes, and no person moves through that with a knob.
   """
   @spec new(keyword()) :: {:ok, Saxy.Partial.t()} | {:error, Saxy.ParseError.t()}
   def new(options \\ []) do
@@ -139,8 +139,8 @@ defmodule MyHiFi.Podcast.Feed.Parser do
   @doc """
   Give the reader the next chunk of the feed.
 
-  `{:done, feed}` means that the reader holds `:max_items` episodes. Stop the
-  download: the rest of the feed holds older episodes, and this gives the answer
+  `{:done, feed}` means that the reader has `:max_items` episodes. Stop the
+  download: the rest of the feed carries older episodes, and this gives the answer
   already.
   """
   @spec feed(Saxy.Partial.t(), binary()) ::
@@ -237,7 +237,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
   def handle_event(event, data, state)
 
   # The root element decides whether this is a feed that we read. An Atom document
-  # holds `feed`, and an error page holds `html`, and neither one holds an
+  # names `feed`, and an error page names `html`, and neither one holds an
   # enclosure.
   def handle_event(:start_element, {"rss", _attributes}, %State{path: []} = state) do
     {:ok, %State{state | rss?: true, path: ["rss"]}}
@@ -341,7 +341,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
 
   # **A publisher that names no episode number gets none.** A feed writes the newest
   # episode first and this reader keeps `:max_items` of them, so the place in the list
-  # is not the number of the episode: one feed of the measurement holds 2955 episodes
+  # is not the number of the episode: one feed of the measurement has 2955 episodes
   # and this keeps 200 of them. A row of such a show draws its date and no number. See
   # `MyHiFi.Playback.Item`.
   defp number(text) do
@@ -352,7 +352,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
   end
 
   # An episode with no audio cannot play, so it never reaches the database. A feed
-  # holds such an item for a post that carries text alone.
+  # sends such an item for a post that carries text alone.
   #
   # A `guid` is not compulsory, and the address of the audio identifies an episode
   # when the feed gives no `guid`.
@@ -393,7 +393,7 @@ defmodule MyHiFi.Podcast.Feed.Parser do
          title: state.show[:title],
          description: state.show[:description],
          author: state.show[:author],
-         # `itunes:image` is what Apple asks a publisher for, and it holds the
+         # `itunes:image` is what Apple asks a publisher for, and it carries the
          # larger picture. `<image><url>` is the element of RSS 2.0, and a feed can
          # hold either one before the other, so the choice happens here and not
          # where each one arrives.

@@ -9,7 +9,7 @@ defmodule MyHiFi.Jellyfin.Fill do
   ## What identifies an item
 
   The identifier of the server identifies the item here as well. Jellyfin gives one
-  identifier to each thing that it holds, so an artist, an album and a track never
+  identifier to each thing that it serves, so an artist, an album and a track never
   collide and `source_ref` needs no name in front of it.
 
   ## What the tree looks like
@@ -20,18 +20,18 @@ defmodule MyHiFi.Jellyfin.Fill do
   does not name goes under one container that this module keeps for those, or it
   would stand beside the artists in that branch.
 
-  ## What a track holds, and what it does not
+  ## What a track carries, and what it does not
 
   `transport` is `:download` and `format` is the codec that the server sends. Both
   are columns, because `MyHiFi.Playback.Item` decides which favourites this device
   reads on to the card, and that read must ask no service. `byte_size` is a column
-  for the same reason: the read asks whether the card holds room before it begins.
+  for the same reason: the read asks whether the card has room before it begins.
   See `MyHiFi.Playback.FavouriteAudio`.
 
-  **A track holds no `url`.** The address of the audio carries the access token, and
+  **A track carries no `url`.** The address of the audio carries the access token, and
   a token changes when a person links the device again.
   `MyHiFi.Source.Jellyfin.resolve/1` builds the address at the time of play, from
-  the token that the device holds then.
+  the token that the device keeps then.
 
   **A track keeps no place.** A song is not an episode: a person who stops half way
   through one does not want the second half of it tomorrow. See `keeps_place?` of
@@ -39,7 +39,7 @@ defmodule MyHiFi.Jellyfin.Fill do
 
   ## Why it writes in bulk
 
-  A library holds tens of thousands of tracks, and section 17 of the specification
+  A library has tens of thousands of tracks, and section 17 of the specification
   measures an Ash write at 11.8 ms against 2.21 ms for the same insert in plain SQL.
   A write for each row would take an hour of the card. `Ash.bulk_create/4` writes one
   statement for each batch, and the sync gives it one page at a time.
@@ -64,7 +64,7 @@ defmodule MyHiFi.Jellyfin.Fill do
   @spec source() :: String.t()
   def source, do: @source
 
-  @doc "The `source_ref` of the container that holds an album with no artist."
+  @doc "The `source_ref` of the container for an album with no artist."
   @spec unknown_artist_ref() :: String.t()
   def unknown_artist_ref, do: @unknown_artist_ref
 
@@ -95,9 +95,9 @@ defmodule MyHiFi.Jellyfin.Fill do
 
   defp write([], _kind), do: 0
 
-  # **The stamp goes on here, and not in `to_item/3`.** That function holds a clause
+  # **The stamp goes on here, and not in `to_item/3`.** That function has a clause
   # for a container and a clause for a track, and a stamp on one of them alone made
-  # each artist and each album look like a row that the server no longer holds. The
+  # each artist and each album look like a row that the server no longer has. The
   # read then removed them, and it took every track with them. One place cannot be
   # missed by a clause that a later version adds.
   defp write(entries, kind) do
@@ -154,7 +154,7 @@ defmodule MyHiFi.Jellyfin.Fill do
   defp ask_for_pictures(_entries, :track), do: :ok
 
   # One read for a whole page, and not one read for each row. A page of 200 tracks
-  # holds far fewer albums than that, so the read is small and the map that it gives
+  # has far fewer albums than that, so the read is small and the map that it builds
   # goes away with the page.
   defp parents(entries) do
     refs =
@@ -214,7 +214,7 @@ defmodule MyHiFi.Jellyfin.Fill do
 
   # **The stamp is not optional here.** `MyHiFi.Jellyfin.Sync.Library` removes each row
   # of this source that a whole read did not see, and `MyHiFi.Playback.Item` removes
-  # what a container holds when that container goes. A row of this one with no stamp
+  # what a container contains when that container goes. A row of this one with no stamp
   # would therefore take every album with no artist away with it.
   defp unknown_artist do
     Playback.upsert_item!(%{

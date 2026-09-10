@@ -2,7 +2,7 @@ defmodule MyHiFi.Radio.Sync do
   @moduledoc """
   The copy of the Radio Browser station list into the catalogue.
 
-  This resource holds no data. `MyHiFi.Playback.Item` holds the stations, and this is
+  This resource stores no data. `MyHiFi.Playback.Item` keeps the stations, and this is
   the place that the schedule and the control of the settings page name.
   `MyHiFi.Playback.Player` is a resource of the same shape. An API extension serves an
   action and not a function, and a policy guards an action and not a function, which is
@@ -35,7 +35,7 @@ defmodule MyHiFi.Radio.Sync do
       description """
       Read the station list of each chosen country, and write it into the catalogue.
 
-      It gives the number of stations that it wrote, the countries that failed, and
+      It returns the number of stations that it wrote, the countries that failed, and
       whether a person has taken the source out of use.
       """
 

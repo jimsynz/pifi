@@ -2,7 +2,7 @@ defmodule MyHiFi.Jellyfin.Sync do
   @moduledoc """
   The copy of a Jellyfin library into the catalogue.
 
-  This resource holds no data. `MyHiFi.Playback.Item` holds the artists, the albums
+  This resource stores no data. `MyHiFi.Playback.Item` keeps the artists, the albums
   and the tracks, and this is the place that the schedule and the control of the
   settings page name. `MyHiFi.Radio.Sync` is a resource of the same shape, and it
   says why each control is an action.
@@ -44,7 +44,7 @@ defmodule MyHiFi.Jellyfin.Sync do
       Read the artists, the albums and the tracks of the server, and write them into
       the catalogue.
 
-      It gives the number of each that it wrote, and whether it read nothing at all.
+      It returns the number of each that it wrote, and whether it read nothing at all.
       """
 
       run MyHiFi.Jellyfin.Sync.Library
@@ -54,7 +54,7 @@ defmodule MyHiFi.Jellyfin.Sync do
       description """
       Ask again for the audio of each marked item that the card does not hold.
 
-      It gives the number of items that it asked for. See
+      It returns the number of items that it asked for. See
       `MyHiFi.Jellyfin.Sync.Favourites`.
       """
 

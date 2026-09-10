@@ -6,7 +6,7 @@ defmodule MyHiFi.Radio do
   `MyHiFi.Radio.RadioBrowser` reads it, and `MyHiFi.Radio.Fill` writes each station
   into the catalogue of `MyHiFi.Playback`.
 
-  This domain holds no station of its own. Every playable thing of this firmware is a
+  This domain stores no station of its own. Every playable thing of this firmware is a
   `MyHiFi.Playback.Item`, so a user interface reads one resource and it needs no
   knowledge of any source.
   """

@@ -38,7 +38,7 @@ defmodule MyHiFi.Podcast.Fill do
   The `source_ref` of the item of one episode.
 
   A `<guid>` is unique inside its feed and not outside it, so the address of the feed
-  goes in front. A feed address holds no space, so a space parts the two.
+  goes in front. A feed address carries no space, so a space parts the two.
   """
   @spec episode_ref(String.t(), String.t()) :: String.t()
   def episode_ref(feed_url, guid), do: feed_url <> " " <> guid
@@ -58,7 +58,7 @@ defmodule MyHiFi.Podcast.Fill do
   # The index gives the categories of a show, and each one becomes a facet. The
   # Categories branch of the tree is then a plain read of the facets, and nothing asks
   # the index for a list: a person sees the categories of the shows that a device
-  # holds.
+  # gives.
   defp categorise(item, []), do: item
 
   defp categorise(item, names) do
@@ -81,7 +81,7 @@ defmodule MyHiFi.Podcast.Fill do
       description: attributes[:description],
       artwork_url: attributes[:artwork_url],
       # The index gives an order, and a list sorts on a column. A show that no list
-      # ranks holds 0.
+      # ranks gets 0.
       rank: attributes[:rank] || 0
     })
   end

@@ -9,9 +9,9 @@ defmodule MyHiFi.Podcast.Index do
 
   ## The key
 
-  The index asks each caller for a key and a secret, and it gives both at
-  <https://api.podcastindex.org/signup> for no money. Each device holds its own,
-  in `MyHiFi.Settings`, so no firmware image holds a secret and no two devices
+  The index asks each caller for a key and a secret, and it gives them at
+  <https://api.podcastindex.org/signup> for no money. Each device keeps its own,
+  in `MyHiFi.Settings`, so no firmware image carries a secret and no two devices
   share a rate limit. A device with no key gives `{:error, :no_api_key}`, and the
   browse page shows that as a message with the address of the signup page.
 
@@ -21,7 +21,7 @@ defmodule MyHiFi.Podcast.Index do
 
   ## The clock
 
-  `X-Auth-Date` holds a 3 minute window. A board with no battery starts in 1970,
+  `X-Auth-Date` allows a 3 minute window. A board with no battery starts in 1970,
   so a request before the first NTP synchronisation always fails. This asks
   `nerves_time` first and gives `{:error, :clock_not_synchronised}`, because a 401
   tells a person nothing about the cause.
@@ -55,14 +55,14 @@ defmodule MyHiFi.Podcast.Index do
   @type category :: %{id: integer(), name: String.t()}
 
   @doc """
-  The settings key that holds the key of the index.
+  The settings key of the key of the index.
 
-  The settings page writes it. This module names it, so no page holds the string.
+  The settings page writes it. This module names it, so no page repeats the string.
   """
   @spec key_setting() :: String.t()
   def key_setting, do: @key_setting
 
-  @doc "The settings key that holds the secret of the index."
+  @doc "The settings key of the secret of the index."
   @spec secret_setting() :: String.t()
   def secret_setting, do: @secret_setting
 
@@ -94,7 +94,7 @@ defmodule MyHiFi.Podcast.Index do
   A person who names a feed gets its title and its artwork before the device reads
   the feed.
 
-  It gives `{:error, :not_in_index}` for a feed that the index does not hold, and a
+  It returns `{:error, :not_in_index}` for a feed that the index does not hold, and a
   private feed is always one of those. `MyHiFi.Podcast.Feed` reads such a feed
   itself, so this error stops nothing.
   """
@@ -122,7 +122,7 @@ defmodule MyHiFi.Podcast.Index do
   @doc """
   The shows that are popular now.
 
-  `:category` names one category of `categories/0`, and it gives the popular shows
+  `:category` names one category of `categories/0`, and it returns the popular shows
   of that category alone. `:language` becomes `en`, because this firmware speaks
   one language today.
 
@@ -170,7 +170,7 @@ defmodule MyHiFi.Podcast.Index do
   `X-Auth-Date` carries.
 
   This is public because it is the one part of this module that the service
-  defines, and a test therefore holds a value that no Elixir code computed. The
+  defines, and a test therefore carries a value that no Elixir code computed. The
   key and the secret below are the example values of the documentation of the
   index.
 
@@ -185,9 +185,9 @@ defmodule MyHiFi.Podcast.Index do
   @doc """
   Turn one feed of the index into the attributes of `MyHiFi.Podcast.Show`.
 
-  It gives `nil` for a feed with no address and for one with no title, because
+  It returns `nil` for a feed with no address and for one with no title, because
   neither one can become a row. `artwork` comes before `image`, because the index
-  calls the first one the best picture that it holds.
+  calls the first one the best picture that it has.
   """
   @spec show(map() | nil) :: show() | nil
   def show(%{"url" => url, "title" => title} = feed) do
@@ -210,7 +210,7 @@ defmodule MyHiFi.Podcast.Index do
   def show(_feed), do: nil
 
   # The index gives the categories of a feed as a map of an identifier to a name, and
-  # it gives none for a feed that holds none. The name is what a person reads, and
+  # it returns none for a feed with none. The name is what a person reads, and
   # `MyHiFi.Podcast.Fill` writes each one as a facet.
   defp categories_of(%{"categories" => categories}) when is_map(categories) do
     categories
@@ -257,7 +257,7 @@ defmodule MyHiFi.Podcast.Index do
   defp answer({:ok, %{status: status}}), do: {:error, {:unexpected_status, status}}
   defp answer({:error, exception}), do: {:error, exception}
 
-  # The index holds a window of 3 minutes for this date, so it comes from the clock
+  # The index allows a window of 3 minutes for this date, so it comes from the clock
   # of the device at each request and no caller may give it.
   defp headers(key, secret) do
     date = Integer.to_string(System.os_time(:second))
@@ -271,8 +271,8 @@ defmodule MyHiFi.Podcast.Index do
   end
 
   # No check for a blank key belongs here. `MyHiFi.Settings.Setting` removes the
-  # space around a value and refuses one that then holds nothing, so a stored key
-  # always holds a character. A test covers that.
+  # space around a value and refuses one that is then empty, so a stored key
+  # always carries a character. A test covers that.
   defp credentials do
     with {:ok, %{value: key}} <- Settings.fetch(@key_setting),
          {:ok, %{value: secret}} <- Settings.fetch(@secret_setting) do
@@ -283,7 +283,7 @@ defmodule MyHiFi.Podcast.Index do
   end
 
   # `nerves_time` is a target dependency, so the host build must hold no reference
-  # to it. The host of a developer holds a clock that another program keeps right.
+  # to it. The host of a developer has a clock that another program keeps right.
   if Mix.target() == :host do
     defp check_clock, do: :ok
   else

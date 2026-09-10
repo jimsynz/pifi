@@ -4,17 +4,17 @@ defmodule MyHiFi.Jellyfin.Sync.Favourites do
 
   A mark asks for the audio at once, and a device that held no network at that
   moment reads nothing. `MyHiFi.AutoSync` runs this when the source is in use, the
-  device holds a link, and the network answers, so the audio arrives on the first
+  device has a link, and the network answers, so the audio arrives on the first
   moment that it can.
 
-  **The rule that decides what reads holds no source at all.**
+  **The rule that decides what reads names no source at all.**
   `MyHiFi.Playback.FavouriteAudio` reads `transport` and `keeps_place?` of an item,
   and this run only says which source to look at. A source that turned its server off
   therefore asks for nothing, and a source that no person uses asks for nothing, and
   neither answer needs a list of the sources anywhere.
 
   It puts one job in the queue for each item, and the job reads the tracks that the
-  item holds. A person who marked twenty albums therefore gets twenty jobs and not
+  item covers. A person who marked twenty albums therefore gets twenty jobs and not
   one that runs for an hour.
   """
 

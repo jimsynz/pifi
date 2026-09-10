@@ -3,13 +3,13 @@ defmodule MyHiFi.Podcast.Feed do
   Reads a podcast feed over HTTP.
 
   `Req` gives the answer in chunks, and each chunk goes to
-  `MyHiFi.Podcast.Feed.Parser`. Nothing holds the whole document, so a large feed
+  `MyHiFi.Podcast.Feed.Parser`. Nothing keeps the whole document, so a large feed
   needs little memory. Of the 50 most popular New Zealand podcasts the median feed
   is 1.6 MB and the largest is 13.6 MB.
 
-  It stops the download as soon as it holds enough episodes. A feed writes the
-  newest episode first, so the rest of the document holds older episodes only. The
-  largest feed of the measurement holds 2955 episodes, and 200 of them arrive in
+  It stops the download as soon as it has enough episodes. A feed writes the
+  newest episode first, so the rest of the document carries older episodes only. The
+  largest feed of the measurement has 2955 episodes, and 200 of them arrive in
   the first 900 KB.
 
   `Req` decompresses no body that streams into a function, and it therefore asks
@@ -38,7 +38,7 @@ defmodule MyHiFi.Podcast.Feed do
   - `{:unsupported_encoding, encoding}` for a compressed answer.
   - `:feed_too_large` for a feed above 32 MB. The largest of the measurement is
     13.6 MB.
-  - `:not_rss` for an Atom document, and for an answer that holds no feed.
+  - `:not_rss` for an Atom document, and for an answer with no feed.
   - A `Saxy.ParseError` for a document that stops in the middle, so a download that
     fails cannot give half of a feed.
   - Whatever `Req` gives for a network fault.
@@ -60,7 +60,7 @@ defmodule MyHiFi.Podcast.Feed do
   # production.
   #
   # `retry: false` is not a choice about how much a device should try. A retry runs
-  # the collector again, and the parser then holds the elements of the first try,
+  # the collector again, and the parser then keeps the elements of the first try,
   # so the second one gives a parse error. The refresh job is an Oban job with
   # `max_attempts`, and that is the layer that tries again.
   defp request(url, state) do
@@ -121,14 +121,14 @@ defmodule MyHiFi.Podcast.Feed do
   end
 
   # A `nil` parser means that this reader wants no more bytes, and `result` then
-  # holds the answer.
+  # carries the answer.
   defp stop(state, result), do: %{state | parser: nil, result: result}
 
   # An answer with no body runs the collector no time at all, so the private value
   # is absent and the status is the only thing to report.
   defp finish(%{status: 200} = response) do
     case Req.Response.get_private(response, :feed) do
-      # An answer with no bytes holds no feed, and that is a better reason than the
+      # An answer with no bytes carries no feed, and that is a better reason than the
       # place where an empty document stops.
       %{result: nil, bytes: 0} -> {:error, :not_rss}
       %{result: nil, parser: parser} -> Parser.finish(parser)

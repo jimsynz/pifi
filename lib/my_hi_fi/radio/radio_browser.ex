@@ -6,7 +6,7 @@ defmodule MyHiFi.Radio.RadioBrowser do
   itself, so each request carries a `User-Agent` header.
 
   The device copies one country at a time, because the whole list is large and a
-  person listens to the radio of one or two countries. The New Zealand list holds
+  person listens to the radio of one or two countries. The New Zealand list has
   242 stations, and it is 280 KB of JSON.
   """
 
@@ -17,7 +17,7 @@ defmodule MyHiFi.Radio.RadioBrowser do
   @doc """
   Ask the service for each station of one country.
 
-  The `country_code` holds two letters, such as `NZ`.
+  The `country_code` is two letters, such as `NZ`.
   """
   @spec stations_by_country(String.t()) :: {:ok, [map()]} | {:error, term()}
   def stations_by_country(country_code) do

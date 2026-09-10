@@ -24,7 +24,7 @@ defmodule MyHiFi.Radio.Sync.FromRemote do
   @default_countries "NZ"
 
   @doc """
-  The settings key that holds the country list.
+  The settings key of the country list.
   """
   @spec countries_key() :: String.t()
   def countries_key, do: @countries_key
@@ -56,7 +56,7 @@ defmodule MyHiFi.Radio.Sync.FromRemote do
       end)
 
     # A sync that drops the last station of a country leaves that country behind, and
-    # the browse tree must show no container that holds nothing.
+    # the browse tree must show no empty container.
     removed = Fill.tidy()
 
     Logger.info(
@@ -76,7 +76,7 @@ defmodule MyHiFi.Radio.Sync.FromRemote do
   @doc """
   Read the country list from the settings.
 
-  It gives the default when a person has chosen none.
+  It returns the default when a person has chosen none.
   """
   @spec configured_countries() :: [String.t()]
   def configured_countries do
@@ -103,7 +103,7 @@ defmodule MyHiFi.Radio.Sync.FromRemote do
     end
   end
 
-  # The service holds stations with no address and stations with no name. Neither can
+  # The service sends stations with no address and stations with no name. Neither can
   # play, and an item needs both.
   defp playable?(%{stream_url: url, title: title})
        when is_binary(url) and url != "" and is_binary(title) and title != "",

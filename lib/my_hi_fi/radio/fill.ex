@@ -211,7 +211,7 @@ defmodule MyHiFi.Radio.Fill do
     :ok
   end
 
-  @doc "Remove the facets that no item holds any more."
+  @doc "Remove the facets that no item links to any more."
   @spec tidy() :: non_neg_integer()
   def tidy do
     {:ok, removed} = Playback.destroy_orphan_facets()

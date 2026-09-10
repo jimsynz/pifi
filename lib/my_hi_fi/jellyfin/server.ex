@@ -4,7 +4,7 @@ defmodule MyHiFi.Jellyfin.Server do
 
   See <https://jellyfin.org>. A person runs the server themselves and names its
   address here, so this source reaches a machine of the household and no service on
-  the internet. `MyHiFi.Settings` holds the address, the token and the identifier of
+  the internet. `MyHiFi.Settings` keeps the address, the token and the identifier of
   the device, because a device has no environment to read a value from.
 
   ## The header that every request carries
@@ -65,10 +65,10 @@ defmodule MyHiFi.Jellyfin.Server do
   @client "PiFi"
   @version Mix.Project.config()[:version]
 
-  # **A page is the largest thing that a read of a library holds at one time.** The
+  # **A page is the largest thing that a read of a library keeps at one time.** The
   # answer, the entries that `parse/3` builds from it, and the attribute maps that
   # `MyHiFi.Jellyfin.Fill` builds from those all exist together, so this number decides
-  # the memory of the whole read, on a board that holds 363.9 MB.
+  # the memory of the whole read, on a board with 363.9 MB.
   #
   # **This costs time, and a measurement says how much.** The server decides the cost
   # of a page, and not the size of it. One page of 50 tracks on 2026-09-03:
@@ -85,16 +85,16 @@ defmodule MyHiFi.Jellyfin.Server do
   #     page 200   67,508 items in 2217 s   about 30 items each second
   #     page  50   67,508 items in ~88 min  about 15 items each second
   #
-  # **50 is the choice, and the time is what it costs.** The memory that one page holds
+  # **50 is the choice, and the time is what it costs.** The memory that one page takes
   # is what this board has least of. Anybody who reads this and wants the read to
-  # finish sooner should raise this number, and watch what one page holds while they do.
+  # finish sooner should raise this number, and watch what one page takes while they do.
   #
   # Watch the time against `rescue_after` of `Oban.Lifeline`, which is two hours. A read
   # of 88 minutes leaves 32 minutes, and a read that passes two hours is a read that the
   # rescue starts again beside the one that still runs.
   @page 50
 
-  # The height of the artwork that the cache holds. The device screen is 320 by 240,
+  # The height of the artwork that the cache keeps. The device screen is 320 by 240,
   # and the web interface draws a larger picture on a tablet.
   @artwork_height 600
 
@@ -125,41 +125,41 @@ defmodule MyHiFi.Jellyfin.Server do
   @typedoc """
   One page of a listing.
 
-  `total` is how many entries the whole listing holds, and `count` is how many the
+  `total` is how many entries the whole listing has, and `count` is how many the
   server sent in this answer. The two are separate from `entries`, because an item
   that cannot become a row is absent there and a caller must still move the same
   distance through the listing.
   """
   @type page :: %{entries: [entry()], count: non_neg_integer(), total: non_neg_integer()}
 
-  @doc "The settings key that holds the address of the server."
+  @doc "The settings key of the address of the server."
   @spec address_setting() :: String.t()
   def address_setting, do: @address_setting
 
-  @doc "The settings key that holds the code that a person types into their client."
+  @doc "The settings key of the code that a person types into their client."
   @spec code_setting() :: String.t()
   def code_setting, do: @code_setting
 
-  @doc "The settings key that holds the identifier of this device."
+  @doc "The settings key of the identifier of this device."
   @spec device_id_setting() :: String.t()
   def device_id_setting, do: @device_id_setting
 
-  @doc "The settings key that holds the secret of a link that is not finished."
+  @doc "The settings key of the secret of a link that is not finished."
   @spec secret_setting() :: String.t()
   def secret_setting, do: @secret_setting
 
-  @doc "The settings key that holds the access token."
+  @doc "The settings key of the access token."
   @spec token_setting() :: String.t()
   def token_setting, do: @token_setting
 
-  @doc "The settings key that holds the identifier of the user."
+  @doc "The settings key of the identifier of the user."
   @spec user_setting() :: String.t()
   def user_setting, do: @user_setting
 
   @doc """
   The address of the server, with no separator at the end.
 
-  It gives `{:error, :no_address}` for a device that holds none.
+  It returns `{:error, :no_address}` for a device with none.
   """
   @spec address() :: {:ok, String.t()} | {:error, :no_address}
   def address do
@@ -172,7 +172,7 @@ defmodule MyHiFi.Jellyfin.Server do
   @doc """
   Does this device hold a link to a server?
 
-  A link needs the address, the token and the user, and a device that holds one of
+  A link needs the address, the token and the user, and a device with one of
   the three can reach nothing. `MyHiFi.AutoSync` asks this before it reads a
   library.
   """
@@ -204,7 +204,7 @@ defmodule MyHiFi.Jellyfin.Server do
 
   It is the name that a person gave the device, so a household with two of them reads
   which is which. The session of the server does not move with it: `device_id/0` is
-  what a Jellyfin server holds a session against, and that one never changes. See
+  what a Jellyfin server keeps a session against, and that one never changes. See
   `MyHiFi.Device.Identity`.
   """
   @spec device_name() :: String.t()
@@ -214,7 +214,7 @@ defmodule MyHiFi.Jellyfin.Server do
   The `Authorization` header of one request.
 
   The token is absent for a request that needs none, such as the first step of Quick
-  Connect. A caller that holds the device identifier passes it as the second argument,
+  Connect. A caller that already read the device identifier passes it as the second argument,
   so a loop of many requests makes one read of the settings and not one for each.
 
       iex> header = authorization("SECRETTOKEN")
@@ -235,7 +235,7 @@ defmodule MyHiFi.Jellyfin.Server do
   Ask one address whether a Jellyfin server answers there.
 
   `put_settings/1` of the source calls this with what a person typed, so the address
-  is not the one that the settings hold. It gives the name of the server, which is
+  is not the one that the settings hold. It returns the name of the server, which is
   what tells a person that they typed the right thing.
   """
   @spec public_info(String.t()) ::
@@ -249,7 +249,7 @@ defmodule MyHiFi.Jellyfin.Server do
   @doc """
   Ask the server for a Quick Connect code.
 
-  It gives the code that a person types into their client, and the secret that
+  It returns the code that a person types into their client, and the secret that
   `quick_connect_state/1` and `authenticate_with_quick_connect/1` name.
 
   A server that turned Quick Connect off answers `{:error, :quick_connect_off}`.
@@ -271,7 +271,7 @@ defmodule MyHiFi.Jellyfin.Server do
   @doc """
   Has a person typed the code into their client yet?
 
-  It gives `{:ok, :authenticated}` when they have, and `{:ok, :waiting}` when they
+  It returns `{:ok, :authenticated}` when they have, and `{:ok, :waiting}` when they
   have not. A secret that the server does not hold any more gives
   `{:error, :unknown_secret}`, and a code that ran out of time is one of those.
   """
@@ -343,10 +343,10 @@ defmodule MyHiFi.Jellyfin.Server do
   Read one page of the artists, of the albums, or of the tracks of the library.
 
   `start` is the number of entries to step over, and `page_size/0` gives how many
-  each answer holds. The answer names how many the whole listing holds, so a caller
+  each answer carries. The answer says how many the whole listing has, so a caller
   reads pages until it has them all. See `MyHiFi.Jellyfin.Sync.Library`.
 
-  A caller that holds the link already passes it as the third argument, so a loop
+  A caller that read the link already passes it as the third argument, so a loop
   of many pages makes one read of the settings and not four for each one.
   """
   @spec page(:artists | :albums | :tracks, non_neg_integer(), map() | nil) ::
@@ -371,7 +371,7 @@ defmodule MyHiFi.Jellyfin.Server do
     end
   end
 
-  @doc "How many entries one page of `page/2` holds."
+  @doc "How many entries one page of `page/2` carries."
   @spec page_size() :: pos_integer()
   def page_size, do: @page
 
@@ -381,7 +381,7 @@ defmodule MyHiFi.Jellyfin.Server do
   It names the container that `format` asks for, so the server sends the file as it
   is when the two agree and converts it when they do not. See the moduledoc.
 
-  A caller that holds the link already passes it as the third argument, so a loop
+  A caller that read the link already passes it as the third argument, so a loop
   of many tracks makes one read of the settings and not four for each one.
   """
   @spec stream_url(String.t(), :aac | :flac | :mp3, map() | nil) ::
@@ -413,7 +413,7 @@ defmodule MyHiFi.Jellyfin.Server do
   @doc """
   Turn one artist of the server into the attributes of an item.
 
-  It gives `nil` for an entry with no identifier and for one with no name, because
+  It returns `nil` for an entry with no identifier and for one with no name, because
   neither one can become a row.
   """
   @spec artist(map(), String.t()) :: entry() | nil
@@ -423,7 +423,7 @@ defmodule MyHiFi.Jellyfin.Server do
   Turn one album of the server into the attributes of an item.
 
   `parent_ref` names the album artist. An album whose artist the server does not
-  name holds `nil` there, and `MyHiFi.Jellyfin.Fill` writes it under the artist that
+  name gives `nil` there, and `MyHiFi.Jellyfin.Fill` writes it under the artist that
   it keeps for those.
   """
   @spec album(map(), String.t()) :: entry() | nil
@@ -475,7 +475,7 @@ defmodule MyHiFi.Jellyfin.Server do
     end
   end
 
-  # An entry needs an identifier and a name, and an item of the server that holds
+  # An entry needs an identifier and a name, and an item of the server that gives
   # neither cannot become a row.
   defp base(item, address) when is_map(item) do
     with ref when is_binary(ref) <- presence(item["Id"]),
@@ -531,8 +531,8 @@ defmodule MyHiFi.Jellyfin.Server do
   many pages makes one read and not four for each one. See
   `MyHiFi.Jellyfin.Sync.Library`.
 
-  It gives `{:error, :no_address}` for a device that holds none, and
-  `{:error, :not_linked}` for one that holds no token or no user.
+  It returns `{:error, :no_address}` for a device with none, and
+  `{:error, :not_linked}` for one with no token or no user.
   """
   @spec link() ::
           {:ok,
@@ -590,7 +590,7 @@ defmodule MyHiFi.Jellyfin.Server do
   defp reader(:albums), do: &album/2
   defp reader(:tracks), do: &track/2
 
-  # An item with no picture of its own uses the picture of the container that holds
+  # An item with no picture of its own uses the picture of the container above
   # it, and the `artwork` calculation of `MyHiFi.Playback.Item` does that already.
   defp image(ref, %{"ImageTags" => %{"Primary" => _tag}}, address),
     do: "#{address}/Items/#{ref}/Images/Primary?maxHeight=#{@artwork_height}"
@@ -604,8 +604,8 @@ defmodule MyHiFi.Jellyfin.Server do
     end
   end
 
-  # **`Artists` holds the artist of the track, and `AlbumArtist` holds the artist of the
-  # record that holds it.** The two differ on a compilation, and the artist of the track
+  # **`Artists` names the artist of the track, and `AlbumArtist` names the artist of the
+  # record that carries it.** The two differ on a compilation, and the artist of the track
   # is the one that a person wants, so it comes first. A track of more than one artist
   # names them all, because a screen that named the first alone would tell a person that
   # the other artists are absent.
@@ -659,7 +659,7 @@ defmodule MyHiFi.Jellyfin.Server do
   defp release_year(_year), do: nil
 
   # **`DateCreated` is when the server first held the album, and it is not the release
-  # date.** `PremiereDate` is the release, and `MyHiFi.Playback.Item` holds that under
+  # date.** `PremiereDate` is the release, and `MyHiFi.Playback.Item` keeps that under
   # `published_at`. A person who wants the record that they added last week needs the
   # first one, and a record of 1979 that they added last week gives the two 47 years
   # apart.

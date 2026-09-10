@@ -6,11 +6,11 @@ defmodule MyHiFi.Podcast.Trending do
   index and the page reads the catalogue. This is the shape that every branch which
   reaches a service uses.
 
-  A show that the index names holds the facet `trending`. The list changes, so this
+  A show that the index names carries the facet `trending`. The list changes, so this
   removes the mark of a show that has left it and leaves the show itself: a person may
   have subscribed to it, and a search may name it again.
 
-  The index gives an order, and `rank` of the item holds it, because a list sorts on a
+  The index gives an order, and `rank` of the item carries it, because a list sorts on a
   column and no data layer sorts on a facet.
   """
 
@@ -35,7 +35,7 @@ defmodule MyHiFi.Podcast.Trending do
   @doc """
   Read the index, and mark the shows that it names.
 
-  It gives the number of shows that it marked.
+  It returns the number of shows that it marked.
   """
   @spec run(keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
   def run(options \\ []) do
@@ -52,7 +52,7 @@ defmodule MyHiFi.Podcast.Trending do
   end
 
   # The first show of the index comes first, and `rank` sorts a list in descending
-  # order, so the first one holds the largest number.
+  # order, so the first one gets the largest number.
   defp store({attributes, index}, count) do
     show = Podcast.upsert_show_from_index!(Map.take(attributes, [:feed_url, :index_id]))
     item = Fill.show(Map.put(attributes, :rank, count - index))

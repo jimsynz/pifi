@@ -21,10 +21,10 @@ defmodule MyHiFi.Podcast.CarryPlaces do
   against the schema of its own moment, and this module runs against the schema of
   today. See `MyHiFi.Radio.CarryFavourites`, which learnt the same lesson.
 
-  ## The file of an episode that a device already holds goes
+  ## The file of an episode that a device already read goes
 
   `MyHiFi.Player.Download` keys a file by the identifier of the episode, and an item
-  holds a new one. A part heard episode therefore arrives again over the network, and
+  gets a new one. A part heard episode therefore arrives again over the network, and
   the eviction of the cache reclaims the file that no row names. The place of the
   person lives through it, which is the part that matters.
   """
@@ -32,7 +32,7 @@ defmodule MyHiFi.Podcast.CarryPlaces do
   @doc """
   Write an item for each show and each episode that a person touched.
 
-  It gives the number of shows and the number of episodes that came across.
+  It returns the number of shows and the number of episodes that came across.
   """
   @spec run(module()) :: %{shows: non_neg_integer(), episodes: non_neg_integer()}
   def run(repo) do
@@ -89,7 +89,7 @@ defmodule MyHiFi.Podcast.CarryPlaces do
   end
 
   # An episode that a person part heard, or reached the end of. One that they never
-  # touched holds nothing worth keeping, and the feed writes it again.
+  # touched carries nothing worth keeping, and the feed writes it again.
   defp carry_episodes(repo, now) do
     %{rows: rows} =
       repo.query!(

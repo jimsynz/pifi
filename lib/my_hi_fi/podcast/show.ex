@@ -37,7 +37,7 @@ defmodule MyHiFi.Podcast.Show do
       # network, so the read happens here. `scheduler_cron false` means that nothing
       # looks for work: `AshOban.run_trigger/2` is the one way that this job arrives.
       #
-      # Two opens of one show ask twice, and `where` is what holds the reads to one.
+      # Two opens of one show ask twice, and `where` is what keeps the reads to one.
       # The job reads the show again, and a copy that the first job made new cancels
       # the second.
       trigger :refresh do
@@ -86,7 +86,7 @@ defmodule MyHiFi.Podcast.Show do
       # statement. A cache row of a record that is going is worth that.
       require_atomic? false
 
-      # The join of the cache holds no key to this record, because no column of the
+      # The join of the cache carries no key to this record, because no column of the
       # cache names a resource. This host therefore removes its own rows. It removes
       # no entry: one picture serves many records, and the eviction reclaims a file
       # that nothing names any more. See `MyHiFi.Cache.Attachment`.
@@ -98,8 +98,8 @@ defmodule MyHiFi.Podcast.Show do
       List the shows that a person subscribed to.
 
       The mark is on the item and not here, because a subscription is what a person did
-      and `MyHiFi.Playback.Item` holds all of that. This read joins to it, so one row
-      holds the answer.
+      and `MyHiFi.Playback.Item` keeps all of that. This read joins to it, so one row
+      carries the answer.
       """
 
       filter expr(item.favourite? == true)
@@ -142,13 +142,13 @@ defmodule MyHiFi.Podcast.Show do
     end
 
     update :set_item do
-      description "Name the item of the catalogue that holds this show."
+      description "Name the item of the catalogue for this show."
       accept [:item_id]
     end
 
     update :refresh do
       description """
-      Read the feed of this show and write what it holds.
+      Read the feed of this show and write what it gives.
 
       The action changes no attribute of its own. `MyHiFi.Podcast.Refresh` writes the
       show and the episodes through their own actions, so a trigger has one record to
@@ -164,8 +164,8 @@ defmodule MyHiFi.Podcast.Show do
       description """
       Read the popular shows of the Podcast Index, and mark them.
 
-      See `MyHiFi.Podcast.Trending`. It gives the number of shows that it marked, and 0
-      for a device that holds no key of the index.
+      See `MyHiFi.Podcast.Trending`. It returns the number of shows that it marked, and
+      0 for a device with no key of the index.
       """
 
       run fn _input, _context ->
@@ -235,14 +235,14 @@ defmodule MyHiFi.Podcast.Show do
       description """
       The container of the catalogue that a person browses.
 
-      A show holds the address of the feed and what a read of it gave. Everything that
+      A show carries the address of the feed and what a read of it gave. Everything that
       a person sees and does is on the item.
       """
 
       public? true
     end
 
-    # The cache holds no column that names this resource, so the filter is what makes
+    # The cache has no column that names this resource, so the filter is what makes
     # the join belong to a show. See `MyHiFi.Cache.Attachment`.
     has_many :cache_attachments, MyHiFi.Cache.Attachment do
       destination_attribute :record_id
@@ -261,7 +261,7 @@ defmodule MyHiFi.Podcast.Show do
 
   calculations do
     # `ago/2` gives no answer on AshSqlite. A filter on it matches no row, and a
-    # calculation of it gives `nil` for a row that holds a date. `datetime_add/3`
+    # calculation of it gives `nil` for a row that carries a date. `datetime_add/3`
     # gives the right answer in both.
     calculate :stale?,
               :boolean,

@@ -1,6 +1,6 @@
 defmodule MyHiFi.Podcast.Refresh do
   @moduledoc """
-  Reads the feed of one show and writes what it holds.
+  Reads the feed of one show and writes what it gives.
 
   Two callers need this, and they must not disagree. `MyHiFi.Source.Podcasts` reads
   a feed when a person opens a show whose local copy is old, and
@@ -29,7 +29,7 @@ defmodule MyHiFi.Podcast.Refresh do
   alias MyHiFi.Source
 
   # A person with a knob moves through a list, and no person moves through 2955
-  # episodes. One feed of the measurement holds that many. The database is on an SD
+  # episodes. One feed of the measurement has that many. The database is on an SD
   # card, so the rest go.
   @keep 200
 
@@ -40,14 +40,14 @@ defmodule MyHiFi.Podcast.Refresh do
   @doc """
   Read the feed of one show.
 
-  It gives the show as it now stands, whether the read succeeded or not, so a
+  It returns the show as it now stands, whether the read succeeded or not, so a
   caller can list the episodes either way.
   """
   @spec run(MyHiFi.Podcast.Show.t()) :: MyHiFi.Podcast.Show.t()
   def run(show) do
     case Feed.read(show.feed_url, max_items: @keep) do
       {:ok, %{show: attrs, episodes: episodes}} ->
-        # A show holds the address of the feed and what the read gave. The title, the
+        # A show carries the address of the feed and what the read gave. The title, the
         # description and the picture go to the item, so this takes what it owns.
         {:ok, show} = Podcast.upsert_show_from_feed(%{feed_url: show.feed_url})
         fill(show, attrs, episodes)
@@ -67,7 +67,7 @@ defmodule MyHiFi.Podcast.Refresh do
   A feed that drops an old episode leaves the item behind, and a publisher who writes
   one each day adds an item each day. Neither one should fill the card.
 
-  The place of a person goes with the episode. An episode that a feed no longer holds
+  The place of a person goes with the episode. An episode that a feed no longer names
   cannot play, so there is nothing to keep a place in.
   """
   @spec prune(MyHiFi.Playback.Item.t()) :: :ok
@@ -100,7 +100,7 @@ defmodule MyHiFi.Podcast.Refresh do
   # followed shows on a period, and a person who opens a show refreshes it as well.
   #
   # `MyHiFi.Playback.FavouriteAudio` decides how many episodes and which ones, and it
-  # reads nothing that the card already holds.
+  # reads nothing that the card already keeps.
   defp hold_audio(%{favourite?: true} = item), do: FavouriteAudio.ask(item)
 
   defp hold_audio(_item), do: :ok

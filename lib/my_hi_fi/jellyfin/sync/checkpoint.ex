@@ -7,18 +7,18 @@ defmodule MyHiFi.Jellyfin.Sync.Checkpoint do
   from it rather than asking the server for the whole library again. See
   `MyHiFi.Jellyfin.Sync.Library`.
 
-  ## What it holds, and why each part
+  ## What it carries, and why each part
 
   - `started_at` is the time that the **first** read of this pass began.
     `MyHiFi.Jellyfin.Sync.Library.remove_unseen/1` removes each row that the pass did
     not see, and it reads `last_seen_at` against this time. A read that continued with
     a new time would call every row of the part already read a row that the server no
-    longer holds, and it would remove the lot.
+    longer has, and it would remove the lot.
   - `kind` and `offset` say where to ask next.
 
   ## Why one setting and not a resource
 
-  It is one row of a key and a value, and `MyHiFi.Settings` already holds that shape.
+  It is one row of a key and a value, and `MyHiFi.Settings` already has that shape.
   A resource would bring a table, a migration and a snapshot for three fields that no
   page reads and no query joins.
 
@@ -62,7 +62,7 @@ defmodule MyHiFi.Jellyfin.Sync.Checkpoint do
   Note where the read has reached, for every tenth page.
 
   `offset` decides whether this writes at all, so a caller gives every page and this
-  holds the rate. A caller that decided for itself would hold the number in two places.
+  sets the rate. A caller that decided for itself would keep the number in two places.
 
   **It raises nothing.** A point that no write reached costs a read of the library
   again, and that is a smaller thing than a read that stops because it could not write
@@ -108,7 +108,7 @@ defmodule MyHiFi.Jellyfin.Sync.Checkpoint do
     end
   end
 
-  @doc "The name that `MyHiFi.Settings` holds this under."
+  @doc "The name that `MyHiFi.Settings` keeps this under."
   @spec key() :: String.t()
   def key, do: @key
 

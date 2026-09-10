@@ -20,7 +20,7 @@ defmodule MyHiFi.Podcast.Show.RefreshAll do
   a week. `updated_at` says when something last touched it, and a search that names
   the same show again moves that date.
 
-  SQLite holds the foreign key, so the episodes of a show go before the show.
+  SQLite enforces the foreign key, so the episodes of a show go before the show.
   """
 
   use Ash.Resource.Actions.Implementation
@@ -84,9 +84,9 @@ defmodule MyHiFi.Podcast.Show.RefreshAll do
   defp subscribed?(%{item: %{favourite?: true}}), do: true
   defp subscribed?(_show), do: false
 
-  # The item of the show holds its episodes, and SQLite removes a child with its
+  # The item of the show contains its episodes, and SQLite removes a child with its
   # parent, so one destroy takes the whole show away.
-  # The row of the show names the item, so the show goes first. SQLite holds that key,
+  # The row of the show names the item, so the show goes first. SQLite enforces that key,
   # and it refuses an item that a show still names.
   defp remove(show) do
     result = Podcast.destroy_show(show)

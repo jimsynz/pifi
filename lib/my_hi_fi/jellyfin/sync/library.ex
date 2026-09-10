@@ -2,13 +2,13 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   @moduledoc """
   Copies the library of a Jellyfin server into the catalogue.
 
-  `MyHiFi.AutoSync` runs this when the source is in use, the device holds a link,
+  `MyHiFi.AutoSync` runs this when the source is in use, the device has a link,
   and the network answers. A person can also press a control on the settings page.
 
   ## It reads a page at a time
 
-  A library holds tens of thousands of tracks, and this board holds 363.9 MB. The
-  read therefore asks for one page, writes it, and lets it go. Nothing here holds
+  A library has tens of thousands of tracks, and this board has 363.9 MB. The
+  read therefore asks for one page, writes it, and lets it go. Nothing here keeps
   the library, and the largest thing in memory is one page of 200 entries.
 
   The three kinds go in order, because an album names its artist and a track names
@@ -16,7 +16,7 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   catalogue, so the artists must be there before the albums arrive.
 
   A read that fails leaves the catalogue as it stands. A person still browses what
-  the device holds, and the next run reads the rest.
+  the device has read, and the next run reads the rest.
 
   ## A read that stops continues where it stopped
 
@@ -25,34 +25,34 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   `Oban.Lifeline` gives such a job back to the queue, and a read that began again from
   nothing would ask the server for the whole library a second time.
 
-  `MyHiFi.Jellyfin.Sync.Checkpoint` therefore holds the kind and the offset that the
+  `MyHiFi.Jellyfin.Sync.Checkpoint` therefore keeps the kind and the offset that the
   read has reached, and a read that finds one continues from it. See `start_point/0`
   for the two things that make this safe: the time of the first read carries over, and
   a point that is too old is left alone.
 
   ## What the read did not see, it removes
 
-  A server that no longer holds an album must not leave that album in the list for
+  A server that no longer has an album must not leave that album in the list for
   ever. Each row that a read writes carries `last_seen_at`, and a read that finishes
   removes every row of this source that is older than the moment it began.
 
   **It removes nothing unless all three reads worked.** That one rule is what makes
   this safe, and it is the only thing that does: a read that stops half way has seen
   no track, and a remover that ran then would empty the catalogue. The `with` below
-  therefore holds the removal, and a failure of any kind leaves every row where it is.
-  The same is true of a device that this source is out of use on, and of one that holds
+  therefore stops the removal, and a failure of any kind leaves every row where it is.
+  The same is true of a device that this source is out of use on, and of one that has
   no link: `run/3` answers before any of this.
 
   **An answer of nothing empties the catalogue, and that is the choice.** A fault that
   names itself removes nothing: no network gives an error, a token that stopped working
   gives 401, and a library that went gives 404, so the `with` never reaches the
-  removal. An answer of 200 that holds no item is not a fault, and a person who cannot
+  removal. An answer of 200 with no item is not a fault, and a person who cannot
   reach their library can play nothing of it, so the device follows the server. A
   Jellyfin that a person rebuilt answers that way while it reads its own files, and the
   next read writes the library again.
 
   **A mark does not hold a row back, and neither does a file on the card.** A person
-  who marked an album that their server no longer holds loses that mark, because the
+  who marked an album that their server no longer has loses that mark, because the
   catalogue follows the server. A track that goes gives up its audio as it goes,
   through the destroy of `MyHiFi.Playback.Item`, and the key of a download is the
   identifier of the row, so a later read writes a new row and reaches none of the old
@@ -111,7 +111,7 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
   # **The time of the read carries over, and it must.** `remove_unseen/1` removes each
   # row that this read did not see, and it reads `last_seen_at` against this time. A
   # read that continued with a new time would call every row that the read before the
-  # interruption wrote a row that the server no longer holds, and it would remove the
+  # interruption wrote a row that the server no longer has, and it would remove the
   # lot, with the marks of a person and the audio on the card.
   #
   # A point that is older than `@forget_after` gives a fresh read instead. The offset of
@@ -162,11 +162,11 @@ defmodule MyHiFi.Jellyfin.Sync.Library do
     end)
   end
 
-  # **`Ash.BulkResult` holds no count of the rows that went**, and `return_records?`
+  # **`Ash.BulkResult` carries no count of the rows that went**, and `return_records?`
   # would hold every one of them in memory for the sake of counting them. This reads
   # the number first, in the way that `MyHiFi.Cache.purge_all/1` says to.
   #
-  # A container takes what it holds with it, through the reference of
+  # A container takes what it contains with it, through the reference of
   # `MyHiFi.Playback.Item`, so the number is of the rows that this query named and not
   # always of the rows that went.
   #

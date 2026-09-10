@@ -25,7 +25,7 @@ defmodule MyHiFi.Radio.CarryFavourites do
   @doc """
   Write an item for each marked station, and give the number that came across.
 
-  It gives 0 when the device holds no `stations` table. A later release removes
+  It returns 0 when the device has no `stations` table. A later release removes
   that table, and a device that is built from nothing never had one, so this must not
   stop either of them.
   """
