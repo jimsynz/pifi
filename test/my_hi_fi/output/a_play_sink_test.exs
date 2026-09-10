@@ -81,6 +81,127 @@ defmodule MyHiFi.Output.APlaySinkTest do
     end
   end
 
+  # **A track that leaves a part of a frame in the port turns every sample after it
+  # into noise.** `aplay` reads frames of a fixed width and it holds no marker to find
+  # the start of one, so a stream that is one byte short shifts every sample that
+  # follows. The next track sounds as noise as well, because the program is the same
+  # one. See the moduledoc.
+  describe "the frames that reach the port" do
+    @format %Membrane.RawAudio{sample_format: :s24le, sample_rate: 44_100, channels: 2}
+
+    defp reader do
+      port = Port.open({:spawn, "cat"}, [:binary])
+      on_exit(fn -> if Port.info(port), do: Port.close(port) end)
+
+      port
+    end
+
+    defp written(port, count) do
+      receive do
+        {^port, {:data, bytes}} when byte_size(bytes) >= count -> bytes
+        {^port, {:data, bytes}} -> bytes <> written(port, count - byte_size(bytes))
+      after
+        2000 -> <<>>
+      end
+    end
+
+    test "a buffer of whole frames goes as it is" do
+      port = reader()
+      state = %State{device: "null", port: port, format: @format, sounded?: true}
+      buffer = %Membrane.Buffer{payload: <<1::size(12 * 8)>>}
+
+      assert {[], state} = APlaySink.handle_buffer(:input, buffer, nil, state)
+
+      assert state.part == <<>>
+      assert byte_size(written(port, 12)) == 12
+    end
+
+    # A frame of this stream is 6 bytes: 3 for each of the two channels.
+    test "a buffer that ends inside a frame keeps the rest for the next one" do
+      port = reader()
+      state = %State{device: "null", port: port, format: @format, sounded?: true}
+
+      assert {[], state} =
+               APlaySink.handle_buffer(
+                 :input,
+                 %Membrane.Buffer{payload: <<1::size(8 * 8)>>},
+                 nil,
+                 state
+               )
+
+      assert byte_size(state.part) == 2
+      assert byte_size(written(port, 6)) == 6
+
+      assert {[], state} =
+               APlaySink.handle_buffer(
+                 :input,
+                 %Membrane.Buffer{payload: <<2::size(4 * 8)>>},
+                 nil,
+                 state
+               )
+
+      assert state.part == <<>>
+      assert byte_size(written(port, 6)) == 6
+    end
+
+    # **This is the fault of #59.** A person pressed next in the middle of a track,
+    # the decoder was cut mid-frame, and every sample of the next track came a byte
+    # late for as long as the program ran.
+    test "the end of a track pads the part of a frame, so the count stays whole" do
+      port = reader()
+      state = %State{device: "null", port: port, format: @format, sounded?: true}
+
+      assert {[], state} =
+               APlaySink.handle_buffer(
+                 :input,
+                 %Membrane.Buffer{payload: <<1::size(8 * 8)>>},
+                 nil,
+                 state
+               )
+
+      assert byte_size(written(port, 6)) == 6
+
+      assert {[], state} = APlaySink.handle_end_of_stream(:input, nil, state)
+
+      assert state.part == <<>>
+      assert byte_size(written(port, 6)) == 6
+    end
+
+    test "the end of a track that lands on a frame pads nothing" do
+      port = reader()
+      state = %State{device: "null", port: port, format: @format, sounded?: true, part: <<>>}
+
+      assert {[], state} = APlaySink.handle_end_of_stream(:input, nil, state)
+
+      assert state.part == <<>>
+      assert written(port, 1) == <<>>
+    end
+
+    # A person who stopped hears nothing more, and the next track starts a program of
+    # its own in any case.
+    test "a stop drops the part of a frame" do
+      {:ok, port} = APlayPort.hold("cat", [])
+      on_exit(fn -> APlayPort.close() end)
+      state = %State{device: "null", port: port, format: @format, part: <<1, 2>>}
+
+      assert {[], state} = APlaySink.handle_parent_notification(:silence, nil, state)
+
+      assert state.part == <<>>
+    end
+
+    # A buffer of less than one frame makes no sound, so it says that none started.
+    test "a buffer that holds no whole frame says that nothing sounded" do
+      port = reader()
+      state = %State{device: "null", port: port, format: @format, sounded?: false}
+      buffer = %Membrane.Buffer{payload: <<1, 2, 3>>}
+
+      assert {[], state} = APlaySink.handle_buffer(:input, buffer, nil, state)
+
+      refute state.sounded?
+      assert byte_size(state.part) == 3
+    end
+  end
+
   describe "the silence that a stop asks for" do
     test "it ends the program, so the room is quiet at once" do
       # The holder owns the port, so the silence reaches the program through it.

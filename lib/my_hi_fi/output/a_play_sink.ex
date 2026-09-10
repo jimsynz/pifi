@@ -30,6 +30,30 @@ defmodule MyHiFi.Output.APlaySink do
 
   A process that does not own a port may write to it, and the busy limits of that
   process still suspend whoever writes, so the pacing above is unchanged.
+
+  ## It writes whole frames, and that is what keeps the next track clean
+
+  **A track that leaves a part of a frame in the port turns every sample after it into
+  noise.** `aplay` reads a stream of frames of a fixed width, and it holds no marker to
+  find the start of one: a stream that is one byte short of a frame shifts every sample
+  that follows by a byte. The card plays that as white noise, and it plays the next
+  track as white noise as well, because the program is the same one and nothing brings
+  it back into step. A person who stops and starts again hears music, because a stop
+  ends the program.
+
+  A whole track ends on a frame, and three things cut one short:
+
+  - A person presses next, and the pipeline of the track that they left is terminated
+    in the middle of a buffer.
+  - `MyHiFi.Player.PortDecoder` closes the port of `flac` a quarter of a second after
+    its last answer, and that ends the program and takes the bytes that it had not
+    written yet.
+  - A file that a download left short ends where the bytes end.
+
+  This element therefore writes whole frames and holds the rest for the next buffer.
+  The end of a stream pads what is left with silence, so the count that reaches the
+  port is always a whole number of frames. The pad is at most one frame, which is 23
+  microseconds of a 44100 Hz stream.
   """
 
   use Membrane.Sink
@@ -62,10 +86,16 @@ defmodule MyHiFi.Output.APlaySink do
             port: port() | nil,
             format: RawAudio.t() | nil,
             sounded?: boolean(),
-            silent?: boolean()
+            silent?: boolean(),
+            part: binary()
           }
 
-    defstruct device: "default", port: nil, format: nil, sounded?: false, silent?: false
+    defstruct device: "default",
+              port: nil,
+              format: nil,
+              sounded?: false,
+              silent?: false,
+              part: <<>>
   end
 
   @impl true
@@ -106,18 +136,11 @@ defmodule MyHiFi.Output.APlaySink do
   # that never arrives, a playlist with no segment, and a decoder that gives
   # nothing all look the same from further up the pipeline.
   @impl true
-  def handle_buffer(:input, buffer, _ctx, %State{port: port, sounded?: false} = state)
-      when is_port(port) do
-    case write(port, buffer.payload) do
-      :ok -> {[notify_parent: :playing], %State{state | sounded?: true}}
-      :closed -> stopped(state)
-    end
-  end
-
-  @impl true
   def handle_buffer(:input, buffer, _ctx, %State{port: port} = state) when is_port(port) do
-    case write(port, buffer.payload) do
-      :ok -> {[], state}
+    {whole, part} = frames(state.part <> buffer.payload, state.format)
+
+    case write(port, whole) do
+      :ok -> sounded(%State{state | part: part}, whole)
       :closed -> stopped(state)
     end
   end
@@ -134,8 +157,16 @@ defmodule MyHiFi.Output.APlaySink do
   # `MyHiFi.Output.APlayPort` keeps the card open, so that half second plays and the
   # pipeline of the next track writes to the same port. This element only stops writing.
   @impl true
+  def handle_end_of_stream(:input, _ctx, %State{port: port, part: part} = state)
+      when is_port(port) and part != <<>> do
+    _result = write(port, pad(part, state.format))
+
+    {[], %State{state | port: nil, part: <<>>}}
+  end
+
+  @impl true
   def handle_end_of_stream(:input, _ctx, %State{} = state) do
-    {[], %State{state | port: nil}}
+    {[], %State{state | port: nil, part: <<>>}}
   end
 
   @doc """
@@ -154,7 +185,7 @@ defmodule MyHiFi.Output.APlaySink do
   def handle_parent_notification(:silence, _ctx, %State{} = state) do
     APlayPort.close()
 
-    {[], %State{state | port: nil, format: nil, silent?: true}}
+    {[], %State{state | port: nil, format: nil, silent?: true, part: <<>>}}
   end
 
   @impl true
@@ -192,6 +223,42 @@ defmodule MyHiFi.Output.APlaySink do
       "--quiet",
       "-"
     ]
+  end
+
+  # The first write says that sound started, and a write of no bytes says nothing: a
+  # buffer that holds less than one frame has made no sound yet.
+  defp sounded(%State{sounded?: false} = state, whole) when whole != <<>> do
+    {[notify_parent: :playing], %State{state | sounded?: true}}
+  end
+
+  defp sounded(state, _whole), do: {[], state}
+
+  # **`aplay` reads frames, and this gives it whole ones.** A frame is one sample of
+  # each channel, so a stream of 24 bits and two channels holds 6 bytes in each one.
+  #
+  # A format of `nil` cannot happen for a port that is open, because
+  # `handle_stream_format/4` is what opens one, and this answers for it in any case:
+  # the bytes go as they are.
+  defp frames(bytes, nil), do: {bytes, <<>>}
+
+  defp frames(bytes, format) do
+    size = RawAudio.frame_size(format)
+    whole = byte_size(bytes) - rem(byte_size(bytes), size)
+
+    <<frames::binary-size(^whole), part::binary>> = bytes
+
+    {frames, part}
+  end
+
+  # **Silence, and not the bytes of the next track.** A part of a frame reaches the
+  # port as a whole one, so the stream stays in step, and 0 is silence for every
+  # signed format that a decoder of this firmware gives.
+  defp pad(part, nil), do: part
+
+  defp pad(part, format) do
+    missing = RawAudio.frame_size(format) - byte_size(part)
+
+    part <> <<0::size(missing * 8)>>
   end
 
   # A test names another program with `:aplay_command`. Nothing sets it in production,
