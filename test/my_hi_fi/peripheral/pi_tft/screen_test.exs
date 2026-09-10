@@ -213,6 +213,95 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
     defp shade(_pixel), do: :other
   end
 
+  # **The menu takes the whole screen**, because a list needs the rows. The event
+  # carries the whole level and this screen draws the rows that fit.
+  describe "the menu" do
+    defp menu_view(rows, index) do
+      %{
+        Screen.new()
+        | menu: %{
+            title: "Playlists",
+            rows: Enum.map(rows, &%{title: &1, subtitle: nil, kind: :open}),
+            index: index,
+            depth: 1
+          }
+      }
+    end
+
+    defp menu_pixels(view) do
+      {width, height} = Screen.size()
+
+      view
+      |> Screen.render()
+      |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+    end
+
+    test "it draws a level at the size of the screen" do
+      {width, height} = Screen.size()
+
+      assert byte_size(menu_pixels(menu_view(["Alpha", "Bravo"], 0))) == width * height * 4
+    end
+
+    # A person reads this screen across a room, so the row that they are on draws a
+    # band and not a colour of the text alone.
+    test "the row that a person is on draws a band" do
+      first = menu_pixels(menu_view(["Alpha", "Bravo"], 0))
+      second = menu_pixels(menu_view(["Alpha", "Bravo"], 1))
+
+      refute first == second
+    end
+
+    # **The window holds still while it can.** A list that scrolled on every press would
+    # move under a person who is reading it.
+    test "a level of more rows than fit draws a window of them" do
+      rows = Enum.map(1..40, &"Row #{&1}")
+
+      {width, height} = Screen.size()
+
+      for index <- [0, 5, 20, 39] do
+        assert byte_size(menu_pixels(menu_view(rows, index))) == width * height * 4
+      end
+
+      refute menu_pixels(menu_view(rows, 0)) == menu_pixels(menu_view(rows, 39))
+    end
+
+    test "a level of no rows still draws" do
+      {width, height} = Screen.size()
+
+      assert byte_size(menu_pixels(menu_view([], 0))) == width * height * 4
+    end
+
+    # A row that leads somewhere, a row that plays and a row that acts on the device
+    # each draw their own mark.
+    test "each kind of row draws" do
+      view = %{
+        Screen.new()
+        | menu: %{
+            title: "Menu",
+            rows: [
+              %{title: "Now playing", subtitle: nil, kind: :do},
+              %{title: "Internet radio", subtitle: nil, kind: :open},
+              %{title: "Alpha", subtitle: "MP3, 128 kbps", kind: :play}
+            ],
+            index: 1,
+            depth: 0
+          }
+      }
+
+      {width, height} = Screen.size()
+
+      assert byte_size(menu_pixels(view)) == width * height * 4
+    end
+
+    # A title that is longer than the screen must not push the mark off the row.
+    test "a title that is far longer than the screen still draws" do
+      {width, height} = Screen.size()
+      long = String.duplicate("A long name. ", 40)
+
+      assert byte_size(menu_pixels(menu_view([long], 0))) == width * height * 4
+    end
+  end
+
   describe "render/1" do
     test "draws every state at the size of the screen" do
       {width, height} = Screen.size()

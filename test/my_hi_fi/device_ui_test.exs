@@ -4,12 +4,17 @@ defmodule MyHiFi.DeviceUiTest do
 
   import ExUnit.CaptureLog
 
+  alias MyHiFi.DeviceUi
   alias MyHiFi.Event
+  alias MyHiFi.Event.Hint
   alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player
+  alias MyHiFi.Event.View
   alias MyHiFi.Output.Volume
+  alias MyHiFi.Peripheral.PirateAudio
   alias MyHiFi.Peripheral.PiTft
   alias MyHiFi.Playback
+  alias MyHiFi.Test.Stations
   alias MyHiFi.Test.TwoCardOutput
 
   setup do
@@ -33,6 +38,8 @@ defmodule MyHiFi.DeviceUiTest do
       0 -> :ok
     end
   end
+
+  defp station(title), do: Stations.create(%{country_code: "NZ", title: title})
 
   defp press(button, peripheral \\ PiTft, hold \\ :short) do
     Event.publish(:input, %Input.ButtonPressed{
@@ -78,6 +85,149 @@ defmodule MyHiFi.DeviceUiTest do
 
       assert Process.alive?(Process.whereis(MyHiFi.DeviceUi))
       refute_receive %Player.Standby{}, 200
+    end
+  end
+
+  # **The menu is the click wheel of the device.** `MyHiFi.DeviceUi` owns where a person
+  # is, and `MyHiFi.DeviceUi.Menu` owns the tree. A screen reads the events.
+  describe "the menu" do
+    # A press on a track plays it, and the player is one process for the whole
+    # firmware, so this leaves it as it found it.
+    setup do
+      MyHiFi.Player.stop()
+      Playback.clear_queue!()
+      :ok = Event.subscribe(:view)
+      :ok = Event.subscribe(:hint)
+
+      on_exit(fn ->
+        MyHiFi.Player.stop()
+        Playback.clear_queue!()
+      end)
+
+      %{}
+    end
+
+    test "a hold of the play button opens it at the root" do
+      press(3, PiTft, :long)
+
+      assert_receive %View.MenuShown{title: "Menu", index: 0, depth: 0} = shown, 5000
+      assert %{title: "Now playing"} = hd(shown.rows)
+      assert_receive %Hint.Detents{count: count, index: 0}, 5000
+      assert count == length(shown.rows)
+
+      assert DeviceUi.places() == [:root]
+    end
+
+    test "the buttons move through the level, and the ends are stops" do
+      press(3, PiTft, :long)
+      assert_receive %View.MenuShown{index: 0}, 5000
+
+      press(4)
+      assert_receive %View.MenuShown{index: 1}, 5000
+
+      press(2)
+      assert_receive %View.MenuShown{index: 0}, 5000
+
+      # The list does not go round: a knob with detents reads the count of the level.
+      press(2)
+      assert_receive %View.MenuShown{index: 0}, 5000
+    end
+
+    test "a press opens the row, and a back leaves it" do
+      press(3, PiTft, :long)
+      assert_receive %View.MenuShown{}, 5000
+
+      press(4)
+      assert_receive %View.MenuShown{index: 1}, 5000
+
+      press(3)
+      assert_receive %View.MenuShown{depth: 1}, 5000
+      assert [_root, _source] = DeviceUi.places()
+
+      press(1)
+      assert_receive %View.MenuShown{depth: 0, index: 1}, 5000
+      assert DeviceUi.places() == [:root]
+    end
+
+    test "a back at the root closes the menu" do
+      press(3, PiTft, :long)
+      assert_receive %View.MenuShown{}, 5000
+
+      press(1)
+      assert_receive %View.MenuClosed{}, 5000
+      assert_receive %Hint.Detents{count: 0}, 5000
+      assert DeviceUi.places() == []
+    end
+
+    # The way out is the first row, so a person who opened the menu by mistake presses
+    # the button that they are already on.
+    test "the first row closes the menu" do
+      press(3, PiTft, :long)
+      assert_receive %View.MenuShown{index: 0}, 5000
+
+      press(3)
+      assert_receive %View.MenuClosed{}, 5000
+      assert DeviceUi.places() == []
+    end
+
+    test "the standby row acts on the device, and the menu goes" do
+      press(3, PiTft, :long)
+      assert_receive %View.MenuShown{rows: rows}, 5000
+
+      Enum.each(1..(length(rows) - 1), fn _step -> press(4) end)
+      press(3)
+
+      assert_receive %Player.Standby{entered?: true}, 5000
+      assert_receive %View.MenuClosed{}, 5000
+    end
+
+    # **A press that plays leaves the menu**, because a person who chose a track wants
+    # to read what plays.
+    test "a track plays, and the menu goes" do
+      station("Alpha")
+
+      press(3, PiTft, :long)
+      assert_receive %View.MenuShown{rows: rows}, 5000
+
+      radio = Enum.find_index(rows, &(&1.title == "Internet radio"))
+      Enum.each(1..radio, fn _step -> press(4) end)
+      press(3)
+      assert_receive %View.MenuShown{title: "Internet radio"}, 5000
+
+      # Favourites is the first branch of internet radio, and Countries is the second.
+      press(4)
+      press(3)
+      assert_receive %View.MenuShown{title: "Countries"}, 5000
+
+      press(3)
+      assert_receive %View.MenuShown{title: "NZ", rows: [%{title: "Alpha"}]}, 5000
+
+      press(3)
+      assert_receive %View.MenuClosed{}, 5000
+      assert DeviceUi.places() == []
+      assert Playback.queue!() |> length() == 1
+    end
+
+    # The transport takes the row of four while the menu is closed, and the menu takes
+    # it while the menu is open.
+    test "the transport is quiet while the menu is open" do
+      press(3, PiTft, :long)
+      assert_receive %View.MenuShown{}, 5000
+      flush()
+
+      press(1)
+      assert_receive %View.MenuClosed{}, 5000
+      refute_receive %Player.Standby{}, 200
+    end
+
+    # A board of two buttons carries three controls of the transport already, and a tree
+    # needs four.
+    test "a board of two buttons reads no menu" do
+      press(1, PirateAudio, :long)
+
+      assert_receive %Player.Standby{entered?: true}, 5000
+      refute_receive %View.MenuShown{}, 200
+      assert DeviceUi.places() == []
     end
   end
 

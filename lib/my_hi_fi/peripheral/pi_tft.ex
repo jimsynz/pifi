@@ -66,6 +66,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player
+  alias MyHiFi.Event.View, as: ViewEvents
   alias MyHiFi.Peripheral.Battery
   alias MyHiFi.Peripheral.Buttons
   alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen, Stmpe610}
@@ -154,9 +155,13 @@ defmodule MyHiFi.Peripheral.PiTft do
 
   It also carries `MyHiFi.Event.Device.IdentityChanged`, so a person who names the
   device on the web page reads that name on the screen at once.
+
+  The `:view` topic carries the menu. `MyHiFi.DeviceUi` owns where a person is and
+  sends the whole level, and this screen draws the rows that fit. See
+  `MyHiFi.Event.View.MenuShown`.
   """
   @impl MyHiFi.Peripheral
-  def subscriptions, do: [:player, :device]
+  def subscriptions, do: [:player, :device, :view]
 
   @doc false
   @impl MyHiFi.Peripheral
@@ -259,6 +264,15 @@ defmodule MyHiFi.Peripheral.PiTft do
         duration_ms: duration(event.track)
     }
   end
+
+  # **The menu takes the screen, and the events of the player carry on behind it.** A
+  # track that ends while a person reads a list writes the title of the next one, and
+  # the person reads it as soon as they leave the menu.
+  defp view(%ViewEvents.MenuShown{} = event, view) do
+    %{view | menu: Map.take(event, [:title, :rows, :index, :depth])}
+  end
+
+  defp view(%ViewEvents.MenuClosed{}, view), do: %{view | menu: nil}
 
   defp view(%Player.Progress{} = event, view) do
     %{view | position_ms: event.position_ms, duration_ms: event.duration_ms}

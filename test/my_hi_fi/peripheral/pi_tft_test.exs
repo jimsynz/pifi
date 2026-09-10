@@ -6,6 +6,7 @@ defmodule MyHiFi.Peripheral.PiTftTest do
   alias MyHiFi.Device.Identity
   alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Player
+  alias MyHiFi.Event.View, as: ViewEvents
   alias MyHiFi.Peripheral.PiTft
   alias MyHiFi.Test.RecordingScreen
   alias Nerves.Runtime.KV
@@ -83,8 +84,51 @@ defmodule MyHiFi.Peripheral.PiTftTest do
     assert Path.basename(state.view.splash_path) == "pifi-320x240.png"
   end
 
-  test "it reads the player topic and the device topic" do
-    assert PiTft.subscriptions() == [:player, :device]
+  test "it reads the player topic, the device topic and the view topic" do
+    assert PiTft.subscriptions() == [:player, :device, :view]
+  end
+
+  # `MyHiFi.DeviceUi` owns where a person is and sends the whole level. This screen
+  # keeps it and draws the rows that fit.
+  describe "the menu" do
+    test "a level reaches the view, and a close takes it away", %{state: state} do
+      shown = %ViewEvents.MenuShown{
+        title: "Playlists",
+        rows: [%{title: "Friday", subtitle: "2 tracks", kind: :open}],
+        index: 0,
+        depth: 1
+      }
+
+      {:ok, state} = PiTft.handle_event(shown, state)
+
+      assert state.view.menu.title == "Playlists"
+      assert state.view.menu.index == 0
+      assert frames() == 1
+
+      {:ok, state} = PiTft.handle_event(%ViewEvents.MenuClosed{}, state)
+
+      assert state.view.menu == nil
+    end
+
+    # A track that ends while a person reads a list writes the title of the next one,
+    # and the person reads it as soon as they leave the menu.
+    test "the events of the player carry on behind the menu", %{state: state} do
+      {:ok, state} = PiTft.handle_event(%ViewEvents.MenuShown{title: "Menu"}, state)
+
+      {:ok, state} = PiTft.handle_event(started(), state)
+
+      assert state.view.title == "The Detail"
+      assert state.view.menu.title == "Menu"
+    end
+
+    # A stop clears the track, and a person who is reading a list must stay in it.
+    test "a stop keeps the menu", %{state: state} do
+      {:ok, state} = PiTft.handle_event(%ViewEvents.MenuShown{title: "Menu"}, state)
+
+      {:ok, state} = PiTft.handle_event(%Player.Stopped{reason: :requested}, state)
+
+      assert state.view.menu.title == "Menu"
+    end
   end
 
   describe "handle_event/2" do

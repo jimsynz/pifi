@@ -23,6 +23,11 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
   @width 320
   @height 240
 
+  # **How many rows of a level this panel draws.** A row is 19 pixels of text in a band
+  # of 5 above and below, and the head takes 21 of the 240. Six rows leave the list
+  # reading as a list and each line reading from a chair.
+  @menu_rows 6
+
   @typedoc """
   What the screen draws.
 
@@ -59,7 +64,23 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
           position_ms: non_neg_integer(),
           duration_ms: pos_integer() | nil,
           network: Network.connection() | nil,
-          volume_percent: 0..100 | nil
+          volume_percent: 0..100 | nil,
+          menu: menu() | nil
+        }
+
+  @typedoc """
+  The level of the menu that a person is on, or `nil` for a screen that draws what
+  plays.
+
+  It is `MyHiFi.Event.View.MenuShown` as this screen keeps it. **The event carries the
+  whole level, and this screen draws the rows that fit**, because the number that fits
+  is a fact about this panel and about no other one.
+  """
+  @type menu :: %{
+          title: String.t(),
+          rows: [MyHiFi.Event.View.MenuShown.row()],
+          index: non_neg_integer(),
+          depth: non_neg_integer()
         }
 
   @doc "The size that this screen draws at."
@@ -85,7 +106,8 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       position_ms: 0,
       duration_ms: nil,
       network: nil,
-      volume_percent: nil
+      volume_percent: nil,
+      menu: nil
     }
   end
 
@@ -104,12 +126,15 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
         device_name: view.device_name,
         splash_path: view.splash_path,
         network: view.network,
-        volume_percent: view.volume_percent
+        volume_percent: view.volume_percent,
+        menu: view.menu
     }
   end
 
   @doc "Draw one view."
   @spec render(view()) :: Emerge.tree()
+  def render(%{menu: %{} = menu} = view), do: menu(view, menu)
+
   def render(%{state: :stopped, splash_path: path} = view) when is_binary(path), do: splash(view)
 
   def render(view) do
@@ -124,6 +149,102 @@ defmodule MyHiFi.Peripheral.PiTft.Screen do
       [status_row(view), body(view), progress(view)]
     )
   end
+
+  # **The menu takes the whole screen, because a list needs the rows.** A person in a
+  # list is choosing, and the track that plays is one press away.
+  #
+  # The head names the level, so a person who moved three levels down reads where they
+  # are. The battery and the network sit beside it, because the hardware says the same
+  # thing wherever a person is.
+  defp menu(view, menu) do
+    column(
+      [
+        width(px(@width)),
+        height(px(@height)),
+        padding(12),
+        spacing(8),
+        Background.color(color(:slate, 950))
+      ],
+      [menu_head(view, menu), menu_rows(menu)]
+    )
+  end
+
+  defp menu_head(view, menu) do
+    Row.ends(
+      [
+        el(
+          [Font.size(13), Font.color(color(:slate, 500))],
+          text(String.upcase(menu.title))
+        )
+      ],
+      [network(view), battery(view)],
+      spacing: 8
+    )
+  end
+
+  # **The window moves with the row that a person is on, and it holds still while it
+  # can.** A list that scrolled on every press would move under a person who is reading
+  # it, so the row stays where it is until it reaches the last line of the window.
+  defp menu_rows(menu) do
+    rows = Enum.slice(menu.rows, start_of(menu), @menu_rows)
+
+    column(
+      [width(fill()), height(fill()), spacing(2)],
+      Enum.map(Enum.with_index(rows, start_of(menu)), fn {row, index} ->
+        menu_row(row, index == menu.index)
+      end)
+    )
+  end
+
+  defp start_of(%{rows: rows, index: index}) do
+    last = Kernel.max(length(rows) - @menu_rows, 0)
+
+    index |> Kernel.-(@menu_rows - 2) |> Kernel.max(0) |> Kernel.min(last)
+  end
+
+  # The row that a person is on draws a band, because a colour of the text alone is not
+  # enough for a person who reads this screen across a room.
+  defp menu_row(row, on?) do
+    Row.ends(
+      [
+        el(
+          [
+            Font.size(19),
+            Font.color(if(on?, do: color(:slate, 950), else: color(:slate, 50)))
+          ],
+          text(row.title)
+        )
+      ],
+      [menu_mark(row.kind, on?)],
+      spacing: 8
+    )
+    |> then(fn line ->
+      el(
+        [
+          width(fill()),
+          padding_xy(8, 5),
+          Border.rounded(6),
+          Background.color(if(on?, do: color(:amber, 400), else: color_rgba(0, 0, 0, 0)))
+        ],
+        line
+      )
+    end)
+  end
+
+  # A row that leads somewhere draws a chevron, a row that plays draws a triangle, and a
+  # row that acts on the device draws nothing: the word is the whole of it.
+  defp menu_mark(:open, on?) do
+    el([Font.size(15), Font.color(mark_colour(on?))], text(">"))
+  end
+
+  defp menu_mark(:play, on?) do
+    el([Font.size(15), Font.color(mark_colour(on?))], text("\u25B6"))
+  end
+
+  defp menu_mark(_kind, _on?), do: none()
+
+  defp mark_colour(true), do: color(:slate, 950)
+  defp mark_colour(false), do: color(:slate, 500)
 
   @doc """
   What a person reads at the top of the screen.
