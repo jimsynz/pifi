@@ -46,6 +46,7 @@ defmodule MyHiFiWeb.QueueLive do
 
   alias MyHiFi.Artwork
   alias MyHiFi.Event
+  alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
 
   import MyHiFiWeb.ItemList, only: [cover: 1]
@@ -59,11 +60,19 @@ defmodule MyHiFiWeb.QueueLive do
     {:ok, socket}
   end
 
-  # Any player event can move the playing mark, and a track that ends moves it with
-  # nobody pressing anything. A queue holds few rows, so reading them all is cheaper
-  # than working out which events matter.
+  # **These three move the playing mark, and no other event does.** A track that ends
+  # moves it with no person pressing anything, so the page must hear them.
+  #
+  # `Progress`, `Buffering` and `MetadataChanged` arrive while a track plays, and
+  # `load/1` reads every item of the queue in one query. A page that read them all
+  # made that query once a second, for a queue of 34 rows, for as long as a person
+  # left the page open. `MyHiFi.AutoStandby` and `MyHiFi.Peripheral` hold the same
+  # rule for the same reason.
   @impl Phoenix.LiveView
-  def handle_info(%_{} = _event, socket), do: {:noreply, load(socket)}
+  def handle_info(%Events.Started{}, socket), do: {:noreply, load(socket)}
+  def handle_info(%Events.Stopped{}, socket), do: {:noreply, load(socket)}
+  def handle_info(%Events.Failed{}, socket), do: {:noreply, load(socket)}
+  def handle_info(%_{}, socket), do: {:noreply, socket}
 
   @impl Phoenix.LiveView
   def handle_event("play", %{"id" => id}, socket) do

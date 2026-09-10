@@ -156,6 +156,20 @@ defmodule MyHiFiWeb.QueueLiveTest do
 
       assert titles_on(view) == ["Bravo", "Charlie"]
     end
+
+    # **An event that moves no mark costs one query for every row of the queue.**
+    # `Progress` arrives once a second while a track plays, and a page that read the
+    # queue again for it made that query for as long as a person left the page open.
+    test "an event that moves nothing draws nothing again", %{conn: conn, rows: rows} do
+      {:ok, view, _html} = live(conn, ~p"/queue")
+
+      first = Enum.find(rows, &(&1.position == 0))
+      {:ok, _row} = Playback.remove_from_queue(first.id)
+
+      MyHiFi.Event.publish(:player, %MyHiFi.Event.Player.Progress{position_ms: 1000})
+
+      assert titles_on(view) == ["Alpha", "Bravo", "Charlie"]
+    end
   end
 
   # **A row of an item that no longer exists draws nothing.** A page cannot say what a
