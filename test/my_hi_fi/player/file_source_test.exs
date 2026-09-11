@@ -378,6 +378,32 @@ defmodule MyHiFi.Player.FileSourceTest do
       assert state.offset == 500
     end
 
+    # LiveDashboard draws how long a skip reads the disk for, and how far it landed
+    # from where it started. See `MyHiFiWeb.Telemetry`.
+    test "it measures what the skip did", %{path: path} do
+      state = mp3_state(path, 2000, %{offset: 1000 * @frame_bytes})
+      handler = "file-source-skip-#{System.unique_integer([:positive])}"
+      test = self()
+
+      :telemetry.attach(
+        handler,
+        [:my_hi_fi, :player, :skip, :stop],
+        fn _event, measurements, metadata, _config ->
+          send(test, {:skip_measured, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      FileSource.handle_parent_notification({:skip, -15_000}, nil, state)
+
+      assert_receive {:skip_measured, %{duration: duration}, metadata}
+      assert duration > 0
+      assert metadata.direction == :backward
+      assert_in_delta metadata.moved_ms, 15_000, 30
+    end
+
     test "it holds no opinion about any other notification", %{path: path} do
       state = playing(path, "some audio")
 

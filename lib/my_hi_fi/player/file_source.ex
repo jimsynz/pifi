@@ -187,7 +187,7 @@ defmodule MyHiFi.Player.FileSource do
 
   @impl true
   def handle_parent_notification({:skip, ms}, _ctx, %State{} = state) do
-    case Skip.place(state.device, state.offset, ms, state.available) do
+    case placed(state, ms) do
       {:ok, place} ->
         Membrane.Logger.info("A skip of #{ms} ms moved #{place.ms} ms, to #{place.byte}.")
 
@@ -203,6 +203,25 @@ defmodule MyHiFi.Player.FileSource do
 
   @impl true
   def handle_parent_notification(_notification, _ctx, %State{} = state), do: {[], state}
+
+  # **A skip reads the disk, and a person presses the control again and again.** A
+  # forward skip steps over 480 KB for 30 seconds of a 128 kbit/s file, and a backward
+  # one measures what it chose. The span says how long that reading takes, and the
+  # direction says which of the two paths did it. See `MyHiFi.Player.Skip`.
+  defp placed(%State{} = state, ms) do
+    metadata = %{direction: direction(ms)}
+
+    :telemetry.span([:my_hi_fi, :player, :skip], metadata, fn ->
+      result = Skip.place(state.device, state.offset, ms, state.available)
+      {result, moved(metadata, result)}
+    end)
+  end
+
+  defp direction(ms) when ms < 0, do: :backward
+  defp direction(_ms), do: :forward
+
+  defp moved(metadata, {:ok, place}), do: Map.put(metadata, :moved_ms, abs(place.ms))
+  defp moved(metadata, {:error, _reason}), do: Map.put(metadata, :moved_ms, 0)
 
   @impl true
   def handle_info({:download, {:bytes, count}}, _ctx, %State{} = state) do

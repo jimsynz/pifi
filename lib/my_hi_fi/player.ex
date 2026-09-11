@@ -32,6 +32,25 @@ defmodule MyHiFi.Player do
   A live stream ends when the network fails, and a person expects the music to
   come back. The player therefore starts the stream again after a short wait, and
   it stops after a few tries.
+
+  ## What this measures
+
+  A person who says that the stereo feels slow needs a number, and the four events
+  below give one. `MyHiFiWeb.Telemetry` draws each of them at `/dev/dashboard`.
+
+  - `[:my_hi_fi, :player, :resolve, :start | :stop | :exception]` covers
+    `c:MyHiFi.Source.resolve/1`, which reads the service behind the page.
+  - `[:my_hi_fi, :player, :sound]` holds the time from the call to the first sound.
+    **This is the wait that a person feels**, and it holds the resolve, the first
+    bytes, and the moment that `aplay` opens the card.
+  - `[:my_hi_fi, :player, :track]` holds how long a track sounded, and the reason
+    says whether a person stopped it or it reached its end.
+  - `MyHiFi.Player.FileSource` writes
+    `[:my_hi_fi, :player, :skip, :start | :stop | :exception]`, because the element
+    that reads the disk is the one that knows how long the reading took.
+
+  A measurement needs no subscriber: `:telemetry` calls nothing when nothing is
+  attached.
   """
 
   use GenServer
@@ -82,6 +101,7 @@ defmodule MyHiFi.Player do
             stream_title: String.t() | nil,
             artwork_path: String.t() | nil,
             started_at: integer() | nil,
+            asked_at: integer() | nil,
             offset_ms: non_neg_integer(),
             position_bytes: non_neg_integer() | nil,
             restarts: non_neg_integer(),
@@ -99,6 +119,7 @@ defmodule MyHiFi.Player do
               stream_title: nil,
               artwork_path: nil,
               started_at: nil,
+              asked_at: nil,
               offset_ms: 0,
               position_bytes: nil,
               restarts: 0,
@@ -483,6 +504,8 @@ defmodule MyHiFi.Player do
     # The count of tries resets here and not where the pipeline starts. Building a
     # pipeline proves nothing: a stream that never arrives builds one each time,
     # and the player would then try for ever. Sound is the proof.
+    sounded(state)
+
     {:noreply,
      %State{
        state
@@ -586,7 +609,7 @@ defmodule MyHiFi.Player do
   defp start(source, item, %State{} = state) do
     state = state |> cancel_restart() |> stop_pipeline()
 
-    with {:ok, playable} <- source.resolve(item),
+    with {:ok, playable} <- resolved(source, item),
          {:ok, sink} <- sink(state) do
       Event.publish(:player, %Events.Buffering{percent: 0})
 
@@ -609,6 +632,7 @@ defmodule MyHiFi.Player do
                stream_title: nil,
                artwork_path: nil,
                started_at: nil,
+               asked_at: System.monotonic_time(),
                offset_ms: playable.position_ms,
                position_bytes: playable[:position_bytes],
                paused?: false,
@@ -621,6 +645,15 @@ defmodule MyHiFi.Player do
     else
       {:error, reason} -> fail(reason, state)
     end
+  end
+
+  # **A source reads a service behind a page, so a resolve takes as long as that
+  # service does.** The span says which source, so a person who waits for the sound
+  # can see whether the wait is the network of the source or the pipeline.
+  defp resolved(source, item) do
+    :telemetry.span([:my_hi_fi, :player, :resolve], %{source: source}, fn ->
+      {source.resolve(item), %{source: source}}
+    end)
   end
 
   # `start/2` and not `start_link/2`. A link would tie the life of this process to
@@ -833,6 +866,7 @@ defmodule MyHiFi.Player do
     store_position(state)
     release_file(state)
     silence(state)
+    track_stopped(state, :requested)
     Event.publish(:player, %Events.Stopped{reason: :requested})
 
     %State{
@@ -948,6 +982,33 @@ defmodule MyHiFi.Player do
     offset + System.monotonic_time(:millisecond) - at
   end
 
+  # **The wait that a person feels is the press, and not the start of the pipeline.**
+  # A resolve reads a service, a download reads the first bytes, and `aplay` opens the
+  # card, so the one number that says how fast this device answers is the time from
+  # the call to the first sound.
+  defp sounded(%State{asked_at: nil}), do: :ok
+
+  defp sounded(%State{asked_at: at} = state) do
+    :telemetry.execute(
+      [:my_hi_fi, :player, :sound],
+      %{duration: System.monotonic_time() - at},
+      %{source: state.source, live?: live?(state)}
+    )
+  end
+
+  # **How long the sound lasted, and why it ended.** A track that a person stops early
+  # and a track that reaches its end are the same event with another reason, so one
+  # measurement answers both.
+  defp track_stopped(%State{started_at: nil}, _reason), do: :ok
+
+  defp track_stopped(%State{started_at: at} = state, reason) do
+    :telemetry.execute(
+      [:my_hi_fi, :player, :track],
+      %{duration: System.monotonic_time(:millisecond) - at},
+      %{reason: reason, source: state.source}
+    )
+  end
+
   # A track ended by itself. A podcast marks the episode played, and a station never
   # reaches this, because a live stream that ends is a network that failed.
   #
@@ -957,6 +1018,7 @@ defmodule MyHiFi.Player do
   # The row stays in the queue and the mark moves past it, so a person can go back to
   # what they heard.
   defp finish(%State{item: item} = state) do
+    track_stopped(state, :finished)
     state = stop_pipeline(state)
     Playback.mark_played(item)
     Event.publish(:player, %Events.Stopped{reason: :finished})
