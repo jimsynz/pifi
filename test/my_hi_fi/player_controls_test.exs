@@ -386,18 +386,23 @@ defmodule MyHiFi.PlayerControlsTest do
 
       assert :ok = Player.skip(30_000)
 
-      assert_receive %Events.Progress{position_ms: position}, 2000
-      assert position >= 30_000
+      # The player publishes a progress event each second as well, so the guard is
+      # what tells the one that the skip caused from a tick that came before it.
+      assert_receive %Events.Progress{position_ms: position} when position >= 30_000, 2000
     end
 
     test "a backward skip moves the count back" do
       playing(1)
       assert :ok = Player.skip(60_000)
-      assert_receive %Events.Progress{position_ms: forward}, 2000
+      assert_receive %Events.Progress{position_ms: forward} when forward >= 60_000, 2000
 
       assert :ok = Player.skip(-15_000)
 
-      assert_receive %Events.Progress{position_ms: back}, 2000
+      # A tick of one second that came before the first skip still holds a count near
+      # zero, so the guard names the band that the second skip lands in.
+      assert_receive %Events.Progress{position_ms: back} when back >= 40_000 and back < 60_000,
+                     2000
+
       assert back < forward
     end
 
@@ -409,9 +414,11 @@ defmodule MyHiFi.PlayerControlsTest do
 
       assert :ok = Player.skip(30_000)
 
-      assert_receive %Events.Progress{position_ms: position}, 2000
-      assert position < 30_000
-      assert position >= 12_345
+      # A tick of one second carries a count near zero, so the guard names the band
+      # that the source measured and the tick cannot reach.
+      assert_receive %Events.Progress{position_ms: position}
+                     when position >= 12_345 and position < 30_000,
+                     2000
     end
 
     test "a live stream holds no skip" do

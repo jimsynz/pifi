@@ -4,6 +4,12 @@ defmodule MyHiFi.Screen.Renderer do
   # against a renderer that stopped and never against one that is working.
   @frame_ms 2_000
 
+  # **How long a screen waits for the frame after the last one.** Emerge reads a
+  # picture after it draws the tree, and it sends a frame for each step of that, so
+  # the frame that holds the picture is the last one and not the first. A measurement
+  # on the host on 2026-09-11 gave 2 ms to 7 ms between the frames of one upload.
+  @settle_ms 50
+
   @moduledoc """
   The Emerge renderer that a screen of this device draws with.
 
@@ -21,16 +27,28 @@ defmodule MyHiFi.Screen.Renderer do
   pictures between frames, and it holds them for itself alone, so a draw of the same
   list costs less than a draw that built everything again.
 
-  ## The frame arrives as a message
+  ## The frame arrives as a message, and more than one arrives
 
   `EmergeSkia.start/1` demands a live process for a headless renderer, and each
-  `EmergeSkia.upload_tree/2` sends one frame to that process. **A frame arrives for
-  each upload, and the tree that did not change gets one as well.**
+  `EmergeSkia.upload_tree/2` sends a frame to that process. **A frame arrives for each
+  upload, and the tree that did not change gets one as well.**
 
-  `pixels/2` therefore uploads and waits for the frame. A screen has nothing else to
-  do while it draws, and the wait is bounded at #{@frame_ms} ms. It takes the frames
-  that an earlier wait left behind first, so a draw that timed out cannot make the
-  next one draw the frame before it.
+  **One upload gives more than one frame, because Emerge reads a picture after it
+  draws the tree.** The guide of Emerge says it plainly: asset loading is
+  asynchronous, and Emerge draws a placeholder for a source that is still loading. A
+  screen that took the first frame therefore wrote the placeholder to the panel, and
+  the picture reached the glass only when something else made the screen draw again.
+  A screen that plays shows a progress event each second and healed itself in one
+  second. **An idle screen draws one time and held the placeholder.**
+
+  `pixels/2` therefore takes frames until #{@settle_ms} ms pass with none, and it
+  gives the last one. A measurement on the host on 2026-09-11 gave one to three
+  frames for each upload, 2 ms to 7 ms apart, and the last one always held the
+  picture.
+
+  The first frame is bounded at #{@frame_ms} ms, which is a bound against a renderer
+  that stopped. It takes the frames that an earlier wait left behind first, so a draw
+  that timed out cannot make the next one draw the frame before it.
 
   ## What a runtime path may hold
 
@@ -93,10 +111,9 @@ defmodule MyHiFi.Screen.Renderer do
 
     EmergeSkia.upload_tree(renderer, tree)
 
-    receive do
-      {:emerge_skia_frame, frame} -> {:ok, frame.storage.data}
-    after
-      @frame_ms -> {:error, :no_frame}
+    case frame(@frame_ms) do
+      {:ok, frame} -> {:ok, settled(frame)}
+      :none -> {:error, :no_frame}
     end
   end
 
@@ -133,6 +150,23 @@ defmodule MyHiFi.Screen.Renderer do
         extensions: [".thumbnail", ".png"]
       ]
     ]
+  end
+
+  # The last frame of this upload. Each one after the first holds more of the picture
+  # than the one before it, so the caller wants the one that no frame follows.
+  defp settled(frame) do
+    case frame(@settle_ms) do
+      {:ok, later} -> settled(later)
+      :none -> frame.storage.data
+    end
+  end
+
+  defp frame(wait) do
+    receive do
+      {:emerge_skia_frame, frame} -> {:ok, frame}
+    after
+      wait -> :none
+    end
   end
 
   # A wait that timed out leaves its frame in the mailbox, and the frame after it is
