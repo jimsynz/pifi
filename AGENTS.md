@@ -94,6 +94,13 @@ Licence: Apache-2.0.
   shared workflow then sets `NBPR_BUILD_BACKEND=shell` and installs the four
   Buildroot packages that the image lacks. A new version of the system starts a
   new build of every `nbpr_*` package, and that build takes 10 minutes.
+  - **A build publishes the result only when it holds the credentials of the
+    registry.** `config/target.exs` names `registry`, and `NBPR.OCI.Client` reads
+    `NBPR_REGISTRY_USERNAME` and `NBPR_REGISTRY_TOKEN`. `mix nbpr.fetch` finishes a
+    package and then stops with `registry_credentials_required` when it finds neither
+    one, so `publish_after_build` reads the two variables. This is the rule that
+    `nerves_hub_link` follows as well: an absent secret turns the feature off, and it
+    does not stop the build.
 - **A production firmware holds no SSH daemon, and `mix upload` needs one.**
   `config/target.exs` gives `nerves_ssh` an application environment only when
   `Mix.env()` is `dev`. A `MIX_ENV=prod` image on a board that a hand cannot reach

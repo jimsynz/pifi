@@ -244,7 +244,23 @@ config :my_hi_fi, MyHiFiWeb.Endpoint,
   # check therefore rejects the LiveView socket.
   check_origin: false
 
-config :nbpr, registry: "harton.dev/mypihifiguy/myhifi", publish_after_build: true
+# **NBPR publishes no artefact for a custom Nerves system**, so each build of this
+# firmware builds the 6 packages from source, and that takes 10 minutes. The registry
+# that this names is where a build puts the result, so the next build reads it.
+#
+# **A build that holds no credential must not publish.** `NBPR.OCI.Client` reads
+# `NBPR_REGISTRY_USERNAME` and `NBPR_REGISTRY_TOKEN`, and `mix nbpr.fetch` stops with
+# `registry_credentials_required` when it finishes a package and finds neither one.
+# The CI container holds neither, so each push to `main` failed before `mix firmware`
+# ran at all. This is the same rule that `nerves_hub_link` above follows: an absent
+# secret turns the feature off, and it does not stop the build.
+registry_username = "NBPR_REGISTRY_USERNAME" |> System.get_env() |> to_string() |> String.trim()
+
+registry_token = "NBPR_REGISTRY_TOKEN" |> System.get_env() |> to_string() |> String.trim()
+
+config :nbpr,
+  registry: "harton.dev/mypihifiguy/myhifi",
+  publish_after_build: registry_username != "" and registry_token != ""
 
 # Import target specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
