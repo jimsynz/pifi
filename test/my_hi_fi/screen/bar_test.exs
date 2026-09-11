@@ -4,6 +4,7 @@ defmodule MyHiFi.Screen.BarTest do
   use Emerge.UI
 
   alias MyHiFi.Screen.Bar
+  alias MyHiFi.Test.Drawing
 
   @width 100
   @height 10
@@ -18,7 +19,7 @@ defmodule MyHiFi.Screen.BarTest do
       track: color(:slate, 800),
       fill: color(:slate, 50)
     )
-    |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: @width, height: @height)
+    |> Drawing.pixels(@width, @height)
   end
 
   # The fill is near white and the track is near black, so a bright pixel is the fill.

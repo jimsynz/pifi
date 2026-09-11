@@ -2,12 +2,13 @@ defmodule MyHiFi.Screen.BatteryTest do
   use ExUnit.Case, async: true
 
   alias MyHiFi.Screen.Battery
+  alias MyHiFi.Test.Drawing
 
   # The icon is a tree, so a test draws it and reads the pixels. A bar that a caller
   # cannot see is the failure that matters, and the width of it is what says the charge.
   defp pixels(percent, low?, opts \\ []) do
     Battery.render(percent, low?, opts)
-    |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: 40, height: 20)
+    |> Drawing.pixels(40, 20)
   end
 
   # The count of every lit pixel, and not the widest row. The border is the widest row

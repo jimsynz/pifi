@@ -13,7 +13,7 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
 
   `write_frame/2` takes RGB565 in the order that `to_rgb565/1` gives, which is the
   high byte first. `to_rgb565/1` takes the RGBA that
-  `EmergeSkia.render_to_pixels/2` gives and keeps the top bits of each channel.
+  `MyHiFi.Screen.Renderer` gives, and it keeps the top bits of each channel.
 
   A full frame is 153 600 bytes. `spidev` takes 4096 bytes in one transfer by
   default, and the limit is a module parameter of the driver, so this asks
@@ -168,7 +168,7 @@ defmodule MyHiFi.Peripheral.PiTft.Ili9341 do
   @doc """
   Turn RGBA into RGB565, with the high byte first.
 
-  `EmergeSkia.render_to_pixels/2` gives four bytes for each pixel, and this keeps
+  `MyHiFi.Screen.Renderer` gives four bytes for each pixel, and this keeps
   the top 5, 6 and 5 bits and drops the alpha. The screen draws no transparency, so
   nothing is lost.
   """

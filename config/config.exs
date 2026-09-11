@@ -141,6 +141,20 @@ config :nerves, :firmware, rootfs_overlay: "rootfs_overlay"
 
 config :nerves, source_date_epoch: "1787022821"
 
+# A screen of this device opens no window and drives no display: it renders to
+# pixels and writes them to a panel over SPI. See `MyHiFi.Screen.Renderer`.
+#
+# **An empty list is the raster NIF, and Emerge 0.4 publishes one.** 0.3 published a
+# NIF for each of three backends and none for no backend, so this project took
+# `[:wayland]`, the smallest of the three, and called nothing in it. That variant
+# names `libxkbcommon`, and the raster NIF needs no library of a display at all.
+#
+# **The host needs the same line as the target.** `EmergeSkia.BuildConfig` chooses
+# `[:drm]` by itself, that variant names `libgbm`, and a build machine without Mesa
+# cannot open the NIF. The tests of each screen then stop with `EmergeSkia.Native is
+# not available`.
+config :emerge, compiled_backends: []
+
 import_config "#{config_env()}.exs"
 
 if Mix.target() == :host do

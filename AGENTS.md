@@ -153,33 +153,43 @@ Licence: Apache-2.0.
   `MyHiFi.DeviceUi` decides what a place in the row means, and the driver names the
   place alone.
 - **Emerge draws the device screen, through its raster part alone.**
-  `EmergeSkia.render_to_pixels/2` gives the pixels back to the caller, and
-  `MyHiFi.Peripheral.PiTft` writes them to the ILI9341 over SPI. Do not call
-  `EmergeSkia.start/1` and do not add a display server: this firmware drives no
-  window and no DRM device. Four traps, and each one costs a build to find.
+  `MyHiFi.Screen.Renderer` starts one headless renderer for each screen, and
+  `MyHiFi.Peripheral.PiTft` writes the pixels to the ILI9341 over SPI. Do not add a
+  display server: this firmware drives no window and no DRM device. Five traps, and
+  each one costs a build to find.
   - **`mix.exs` sets `TARGET_VENDOR` to `"unknown"`, and it must stay that way.**
     `rustler_precompiled` reads the same four variables that Bundlex reads. Emerge
     publishes `aarch64-unknown-linux-gnu`, so `"nerves"` there makes it compile
     Skia from source. Bundlex stores the value and reads it nowhere else, and
     `Membrane.PrecompiledDependencyProvider` matches the architecture, the
     operating system and the ABI, and never the vendor.
-  - **`config/target.exs` must name `compiled_backends`.**
-    `EmergeSkia.BuildConfig` sees `MIX_TARGET` and chooses `[:drm]` by itself, and
-    that variant names `libgbm`, which needs Mesa. `[]` is what this firmware wants,
-    and Emerge publishes no artefact for it, so `[:wayland]` is the choice and
-    nothing calls into it.
-  - **`nerves_system_myhifi_rpi0_2` holds `libxkbcommon` for the NIF and for
-    nothing else.** The dynamic loader reads the name when it opens the NIF. NBPR
-    cannot serve this: it sets `LD_LIBRARY_PATH` at boot, glibc reads that variable
-    one time when the process starts, and a NIF of the BEAM is not a program that a
-    port starts.
+  - **`rustler_precompiled` shares one cache between targets, in the way that
+    Bundlex does.** It keeps each NIF under `deps/emerge/priv/native`, and
+    `_build/<target>/lib/emerge/priv` is a symbolic link to it, so a host build
+    leaves an x86 library where a target release copies it and the Nerves scrub step
+    stops. The release step `prune_foreign_rustler/1` in `mix.exs` makes the
+    directory real and removes each NIF that does not name the target triple.
+  - **`config/config.exs` must name `compiled_backends`, and the value is `[]`.**
+    `EmergeSkia.BuildConfig` chooses `[:drm]` by itself, that variant names `libgbm`,
+    and `libgbm` needs Mesa. Emerge 0.4 publishes an artefact for `[]`, which is the
+    `--raster` NIF, so this project needs neither Mesa nor `libxkbcommon` and it
+    compiles nothing from source. **The line belongs in the shared config, and not in
+    `config/target.exs`.** The host runs the tests of each screen, so a host that names
+    no value downloads the DRM NIF and 132 of those tests stop with `EmergeSkia.Native
+    is not available`.
+  - **Emerge 0.4 draws for a renderer, and not for a call.**
+    `EmergeSkia.render_to_pixels/2` took a tree in 0.3 and reads the last frame of a
+    running renderer now. `EmergeSkia.start/1` gives a renderer, each
+    `EmergeSkia.upload_tree/2` sends one frame to the process that started it, and a
+    frame arrives for an unchanged tree as well. `MyHiFi.Screen.Renderer` holds that
+    exchange for a screen and `MyHiFi.Test.Drawing` holds it for a test.
   - **Emerge refuses a runtime path by its extension, and it reads no byte to
     decide.** The list that it holds by default names `.png`, `.jpg` and five other
     types, and a name of the cache carries no type, so a thumbnail is
     `<hash>.thumbnail`. Emerge drew the mark that it draws for a picture that it
     cannot read, and the screen showed that in the place of the artwork.
-    `MyHiFi.Peripheral.PiTft.asset_options/0` names the two that this firmware gives
-    it: `.thumbnail` for the cache, and `.png` for the picture that the firmware ships
+    `MyHiFi.Screen.Renderer.assets/0` names the two that this firmware gives it:
+    `.thumbnail` for the cache, and `.png` for the picture that the firmware ships
     for an idle screen.
   - **The idle screen of a device that a person gave no picture draws the mark of the
     product.** `priv/splash` holds one PNG for each screen, named

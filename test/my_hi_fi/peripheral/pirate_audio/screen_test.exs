@@ -2,6 +2,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
   use ExUnit.Case, async: true
 
   alias MyHiFi.Peripheral.PirateAudio.Screen
+  alias MyHiFi.Test.Drawing
 
   # One flat red picture of 8 by 8 pixels. A flat colour is what makes a measurement of
   # the pixels mean something: every place that the picture covers holds one value.
@@ -75,12 +76,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
       pixels =
         view
         |> Screen.render()
-        |> EmergeSkia.render_to_pixels(
-          otp_app: :my_hi_fi,
-          width: width,
-          height: height,
-          assets: context.assets
-        )
+        |> Drawing.pixels(width, height, context.assets)
 
       assert {red, _green, _blue} = pixel(pixels, width, 4, 40)
       assert red > 150
@@ -218,7 +214,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
       network
       |> view_with()
       |> Screen.render()
-      |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+      |> Drawing.pixels(width, height)
     end
 
     # The corner that the mark sits in, and the row that the battery shares with it.
@@ -254,7 +250,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
         pixels =
           view
           |> Screen.render()
-          |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+          |> Drawing.pixels(width, height)
 
         assert byte_size(pixels) == width * height * 4
       end
@@ -269,7 +265,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
       pixels =
         %{Screen.new() | state: :playing, title: "Tiny Ruins", subtitle: "Ceremony"}
         |> Screen.render()
-        |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+        |> Drawing.pixels(width, height)
 
       for y <- [height - 40, height - 20, height - 4] do
         assert {red, green, blue} = pixel(pixels, width, 4, y)
@@ -279,7 +275,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
   end
 
   # Emerge refuses a runtime path by its extension, so the file carries the name that
-  # the cache gives a thumbnail. See `MyHiFi.Peripheral.PirateAudio.asset_options/0`.
+  # the cache gives a thumbnail. See `MyHiFi.Screen.Renderer.assets/0`.
   defp splash_file(_context) do
     directory = Path.join(System.tmp_dir!(), "splash_#{:erlang.unique_integer([:positive])}")
     path = Path.join(directory, "splash.thumbnail")
@@ -298,12 +294,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
 
     view
     |> Screen.render()
-    |> EmergeSkia.render_to_pixels(
-      otp_app: :my_hi_fi,
-      width: width,
-      height: height,
-      assets: context.assets
-    )
+    |> Drawing.pixels(width, height, context.assets)
   end
 
   # The bar is the one bright row at the foot of the screen, and the words above it hold
@@ -315,7 +306,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.ScreenTest do
     pixels =
       view
       |> Screen.render()
-      |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+      |> Drawing.pixels(width, height)
 
     Enum.count(0..(width - 1), fn x ->
       {red, green, blue} = pixel(pixels, width, x, height - 14)

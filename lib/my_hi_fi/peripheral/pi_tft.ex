@@ -9,13 +9,14 @@ defmodule MyHiFi.Peripheral.PiTft do
       Player event
         -> the view                          (this module)
         -> Emerge tree                       (MyHiFi.Peripheral.PiTft.Screen)
-        -> RGBA, 307 200 bytes               (EmergeSkia.render_to_pixels/2)
+        -> RGBA, 307 200 bytes               (MyHiFi.Screen.Renderer)
         -> RGB565, 153 600 bytes             (Ili9341.to_rgb565/1)
         -> the screen                        (Ili9341.write_frame/2)
 
-  Emerge opens no window here. `EmergeSkia.render_to_pixels/2` is its raster part:
-  it lays the tree out, draws it to a surface in memory, and gives the bytes back.
-  A display server is therefore not necessary, and the firmware ships none.
+  Emerge opens no window here. `MyHiFi.Screen.Renderer` starts a headless renderer
+  of Emerge, which lays the tree out, draws it to a surface in memory, and sends the
+  bytes back. A display server is therefore not necessary, and the firmware ships
+  none.
 
   ## What it does not do yet
 
@@ -72,6 +73,7 @@ defmodule MyHiFi.Peripheral.PiTft do
   alias MyHiFi.Peripheral.PiTft.{Ili9341, Screen, Stmpe610}
   alias MyHiFi.Playback
   alias MyHiFi.Screen.Network
+  alias MyHiFi.Screen.Renderer
 
   # How long the level stays on the glass after a person stops moving it. Long enough
   # to read the number, and short enough that the track comes back before they look
@@ -93,11 +95,13 @@ defmodule MyHiFi.Peripheral.PiTft do
   def init(opts) do
     with {:ok, screen} <- Ili9341.open(opts),
          {:ok, stmpe} <- Stmpe610.open(),
-         {:ok, buttons} <- Buttons.open() do
+         {:ok, buttons} <- Buttons.open(),
+         {:ok, renderer} <- Renderer.start(Screen.size()) do
       first_frame(%{
         screen: screen,
         stmpe: stmpe,
         buttons: buttons,
+        renderer: renderer,
         volume_ms: Keyword.get(opts, :volume_ms, @volume_ms),
         view: Screen.new() |> with_battery() |> with_identity() |> with_network(),
         awake?: true
@@ -219,35 +223,10 @@ defmodule MyHiFi.Peripheral.PiTft do
   @doc "Turn the backlight off and give the hardware back."
   @impl MyHiFi.Peripheral
   def terminate(_reason, state) do
+    Renderer.stop(state.renderer)
     Buttons.close(state.buttons)
     Stmpe610.close(state.stmpe)
     Ili9341.close(state.screen)
-  end
-
-  @doc """
-  What Emerge may read from the disk while it draws.
-
-  The cache keeps the thumbnails, and `MyHiFi.Artwork` names each one
-  `<hash>.thumbnail`, because a name of the cache carries no type.
-
-  **Emerge refuses a runtime path by its extension, and it reads no byte to decide.**
-  The default list names `.jpg` and six other types, so it refused every thumbnail,
-  and the screen showed the mark that Emerge draws for a picture that it cannot read.
-  Skia reads the bytes and finds the JPEG, so the name of the file is all that this
-  changes.
-
-  One extension is also tighter than seven: a runtime path of this firmware is a
-  thumbnail of the cache and nothing else.
-  """
-  @spec asset_options() :: keyword()
-  def asset_options do
-    [
-      runtime_paths: [
-        enabled: true,
-        allowlist: [MyHiFi.Cache.directory(), Identity.splash_directory()],
-        extensions: [".thumbnail", ".png"]
-      ]
-    ]
   end
 
   defp view(%Player.Started{} = event, view) do
@@ -351,20 +330,11 @@ defmodule MyHiFi.Peripheral.PiTft do
   defp draw(%{awake?: false} = state), do: {:ok, state}
 
   defp draw(state) do
-    {width, height} = Screen.size()
-
-    pixels =
-      state.view
-      |> Screen.render()
-      |> EmergeSkia.render_to_pixels(
-        otp_app: :my_hi_fi,
-        width: width,
-        height: height,
-        assets: asset_options()
-      )
-      |> Ili9341.to_rgb565()
-
-    case Ili9341.write_frame(state.screen, pixels) do
+    case Renderer.pixels(state.renderer, Screen.render(state.view)) do
+      {:ok, pixels} -> Ili9341.write_frame(state.screen, Ili9341.to_rgb565(pixels))
+      {:error, reason} -> {:error, reason}
+    end
+    |> case do
       :ok -> {:ok, state}
       {:error, reason} -> {:error, reason}
     end

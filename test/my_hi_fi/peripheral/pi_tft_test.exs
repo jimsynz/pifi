@@ -8,6 +8,8 @@ defmodule MyHiFi.Peripheral.PiTftTest do
   alias MyHiFi.Event.Player
   alias MyHiFi.Event.View, as: ViewEvents
   alias MyHiFi.Peripheral.PiTft
+  alias MyHiFi.Screen.Renderer
+  alias MyHiFi.Test.Drawing
   alias MyHiFi.Test.RecordingScreen
   alias Nerves.Runtime.KV
 
@@ -391,8 +393,8 @@ defmodule MyHiFi.Peripheral.PiTftTest do
         ]
       ]
 
-      ours = pixels_of(thumbnail, PiTft.asset_options())
-      absent = pixels_of(Path.join(directory, "absent.thumbnail"), PiTft.asset_options())
+      ours = pixels_of(thumbnail, Renderer.assets())
+      absent = pixels_of(Path.join(directory, "absent.thumbnail"), Renderer.assets())
 
       assert ours == pixels_of(picture, by_extension)
       refute ours == absent
@@ -404,12 +406,7 @@ defmodule MyHiFi.Peripheral.PiTftTest do
 
     %{PiTft.Screen.new() | state: :playing, title: "RNZ National", artwork_path: path}
     |> PiTft.Screen.render()
-    |> EmergeSkia.render_to_pixels(
-      otp_app: :my_hi_fi,
-      width: width,
-      height: height,
-      assets: assets
-    )
+    |> Drawing.pixels(width, height, assets)
   end
 
   # **A person holding a button needs to see the number that they are setting**, and the

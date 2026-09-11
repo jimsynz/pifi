@@ -4,13 +4,14 @@ defmodule MyHiFi.Screen.BadgeTest do
   use Emerge.UI
 
   alias MyHiFi.Screen.Badge
+  alias MyHiFi.Test.Drawing
 
   @width 60
   @height 30
 
   defp pixels(tree) do
     tree
-    |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: @width, height: @height)
+    |> Drawing.pixels(@width, @height)
   end
 
   defp mark do

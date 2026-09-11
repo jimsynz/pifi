@@ -9,6 +9,7 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
   alias MyHiFi.Event.Player
   alias MyHiFi.Peripheral.PirateAudio
   alias MyHiFi.Peripheral.PirateAudio.Screen
+  alias MyHiFi.Screen.Renderer
   alias MyHiFi.Test.RecordingScreen
   alias Nerves.Runtime.KV
 
@@ -361,7 +362,7 @@ defmodule MyHiFi.Peripheral.PirateAudioTest do
   # two names here are the thumbnail of the cache and the picture that this firmware
   # ships. Nothing else of the partition is readable.
   test "it lets Emerge read a thumbnail of the cache and a shipped picture" do
-    options = PirateAudio.asset_options()
+    options = Renderer.assets()
     paths = Keyword.fetch!(options, :runtime_paths)
 
     assert Keyword.fetch!(paths, :enabled)

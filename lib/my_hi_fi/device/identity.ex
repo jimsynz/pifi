@@ -49,7 +49,7 @@ defmodule MyHiFi.Device.Identity do
   `MyHiFi.Artwork` keeps the picture of a person, in the way that it keeps the logo of a
   station: the same store, the same thumbnail, the same address, and the same rule about
   which types this firmware serves. A screen therefore reads the splash through the path that it
-  reads a cover with, and `MyHiFi.Peripheral.PiTft.asset_options/0` needs no change.
+  reads a cover with, and `MyHiFi.Screen.Renderer.assets/0` needs no change.
 
   The name of the entry is the hash of the bytes, so it is 64 characters like every
   other name of that module. See `MyHiFi.Artwork.put/1`.
@@ -207,7 +207,7 @@ defmodule MyHiFi.Device.Identity do
 
   The file is a PNG of exactly the size of the screen. **A picture of another size
   would cost a scale for each draw**, and one that a screen has to crop would lose the
-  ends of the waveform of this one; `MyHiFi.Peripheral.PiTft.asset_options/0` names this
+  ends of the waveform of this one; `MyHiFi.Screen.Renderer.assets/0` names this
   directory so that Emerge may read it.
 
   **A provisioner names the set, so one firmware carries the artwork of several

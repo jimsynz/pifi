@@ -11,7 +11,7 @@ defmodule MyHiFi.Screen.Battery do
 
   Emerge draws an SVG with `Emerge.UI.svg/2`, which takes a source that it must read from
   the disk, and a runtime path of this firmware is a thumbnail of the cache and nothing
-  else. See `MyHiFi.Peripheral.PirateAudio.asset_options/0`. Three rectangles need no
+  else. See `MyHiFi.Screen.Renderer.assets/0`. Three rectangles need no
   file, no allowlist and no decode, and they stay sharp at 11 pixels tall where a scaled
   image does not.
 

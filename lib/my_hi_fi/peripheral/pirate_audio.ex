@@ -9,7 +9,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
       Player event
         -> the view                          (this module)
         -> Emerge tree                       (MyHiFi.Peripheral.PirateAudio.Screen)
-        -> RGBA, 230 400 bytes               (EmergeSkia.render_to_pixels/2)
+        -> RGBA, 230 400 bytes               (MyHiFi.Screen.Renderer)
         -> RGB565, 115 200 bytes             (St7789.to_rgb565/1)
         -> the screen                        (St7789.write_frame/2)
 
@@ -90,6 +90,7 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   alias MyHiFi.Peripheral.PirateAudio.{Screen, St7789}
   alias MyHiFi.Playback
   alias MyHiFi.Screen.Network
+  alias MyHiFi.Screen.Renderer
 
   # The two buttons that answer on this board, in the order that they sit down the left
   # of the screen. See the moduledoc for the measurement that found them.
@@ -128,10 +129,12 @@ defmodule MyHiFi.Peripheral.PirateAudio do
            Buttons.open(
              lines: Keyword.get(opts, :lines, @lines),
              hold_ms: Keyword.get(opts, :hold_ms, @hold_ms)
-           ) do
+           ),
+         {:ok, renderer} <- Renderer.start(Screen.size()) do
       first_frame(%{
         screen: screen,
         buttons: buttons,
+        renderer: renderer,
         show_ms: Keyword.get(opts, :show_ms, @show_ms),
         volume_ms: Keyword.get(opts, :volume_ms, @volume_ms),
         view: Screen.new() |> with_battery() |> with_identity() |> with_network(),
@@ -270,28 +273,9 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   @doc "Turn the backlight off and give the hardware back."
   @impl MyHiFi.Peripheral
   def terminate(_reason, state) do
+    Renderer.stop(state.renderer)
     Buttons.close(state.buttons)
     St7789.close(state.screen)
-  end
-
-  @doc """
-  What Emerge may read from the disk while it draws.
-
-  The cache keeps the thumbnails, and `MyHiFi.Artwork` names each one
-  `<hash>.thumbnail`, because a name of the cache carries no type. Emerge refuses a
-  runtime path by its extension and reads no byte to decide, and its default list names
-  `.jpg` and six other names, so it would refuse every thumbnail and draw the mark that
-  it draws for a picture it cannot read.
-  """
-  @spec asset_options() :: keyword()
-  def asset_options do
-    [
-      runtime_paths: [
-        enabled: true,
-        allowlist: [MyHiFi.Cache.directory(), Identity.splash_directory()],
-        extensions: [".thumbnail", ".png"]
-      ]
-    ]
   end
 
   defp view(%Player.Started{} = event, view) do
@@ -382,20 +366,11 @@ defmodule MyHiFi.Peripheral.PirateAudio do
   defp draw(%{awake?: false} = state), do: {:ok, state}
 
   defp draw(state) do
-    {width, height} = Screen.size()
-
-    pixels =
-      state.view
-      |> Screen.render()
-      |> EmergeSkia.render_to_pixels(
-        otp_app: :my_hi_fi,
-        width: width,
-        height: height,
-        assets: asset_options()
-      )
-      |> St7789.to_rgb565()
-
-    case St7789.write_frame(state.screen, pixels) do
+    case Renderer.pixels(state.renderer, Screen.render(state.view)) do
+      {:ok, pixels} -> St7789.write_frame(state.screen, St7789.to_rgb565(pixels))
+      {:error, reason} -> {:error, reason}
+    end
+    |> case do
       :ok -> {:ok, state}
       {:error, reason} -> {:error, reason}
     end

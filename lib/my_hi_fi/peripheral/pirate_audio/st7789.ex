@@ -214,7 +214,7 @@ defmodule MyHiFi.Peripheral.PirateAudio.St7789 do
   @doc """
   Turn RGBA into RGB565, with the high byte first.
 
-  `EmergeSkia.render_to_pixels/2` gives four bytes for each pixel, and this keeps the
+  `MyHiFi.Screen.Renderer` gives four bytes for each pixel, and this keeps the
   top 5, 6 and 5 bits and drops the alpha. The screen draws no transparency, so nothing
   is lost.
   """

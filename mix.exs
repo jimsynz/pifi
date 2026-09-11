@@ -151,7 +151,7 @@ defmodule MyHiFi.MixProject do
       # `config/target.exs` names the backend, because `EmergeSkia.BuildConfig`
       # sees `MIX_TARGET` and chooses the DRM one by itself, and it holds the reason
       # that the choice is what it is.
-      {:emerge, "~> 0.3"},
+      {:emerge, "~> 0.4.0-beta.1"},
       # The fuel gauge of the UPS-Lite pHAT. It reads the charge of the cell over I2C,
       # and it holds no native code of its own: `wafer` is the layer that talks to
       # `circuits_i2c`. See `MyHiFi.Peripheral.Battery`.
@@ -340,8 +340,48 @@ defmodule MyHiFi.MixProject do
       |> Enum.each(&File.rm_rf!/1)
     end
 
+    prune_foreign_rustler(release)
+  end
+
+  # **`rustler_precompiled` shares one directory between targets, in the way that
+  # Bundlex does.** It writes the NIF that it fetched into `deps/<dep>/priv/native`,
+  # and `_build/<target>/lib/<dep>/priv` is a symbolic link to that directory, so a
+  # build for the host leaves an x86 library where a build for the target copies it.
+  # The scrub step of Nerves then stops with `Unexpected executable format`.
+  #
+  # The name of each file holds the triple that it was built for, and the four
+  # `TARGET_` variables above name the one that this build wants.
+  defp prune_foreign_rustler(release) do
+    with {:ok, env} <- Map.fetch(@bundlex_targets, Mix.target()) do
+      keep = triple(env)
+      build = Mix.Project.build_path()
+
+      # The link is `priv`, and `native` is a directory inside it, so this must
+      # replace `priv` itself. A step that named `priv/native/..` read through the
+      # link, materialised nothing, and removed the host NIF from `deps`.
+      build
+      |> Path.join("lib/*/priv")
+      |> Path.wildcard()
+      |> Enum.filter(&File.dir?(Path.join(&1, "native")))
+      |> Enum.each(&materialise_symlink/1)
+
+      build
+      |> Path.join("lib/*/priv/native/*")
+      |> Path.wildcard()
+      |> Enum.reject(&String.contains?(Path.basename(&1), keep))
+      |> Enum.each(&File.rm_rf!/1)
+    end
+
     release
   end
+
+  defp triple(%{
+         "TARGET_ARCH" => arch,
+         "TARGET_VENDOR" => vendor,
+         "TARGET_OS" => os,
+         "TARGET_ABI" => abi
+       }),
+       do: "#{arch}-#{vendor}-#{os}-#{abi}"
 
   defp materialise_symlink(path) do
     case File.read_link(path) do

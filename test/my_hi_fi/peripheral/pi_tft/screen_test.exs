@@ -2,6 +2,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
   use ExUnit.Case, async: true
 
   alias MyHiFi.Peripheral.PiTft.Screen
+  alias MyHiFi.Test.Drawing
 
   # One flat red picture of 8 by 8 pixels. A flat colour is what makes a measurement of
   # the pixels mean something: every place that the picture covers holds one value.
@@ -78,12 +79,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
       pixels =
         view
         |> Screen.render()
-        |> EmergeSkia.render_to_pixels(
-          otp_app: :my_hi_fi,
-          width: width,
-          height: height,
-          assets: assets
-        )
+        |> Drawing.pixels(width, height, assets)
 
       assert byte_size(pixels) == width * height * 4
 
@@ -111,12 +107,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
       pixels =
         view
         |> Screen.render()
-        |> EmergeSkia.render_to_pixels(
-          otp_app: :my_hi_fi,
-          width: width,
-          height: height,
-          assets: assets
-        )
+        |> Drawing.pixels(width, height, assets)
 
       assert {red, green, blue} = pixel(pixels, width, 160, 120)
       assert red < 40 and green < 40 and blue < 40
@@ -186,12 +177,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
 
       view
       |> Screen.render()
-      |> EmergeSkia.render_to_pixels(
-        otp_app: :my_hi_fi,
-        width: width,
-        height: height,
-        assets: assets
-      )
+      |> Drawing.pixels(width, height, assets)
     end
 
     # **The mark is the one amber or rose thing at the top of the screen.** A state of
@@ -233,7 +219,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
 
       view
       |> Screen.render()
-      |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+      |> Drawing.pixels(width, height)
     end
 
     test "it draws a level at the size of the screen" do
@@ -310,7 +296,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
         pixels =
           view
           |> Screen.render()
-          |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+          |> Drawing.pixels(width, height)
 
         assert byte_size(pixels) == width * height * 4
       end
@@ -323,7 +309,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
       pixels =
         view
         |> Screen.render()
-        |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+        |> Drawing.pixels(width, height)
 
       assert byte_size(pixels) == width * height * 4
     end
@@ -335,7 +321,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
       pixels =
         view
         |> Screen.render()
-        |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+        |> Drawing.pixels(width, height)
 
       assert byte_size(pixels) == width * height * 4
     end
@@ -370,7 +356,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
   end
 
   # Emerge refuses a runtime path by its extension, so the file carries the name that
-  # the cache gives a thumbnail. See `MyHiFi.Peripheral.PiTft.asset_options/0`.
+  # the cache gives a thumbnail. See `MyHiFi.Screen.Renderer.assets/0`.
   defp splash_file(_context) do
     directory = Path.join(System.tmp_dir!(), "splash_#{:erlang.unique_integer([:positive])}")
     path = Path.join(directory, "splash.thumbnail")
@@ -394,7 +380,7 @@ defmodule MyHiFi.Peripheral.PiTft.ScreenTest do
   defp pixels(view, width, height) do
     view
     |> Screen.render()
-    |> EmergeSkia.render_to_pixels(otp_app: :my_hi_fi, width: width, height: height)
+    |> Drawing.pixels(width, height)
   end
 
   defp views do

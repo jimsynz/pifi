@@ -4,12 +4,13 @@ defmodule MyHiFi.Screen.RowTest do
   use Emerge.UI
 
   alias MyHiFi.Screen.Row
+  alias MyHiFi.Test.Drawing
 
   @width 100
   @height 10
 
   defp pixels(tree) do
-    EmergeSkia.render_to_pixels(tree, otp_app: :my_hi_fi, width: @width, height: @height)
+    Drawing.pixels(tree, @width, @height)
   end
 
   defp block do
