@@ -6,6 +6,12 @@ defmodule MyHiFi.Output.APlayPortTest do
   tests use that one and each of them gives the port back. `cat` takes the place of
   `aplay`: this module holds no knowledge of ALSA, and the arguments are the name of
   the sound and nothing more.
+
+  **Every program that a test names must read its input and stay alive.** `aplay`
+  does, and a program that ends at once makes each test a race against the
+  `:exit_status` message that ends it. `cat` stops with an error on an argument that
+  names a rate, so a test that needs an argument names `sh -c cat` and gives the rate
+  to the shell, which ignores it.
   """
 
   use ExUnit.Case, async: false
@@ -29,8 +35,8 @@ defmodule MyHiFi.Output.APlayPortTest do
     # **This is what removes the gap between two tracks of one album.** A start of
     # `aplay` opens the sound card and holds a silence of about one second.
     test "the same arguments again give the same port" do
-      assert {:ok, first} = APlayPort.hold("cat", ["--rate=44100"])
-      assert {:ok, second} = APlayPort.hold("cat", ["--rate=44100"])
+      assert {:ok, first} = APlayPort.hold("sh", ["-c", "cat", "--rate=44100"])
+      assert {:ok, second} = APlayPort.hold("sh", ["-c", "cat", "--rate=44100"])
 
       assert second == first
     end
@@ -39,13 +45,13 @@ defmodule MyHiFi.Output.APlayPortTest do
     # rate needs another program. A station at 24000 Hz after a track at 44100 Hz is
     # the case that this covers.
     test "other arguments end the program and open another" do
-      assert {:ok, first} = APlayPort.hold("cat", ["--rate=44100"])
-      assert {:ok, second} = APlayPort.hold("cat", ["--rate=24000"])
+      assert {:ok, first} = APlayPort.hold("sh", ["-c", "cat", "--rate=44100"])
+      assert {:ok, second} = APlayPort.hold("sh", ["-c", "cat", "--rate=24000"])
 
       assert second != first
       refute Port.info(first)
       assert Port.info(second)
-      assert APlayPort.held() == {"cat", ["--rate=24000"]}
+      assert APlayPort.held() == {"sh", ["-c", "cat", "--rate=24000"]}
     end
 
     test "a program that this system holds nowhere gives an error" do
@@ -86,13 +92,22 @@ defmodule MyHiFi.Output.APlayPortTest do
   # and this is the fact that lets one program outlive the pipeline that plays through
   # it.
   describe "the port that a stranger writes to" do
+    # **`Port.info(port, :output)` cannot answer this.** It counts the bytes of one
+    # port identifier, the BEAM gives an identifier that a closed port held before to
+    # the next port that opens, and the tests above open and close several. The count
+    # that this test read was therefore the count of a port of another test now and
+    # then. The bytes that the program itself wrote answer the question and nothing
+    # else does.
     test "a write from another process reaches the program" do
-      {:ok, port} = APlayPort.hold("cat", [])
+      path = Path.join(System.tmp_dir!(), "a_play_port_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(path) end)
+
+      {:ok, port} = APlayPort.hold("sh", ["-c", "cat -u > #{path}"])
 
       task = Task.async(fn -> Port.command(port, "some samples") end)
 
       assert Task.await(task)
-      assert eventually(fn -> Port.info(port, :output) == {:output, 12} end)
+      assert eventually(fn -> File.read(path) == {:ok, "some samples"} end)
     end
   end
 
