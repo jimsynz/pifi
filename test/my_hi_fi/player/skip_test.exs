@@ -25,8 +25,16 @@ defmodule MyHiFi.Player.SkipTest do
     device
   end
 
+  # AAC LC, 44100 Hz, stereo, one raw data block, and a frame of 384 bytes. The
+  # strategy of this module holds no knowledge of a codec, so one file of ADTS proves
+  # that it reads the other reader as well. See `MyHiFi.Player.AdtsFrameTest` for the
+  # header itself.
+  @adts <<0xFF, 0xF1, 0x50, 0x80, 0x30, 0x1F, 0xFC>>
+  @adts_bytes 384
+  @adts_us 23_219
+
   defp region(count, header, bytes) do
-    :binary.copy(header <> :binary.copy(<<0>>, bytes - 4), count)
+    :binary.copy(header <> :binary.copy(<<0>>, bytes - byte_size(header)), count)
   end
 
   defp ms_of(frames), do: div(frames * @frame_us, 1000)
@@ -36,7 +44,8 @@ defmodule MyHiFi.Player.SkipTest do
       device = open(path, region(2000, @fast, @fast_bytes))
       limit = 2000 * @fast_bytes
 
-      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, 100 * @fast_bytes, 30_000, limit)
+      assert {:ok, %{byte: byte, ms: ms}} =
+               Skip.place(device, 100 * @fast_bytes, 30_000, limit, :mp3)
 
       assert ms_of(div(byte, @fast_bytes) - 100) == ms
       assert_in_delta ms, 30_000, 30
@@ -46,7 +55,8 @@ defmodule MyHiFi.Player.SkipTest do
       device = open(path, region(2000, @fast, @fast_bytes))
       limit = 2000 * @fast_bytes
 
-      assert {:ok, %{byte: byte}} = Skip.place(device, 100 * @fast_bytes + 200, 15_000, limit)
+      assert {:ok, %{byte: byte}} =
+               Skip.place(device, 100 * @fast_bytes + 200, 15_000, limit, :mp3)
 
       assert rem(byte, @fast_bytes) == 0
     end
@@ -57,7 +67,8 @@ defmodule MyHiFi.Player.SkipTest do
       device = open(path, region(100, @fast, @fast_bytes))
       limit = 100 * @fast_bytes
 
-      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, 90 * @fast_bytes, 60_000, limit)
+      assert {:ok, %{byte: byte, ms: ms}} =
+               Skip.place(device, 90 * @fast_bytes, 60_000, limit, :mp3)
 
       assert byte == limit
       assert ms == ms_of(10)
@@ -66,7 +77,7 @@ defmodule MyHiFi.Player.SkipTest do
     test "it reads no further than the limit", %{path: path} do
       device = open(path, region(2000, @fast, @fast_bytes))
 
-      assert {:ok, %{byte: byte}} = Skip.place(device, 0, 60_000, 50 * @fast_bytes)
+      assert {:ok, %{byte: byte}} = Skip.place(device, 0, 60_000, 50 * @fast_bytes, :mp3)
 
       assert byte == 50 * @fast_bytes
     end
@@ -78,7 +89,7 @@ defmodule MyHiFi.Player.SkipTest do
       limit = 2000 * @fast_bytes
       from = 1000 * @fast_bytes
 
-      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, -15_000, limit)
+      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, -15_000, limit, :mp3)
 
       assert byte < from
       assert ms == -ms_of(1000 - div(byte, @fast_bytes))
@@ -89,7 +100,8 @@ defmodule MyHiFi.Player.SkipTest do
       device = open(path, region(2000, @fast, @fast_bytes))
       limit = 2000 * @fast_bytes
 
-      assert {:ok, %{byte: byte}} = Skip.place(device, 1000 * @fast_bytes + 100, -15_000, limit)
+      assert {:ok, %{byte: byte}} =
+               Skip.place(device, 1000 * @fast_bytes + 100, -15_000, limit, :mp3)
 
       assert rem(byte, @fast_bytes) == 0
     end
@@ -98,7 +110,8 @@ defmodule MyHiFi.Player.SkipTest do
       device = open(path, region(200, @fast, @fast_bytes))
       limit = 200 * @fast_bytes
 
-      assert {:ok, %{byte: 0, ms: ms}} = Skip.place(device, 50 * @fast_bytes, -60_000, limit)
+      assert {:ok, %{byte: 0, ms: ms}} =
+               Skip.place(device, 50 * @fast_bytes, -60_000, limit, :mp3)
 
       assert ms == -ms_of(50)
     end
@@ -120,7 +133,7 @@ defmodule MyHiFi.Player.SkipTest do
          %{device: device, limit: limit, border: border} do
       from = border + 500 * @slow_bytes
 
-      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, -30_000, limit)
+      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, -30_000, limit, :mp3)
 
       assert byte < border, "the skip must reach into the fast region"
       assert rem(byte, @fast_bytes) == 0
@@ -133,7 +146,7 @@ defmodule MyHiFi.Player.SkipTest do
          %{device: device, limit: limit, border: border} do
       from = border + 500 * @slow_bytes
 
-      assert {:ok, %{ms: ms}} = Skip.place(device, from, -30_000, limit)
+      assert {:ok, %{ms: ms}} = Skip.place(device, from, -30_000, limit, :mp3)
 
       assert_in_delta ms, -30_000, 3000
     end
@@ -146,7 +159,7 @@ defmodule MyHiFi.Player.SkipTest do
          %{device: device, limit: limit, border: border} do
       from = border + 50 * @slow_bytes
 
-      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, -30_000, limit)
+      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, -30_000, limit, :mp3)
 
       assert -ms == ms_of(1000 - div(byte, @fast_bytes) + 50)
       assert_in_delta ms, -30_000, 3000
@@ -156,7 +169,7 @@ defmodule MyHiFi.Player.SkipTest do
          %{device: device, limit: limit, border: border} do
       from = 900 * @fast_bytes
 
-      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, 20_000, limit)
+      assert {:ok, %{byte: byte, ms: ms}} = Skip.place(device, from, 20_000, limit, :mp3)
 
       assert byte > border, "the skip must reach into the slow region"
       assert ms == ms_of(100 + div(byte - border, @slow_bytes))
@@ -168,14 +181,66 @@ defmodule MyHiFi.Player.SkipTest do
     test "a skip gives an error", %{path: path} do
       device = open(path, :binary.copy(<<0>>, 100_000))
 
-      assert {:error, :no_frame} = Skip.place(device, 50_000, 15_000, 100_000)
-      assert {:error, :no_frame} = Skip.place(device, 50_000, -15_000, 100_000)
+      assert {:error, :no_frame} = Skip.place(device, 50_000, 15_000, 100_000, :mp3)
+      assert {:error, :no_frame} = Skip.place(device, 50_000, -15_000, 100_000, :mp3)
     end
   end
 
   test "a skip of no time moves nothing", %{path: path} do
     device = open(path, region(200, @fast, @fast_bytes))
 
-    assert {:ok, %{byte: 1000, ms: 0}} = Skip.place(device, 1000, 0, 200 * @fast_bytes)
+    assert {:ok, %{byte: 1000, ms: 0}} = Skip.place(device, 1000, 0, 200 * @fast_bytes, :mp3)
+  end
+
+  describe "a file of AAC" do
+    test "a forward skip moves the time that it names", %{path: path} do
+      device = open(path, region(2000, @adts, @adts_bytes))
+      limit = 2000 * @adts_bytes
+
+      assert {:ok, %{byte: byte, ms: ms}} =
+               Skip.place(device, 100 * @adts_bytes, 30_000, limit, :aac)
+
+      assert byte > 100 * @adts_bytes
+      assert rem(byte, @adts_bytes) == 0
+      assert_in_delta ms, 30_000, div(@adts_us, 1000) + 1
+    end
+
+    test "a backward skip moves the time that it names", %{path: path} do
+      device = open(path, region(2000, @adts, @adts_bytes))
+      limit = 2000 * @adts_bytes
+
+      assert {:ok, %{byte: byte, ms: ms}} =
+               Skip.place(device, 1800 * @adts_bytes, -30_000, limit, :aac)
+
+      assert byte < 1800 * @adts_bytes
+      assert rem(byte, @adts_bytes) == 0
+      assert_in_delta ms, -30_000, div(@adts_us, 1000) + 1
+    end
+
+    test "a skip past the start of the file stops at the start", %{path: path} do
+      device = open(path, region(200, @adts, @adts_bytes))
+      limit = 200 * @adts_bytes
+
+      assert {:ok, %{byte: 0, ms: ms}} =
+               Skip.place(device, 10 * @adts_bytes, -60_000, limit, :aac)
+
+      assert_in_delta ms, -div(10 * @adts_us, 1000), 1
+    end
+  end
+
+  describe "a codec that this firmware reads no frame of" do
+    test "it gives an error and it moves nothing", %{path: path} do
+      device = open(path, region(200, @adts, @adts_bytes))
+
+      assert {:error, {:no_frames, :vorbis}} =
+               Skip.place(device, 100 * @adts_bytes, 30_000, 200 * @adts_bytes, :vorbis)
+    end
+
+    # A skip of no time answers before it reads anything, so it needs no reader.
+    test "a skip of no time still moves nothing", %{path: path} do
+      device = open(path, region(200, @adts, @adts_bytes))
+
+      assert {:ok, %{byte: 500, ms: 0}} = Skip.place(device, 500, 0, 200 * @adts_bytes, :vorbis)
+    end
   end
 end

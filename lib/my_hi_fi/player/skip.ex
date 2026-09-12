@@ -7,7 +7,18 @@ defmodule MyHiFi.Player.Skip do
   calls it, and `MyHiFi.Player` adds the time that it reports to the count that a
   person reads.
 
-  ## Forward is a walk
+  ## Two strategies, and the shape of a frame decides which
+
+  **MP3 and AAC name the length of each frame, and FLAC names the time of each
+  frame.** That one difference gives two strategies, and `place/5` chooses by the
+  codec.
+
+  - `MyHiFi.Player.Mp3Frame` and `MyHiFi.Player.AdtsFrame` name bytes, so this module
+    walks the frames and sums the time. The two sections below describe that walk.
+  - `MyHiFi.Player.FlacFrame` names samples, so it bisects the file and needs neither
+    a walk nor a measurement. Read that module for its own reasons.
+
+  ## Forward is a walk, for a codec that names bytes
 
   `MyHiFi.Player.Mp3Frame.forward/4` adds the length of each frame until the sum
   reaches the time, so a forward skip is one walk and it needs nothing else. The walk
@@ -18,7 +29,7 @@ defmodule MyHiFi.Player.Skip do
   played. A file that still grows waits for the bytes, which is what
   `MyHiFi.Player.FileSource` already does when the network is slower than the audio.
 
-  ## Backward is a measurement
+  ## Backward is a measurement, for a codec that names bytes
 
   A frame has no pointer to the frame before it, so nothing walks backward. This
   therefore chooses a byte and then measures what it chose:
@@ -40,6 +51,8 @@ defmodule MyHiFi.Player.Skip do
   from the request is a skip that a person calls correct.
   """
 
+  alias MyHiFi.Player.AdtsFrame
+  alias MyHiFi.Player.FlacFrame
   alias MyHiFi.Player.Mp3Frame
 
   # How far from the request a measurement may land before this measures again. A
@@ -60,42 +73,65 @@ defmodule MyHiFi.Player.Skip do
   carries the same sign, and it is the time that this measured and not the time that
   the caller asked for.
 
-  This reads MP3 frames alone, so `MyHiFi.Player` refuses a skip of another format
-  before it reaches the pipeline. 8771 of the 8773 episodes of the measurement of
-  2026-08-24 hold `audio/mpeg`.
+  `format` names the codec of the file, and it decides which reader of frames answers.
+  A format that no reader holds gives `{:error, {:no_frames, format}}`, and
+  `MyHiFi.Player` refuses such a skip before it reaches the pipeline.
   """
-  @spec place(:file.fd(), non_neg_integer(), integer(), non_neg_integer()) ::
+  @spec place(:file.fd(), non_neg_integer(), integer(), non_neg_integer(), atom()) ::
           {:ok, %{byte: non_neg_integer(), ms: integer()}} | {:error, term()}
-  def place(_device, from, 0, _limit), do: {:ok, %{byte: from, ms: 0}}
+  def place(device, from, ms, limit, format)
 
-  def place(device, from, ms, limit) when ms > 0 do
-    Mp3Frame.forward(device, from, ms, limit)
-  end
+  def place(_device, from, 0, _limit, _format), do: {:ok, %{byte: from, ms: 0}}
 
-  def place(device, from, ms, limit) do
-    with {:ok, bytes} <- Mp3Frame.bytes_of_ms(device, from, -ms, limit) do
-      back(device, from, -ms, from - bytes, limit)
+  # **FLAC needs no walk and no measurement.** Each header names the sample that its
+  # frame begins at, so `MyHiFi.Player.FlacFrame` bisects the file and reports an
+  # exact time. See that module for why a walk is impossible for this codec.
+  def place(device, from, ms, limit, :flac), do: FlacFrame.place(device, from, ms, limit)
+
+  def place(device, from, ms, limit, format) when ms > 0 do
+    with {:ok, frames} <- frames(format) do
+      frames.forward(device, from, ms, limit)
     end
   end
 
-  # The start of the file is as far back as a skip reaches, so this measures that span
-  # and gives it. A second measurement would ask for the same bytes again.
-  defp back(device, from, _wanted, candidate, limit) when candidate <= 0 do
-    measured(device, from, 0, limit)
+  def place(device, from, ms, limit, format) do
+    with {:ok, frames} <- frames(format),
+         {:ok, bytes} <- frames.bytes_of_ms(device, from, -ms, limit) do
+      back(frames, device, from, -ms, from - bytes, limit)
+    end
   end
 
-  defp back(device, from, wanted, candidate, limit) do
-    with {:ok, place} <- measured(device, from, candidate, limit) do
-      nearer(device, from, wanted, place, limit)
+  @doc """
+  The reader of frames of one codec.
+
+  Every reader gives `boundary_before/3`, which is what a resume needs, so
+  `MyHiFi.Player.FileSource` reads this list as well as `MyHiFi.Player` does. A codec
+  that this answers for is a codec that a person can move inside.
+  """
+  @spec frames(atom()) :: {:ok, module()} | {:error, term()}
+  def frames(:mp3), do: {:ok, Mp3Frame}
+  def frames(:aac), do: {:ok, AdtsFrame}
+  def frames(:flac), do: {:ok, FlacFrame}
+  def frames(format), do: {:error, {:no_frames, format}}
+
+  # The start of the file is as far back as a skip reaches, so this measures that span
+  # and gives it. A second measurement would ask for the same bytes again.
+  defp back(frames, device, from, _wanted, candidate, limit) when candidate <= 0 do
+    measured(frames, device, from, 0, limit)
+  end
+
+  defp back(frames, device, from, wanted, candidate, limit) do
+    with {:ok, place} <- measured(frames, device, from, candidate, limit) do
+      nearer(frames, device, from, wanted, place, limit)
     end
   end
 
   # A second candidate reaches past the start of the file when the first measurement
   # was much shorter than the request, so this keeps it at the start.
-  defp measured(device, from, candidate, limit) do
-    with {:ok, start} <- Mp3Frame.boundary_at(device, max(candidate, 0), limit),
+  defp measured(frames, device, from, candidate, limit) do
+    with {:ok, start} <- frames.boundary_at(device, max(candidate, 0), limit),
          true <- start < from,
-         {:ok, %{ms: ms}} <- Mp3Frame.forward(device, start, :infinity, from) do
+         {:ok, %{ms: ms}} <- frames.forward(device, start, :infinity, from) do
       {:ok, %{byte: start, ms: -ms}}
     else
       false -> {:error, :no_frame}
@@ -104,13 +140,13 @@ defmodule MyHiFi.Player.Skip do
   end
 
   # A span of no time gives no error to scale by, so this keeps the first answer.
-  defp nearer(_device, _from, _wanted, %{ms: 0} = place, _limit), do: {:ok, place}
+  defp nearer(_frames, _device, _from, _wanted, %{ms: 0} = place, _limit), do: {:ok, place}
 
-  defp nearer(device, from, wanted, place, limit) do
+  defp nearer(frames, device, from, wanted, place, limit) do
     if near?(place.ms, wanted) do
       {:ok, place}
     else
-      case measured(device, from, scaled(from, wanted, place), limit) do
+      case measured(frames, device, from, scaled(from, wanted, place), limit) do
         {:ok, better} -> {:ok, better}
         {:error, _reason} -> {:ok, place}
       end

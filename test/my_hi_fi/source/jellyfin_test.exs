@@ -155,10 +155,11 @@ defmodule MyHiFi.Source.JellyfinTest do
       assert Jellyfin in Source.all()
     end
 
-    # A song lasts three minutes, and this source gives FLAC, which
-    # `MyHiFi.Player.Skip` cannot move inside.
-    test "it holds no skip and no search" do
-      assert Jellyfin.capabilities() == []
+    # **A skip needs a reader for every codec of the library**, or it works for one
+    # track and not the next. `MyHiFi.Player.Skip.frames/1` holds MP3, AAC and FLAC,
+    # which is every codec that `MyHiFi.Jellyfin.Server` asks a server for.
+    test "it holds a skip, and no search" do
+      assert Jellyfin.capabilities() == [:skip]
     end
 
     test "a device with no link is not ready, so no job asks the server" do

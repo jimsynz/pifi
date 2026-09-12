@@ -435,9 +435,57 @@ defmodule MyHiFi.PlayerControlsTest do
       assert {:error, :cannot_skip} = Player.skip(30_000)
     end
 
-    # `MyHiFi.Player.Skip` reads MP3 frames, and an ADTS frame needs another parser.
-    test "a format that holds no frame reader gives an error" do
+    # `MyHiFi.Player.AdtsFrame` reads AAC, so a track of that codec moves in the same
+    # way that an episode of MP3 does.
+    test "a track of AAC takes a skip" do
       Episodes.holds(format: :aac)
+      playing(1)
+
+      assert :ok = Player.skip(30_000)
+    end
+
+    # `MyHiFi.Player.FlacFrame` bisects the file, because a FLAC header names the
+    # sample that its frame begins at and never the length of the frame.
+    test "a track of FLAC takes a skip" do
+      Episodes.holds(format: :flac)
+      playing(1)
+
+      assert :ok = Player.skip(30_000)
+    end
+
+    # **`flac` reads one stream from its own beginning**, so the reader cannot move
+    # under it. A skip of such a codec builds the pipeline again, and the buffering
+    # state is what a person sees while it does. See
+    # `MyHiFi.Player.Pipeline.decoder_holds_stream?/1`.
+    test "a skip of FLAC builds the pipeline again" do
+      Episodes.holds(format: :flac)
+      playing(1)
+
+      assert :ok = Player.skip(30_000)
+
+      assert_receive %Events.Buffering{}, 2000
+      assert_receive %Events.Started{}, 2000
+      assert %{playing?: true} = Player.state()
+    end
+
+    # MP3 keeps the pipeline, because `Membrane.MP3.MAD.Decoder` finds the next frame
+    # by itself. A restart would cost a person the silence of a start for nothing.
+    test "a skip of MP3 keeps the pipeline" do
+      playing(1)
+
+      # The play published one of these before the sound began, and `playing/1` waits
+      # for the sound and leaves it. A second one would be the pipeline of a restart.
+      assert_received %Events.Buffering{}
+
+      assert :ok = Player.skip(30_000)
+
+      refute_receive %Events.Buffering{}, 500
+    end
+
+    # `MyHiFi.Player.Skip.frames/1` names the codecs that this firmware reads the
+    # frames of, and Ogg Vorbis is not one of them.
+    test "a format that holds no frame reader gives an error" do
+      Episodes.holds(format: :vorbis)
       playing(1)
 
       assert {:error, :cannot_skip} = Player.skip(30_000)

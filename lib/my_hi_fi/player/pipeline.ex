@@ -148,6 +148,7 @@ defmodule MyHiFi.Player.Pipeline do
       uri: playable.uri,
       position_bytes: playable.position_bytes || 0,
       format: playable.format,
+      skip_ms: playable[:skip_ms] || 0,
       buffer_bytes: buffer_bytes
     })
   end
@@ -241,6 +242,25 @@ defmodule MyHiFi.Player.Pipeline do
   # `Membrane.RemoteStream` with no content format, and a port decoder reads a pipe,
   # so it loses nothing.
   defp adapter(link, _playable), do: link
+
+  @doc """
+  Whether the decoder of one playable holds the state of the stream.
+
+  **A program that decodes through a port reads one stream from its own beginning.**
+  A skip that moves the reader hands it a frame that stops early and then a whole
+  one, and `flac` gives up: a measurement on the board on 2026-09-11 logged
+  `flac stopped with status 1` 1.5 seconds after a skip of 60 seconds, and the player
+  started the track again.
+
+  `MyHiFi.Player` therefore builds the pipeline again for such a codec, and
+  `MyHiFi.Player.FileSource` does the skip before a byte leaves it. A decoder of
+  Membrane finds the next frame by itself, so MP3 and AAC keep the pipeline and the
+  reader moves inside it.
+
+  The list is the one that `decoder/2` below sends to `MyHiFi.Player.PortDecoder`.
+  """
+  @spec decoder_holds_stream?(map()) :: boolean()
+  def decoder_holds_stream?(%{format: format}), do: format in [:flac, :vorbis]
 
   # MAD gives 24-bit samples, and FDK gives 16-bit ones. The sink reads the format
   # from the stream and tells `aplay`, so neither one needs a resampler.

@@ -127,8 +127,28 @@ Licence: Apache-2.0.
   The player therefore calls the pipeline and `MyHiFi.Player.FileSource` moves the byte
   that it reads. **A skip needs no bitrate either:** `MyHiFi.Player.Mp3Frame` walks the
   frame headers and `MyHiFi.Player.Skip` measures the span that it lands on, because 11
-  of 46 real episodes hold more than one bitrate. This holds for MP3 alone, and 8771 of
-  8773 measured episodes hold `audio/mpeg`.
+  of 46 real episodes hold more than one bitrate.
+  - **The shape of a frame gives two strategies, and `MyHiFi.Player.Skip.place/5`
+    chooses by the codec.** MP3 and AAC name the length of each frame, so this
+    firmware walks the frames and sums the time. **A FLAC header names neither a
+    length nor a bitrate**: it names the number of the frame, or of the first sample
+    of it, so `MyHiFi.Player.FlacFrame` bisects the file instead and reports a time
+    that is exact and not measured.
+  - **A skip of FLAC that lands one byte inside a frame plays nothing at all.** A
+    measurement on the host on 2026-09-11 gave
+    `FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC after processing 0 samples` and no
+    audio. A sync word alone cannot be trusted, and the other two readers confirm a
+    frame with the frame that follows it, which this one cannot. **The CRC-8 of the
+    header is what makes a FLAC frame real.**
+  - **A skip of FLAC needs no restart of the decoder.** The same measurement spliced
+    the frames of one place on to the audio of another, forward and backward, and
+    `flac --decode --stdout --silent -` gave every remaining sample. Each frame
+    carries its own rate, channel count and width, so the program needs neither the
+    `fLaC` marker nor the metadata again.
+  - `MyHiFi.Player.Skip.frames/1` is the one list of the codecs that this firmware
+    reads the frames of. `MyHiFi.Player.skippable?/1` and
+    `MyHiFi.Player.FileSource.rewound/3` both read it, so a new codec needs a reader
+    and one line.
 - **A peripheral renders itself.** Do not build a central renderer and do not
   send pixels or frames to a screen. Send it typed events. A 128 by 64
   monochrome screen and a 320 by 240 colour screen need different layouts, and

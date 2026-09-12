@@ -70,14 +70,17 @@ defmodule MyHiFi.Source.Jellyfin do
   @impl MyHiFi.Source
   def icon, do: :jellyfin
 
-  # A song lasts three minutes, so no person moves inside one. `MyHiFi.Player.Skip`
-  # reads MP3 frames as well, and this source gives FLAC and AAC, so a skip would
-  # work for one track of a library and not for the next.
+  # **A skip works for every track of this library now.** It was absent while
+  # `MyHiFi.Player.Skip` read MP3 alone: a library of 1088 FLAC tracks and 268 MP3
+  # ones would have moved inside one track and not the next, and a control that works
+  # for some rows is worse than none. `MyHiFi.Player.FlacFrame` and
+  # `MyHiFi.Player.AdtsFrame` read the other two codecs that
+  # `MyHiFi.Jellyfin.Server` asks a server for, so the list is whole.
   #
   # A search is absent because the catalogue has the whole library already, and
   # `MyHiFiWeb.SearchLive` needs a source to say so. That comes later.
   @impl MyHiFi.Source
-  def capabilities, do: []
+  def capabilities, do: [:skip]
 
   @impl MyHiFi.Source
   def kinds, do: [container: "Albums", track: "Tracks"]

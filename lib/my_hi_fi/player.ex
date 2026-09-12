@@ -65,6 +65,7 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Player.Download
   alias MyHiFi.Player.Pipeline
   alias MyHiFi.Player.Prefetch
+  alias MyHiFi.Player.Skip
   alias MyHiFi.Settings
   alias MyHiFi.Source
 
@@ -378,10 +379,10 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_call({:skip, ms}, _from, %State{} = state) do
-    if skippable?(state) do
-      {:reply, ask_skip(state, ms), state}
-    else
-      {:reply, {:error, :cannot_skip}, state}
+    cond do
+      not skippable?(state) -> {:reply, {:error, :cannot_skip}, state}
+      Pipeline.decoder_holds_stream?(state.playable) -> restarted(state, ms)
+      true -> {:reply, ask_skip(state, ms), state}
     end
   end
 
@@ -738,17 +739,59 @@ defmodule MyHiFi.Player do
   end
 
   # A skip needs four things: a source that offers one, a track with an end, a file to
-  # read, and a format that `MyHiFi.Player.Skip` reads. `:download` is the transport
+  # read, and a format that a reader of frames holds. `:download` is the transport
   # that gives the file, and `MyHiFi.Player.FileSource` is the element that moves. All
   # four give one answer to a person: this track takes no skip.
   defp skippable?(%State{
          source: source,
-         playable: %{live?: false, transport: :download, format: :mp3}
+         playable: %{live?: false, transport: :download, format: format}
        }) do
-    :skip in source.capabilities()
+    match?({:ok, _frames}, Skip.frames(format)) and :skip in source.capabilities()
   end
 
   defp skippable?(%State{}), do: false
+
+  # **A skip of a codec whose decoder holds the state of the stream builds the
+  # pipeline again.** The reader cannot move under such a decoder: it reads one
+  # stream from its own beginning, and a skip hands it half of a frame and then a
+  # whole one. See `MyHiFi.Player.Pipeline.decoder_holds_stream?/1`.
+  #
+  # The cost is small now. `MyHiFi.Output.APlayPort` keeps the sound card across a
+  # pipeline, so a start no longer holds the silence of about one second unless the
+  # format of the audio changed, and the file is on the card already.
+  #
+  # **This resolves nothing again.** The playable of the state already names the file
+  # and the place, so the source reads no service and the download reads no network.
+  # `MyHiFi.Player.FileSource` does the skip before a byte leaves it, and it reports
+  # the time that it moved in the notification that a skip always sends.
+  defp restarted(%State{} = state, ms) do
+    playable =
+      state.playable
+      |> Map.put(:position_bytes, state.position_bytes || 0)
+      |> Map.put(:skip_ms, ms)
+      |> Map.put(:position_ms, position_ms(state))
+
+    with {:ok, sink} <- sink(state),
+         state = stop_pipeline(state),
+         {:ok, pipeline} <- start_pipeline(playable, sink, state) do
+      Event.publish(:player, %Events.Buffering{percent: 0})
+
+      {:reply, :ok,
+       %State{
+         state
+         | playable: playable,
+           pipeline: pipeline,
+           monitor: Process.monitor(pipeline),
+           started_at: nil,
+           asked_at: System.monotonic_time(),
+           offset_ms: playable.position_ms
+       }}
+    else
+      {:error, reason} ->
+        Logger.warning("A skip could not start the pipeline again: #{inspect(reason)}")
+        {:reply, {:error, reason}, state}
+    end
+  end
 
   defp ask_skip(%State{pipeline: pipeline}, ms) do
     Membrane.Pipeline.call(pipeline, {:skip, ms}, @skip_timeout)

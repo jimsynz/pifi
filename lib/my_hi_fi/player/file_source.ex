@@ -36,7 +36,7 @@ defmodule MyHiFi.Player.FileSource do
   require Membrane.Logger
 
   alias MyHiFi.Player.Download
-  alias MyHiFi.Player.Mp3Frame
+  alias MyHiFi.Player.FlacFrame
   alias MyHiFi.Player.Skip
 
   # How far the reader moves before it tells the player where it is. 16 KB is about
@@ -88,8 +88,19 @@ defmodule MyHiFi.Player.FileSource do
       spec: atom(),
       default: :mp3,
       description: """
-      The codec of the file. A resume steps back to a frame boundary, and only
-      `:mp3` carries frames that `MyHiFi.Player.Mp3Frame` reads.
+      The codec of the file. A resume steps back to a frame boundary, and
+      `MyHiFi.Player.Skip.frames/1` says which codecs carry frames that this
+      firmware reads.
+      """
+    ],
+    skip_ms: [
+      spec: integer(),
+      default: 0,
+      description: """
+      How far to move from `position_bytes` before the first byte leaves this
+      element. **A decoder that holds the state of a stream cannot take a skip while
+      it runs**, so `MyHiFi.Player` builds the pipeline again and gives the skip
+      here. It is 0 for every other start.
       """
     ],
     buffer_bytes: [
@@ -118,6 +129,8 @@ defmodule MyHiFi.Player.FileSource do
             key: String.t(),
             uri: String.t(),
             format: atom(),
+            skip_ms: integer(),
+            prefix: binary(),
             device: :file.fd() | nil,
             offset: non_neg_integer(),
             available: non_neg_integer(),
@@ -133,6 +146,8 @@ defmodule MyHiFi.Player.FileSource do
       :uri,
       :device,
       format: :mp3,
+      skip_ms: 0,
+      prefix: <<>>,
       offset: 0,
       available: 0,
       demand: 0,
@@ -151,6 +166,7 @@ defmodule MyHiFi.Player.FileSource do
        uri: options.uri,
        offset: options.position_bytes,
        format: options.format,
+       skip_ms: options.skip_ms,
        buffer_bytes: options.buffer_bytes
      }}
   end
@@ -162,7 +178,10 @@ defmodule MyHiFi.Player.FileSource do
     # bytes.
     case Download.ensure(state.key, state.uri) do
       {:ok, %{paths: paths, complete?: whole?}} ->
-        {[stream_format: {:output, %Membrane.RemoteStream{}}], open(state, paths, whole?)}
+        {state, moved} = state |> open(paths, whole?) |> sought()
+        state = prefixed(state)
+
+        {[stream_format: {:output, %Membrane.RemoteStream{}}] ++ moved, state}
 
       {:error, reason} ->
         raise "Could not read #{state.uri}: #{inspect(reason)}"
@@ -209,10 +228,10 @@ defmodule MyHiFi.Player.FileSource do
   # one measures what it chose. The span says how long that reading takes, and the
   # direction says which of the two paths did it. See `MyHiFi.Player.Skip`.
   defp placed(%State{} = state, ms) do
-    metadata = %{direction: direction(ms)}
+    metadata = %{direction: direction(ms), format: state.format}
 
     :telemetry.span([:my_hi_fi, :player, :skip], metadata, fn ->
-      result = Skip.place(state.device, state.offset, ms, state.available)
+      result = Skip.place(state.device, state.offset, ms, state.available, state.format)
       {result, moved(metadata, result)}
     end)
   end
@@ -264,7 +283,7 @@ defmodule MyHiFi.Player.FileSource do
           | device: device,
             available: size,
             whole?: whole?,
-            offset: state.offset |> rewound(device, state.format) |> begin_at(size, whole?)
+            offset: state.offset |> begun(device, state) |> begin_at(size, whole?)
         }
 
       nil ->
@@ -284,24 +303,81 @@ defmodule MyHiFi.Player.FileSource do
   @spec rewound(non_neg_integer(), :file.fd(), atom()) :: non_neg_integer()
   def rewound(offset, _device, _format) when offset <= 0, do: 0
 
-  def rewound(offset, device, :mp3) do
-    case Mp3Frame.boundary_before(device, offset, @rewind_bytes) do
-      {:ok, byte} ->
-        Membrane.Logger.info("A resume of #{offset} begins at #{byte}.")
-        byte
-
-      # A file with no frame where this looked still plays. The step back is
-      # what stops a person from losing a word, and the alignment costs MAD under two
-      # frames when it is absent.
+  def rewound(offset, device, format) do
+    with {:ok, frames} <- Skip.frames(format),
+         {:ok, byte} <- frames.boundary_before(device, offset, @rewind_bytes) do
+      Membrane.Logger.info("A resume of #{offset} begins at #{byte}.")
+      byte
+    else
+      # A codec that no reader holds, and a file with no frame where this looked,
+      # both still play. The step back is what stops a person from losing a word, and
+      # the alignment costs the decoder under two frames when it is absent.
       {:error, reason} ->
         Membrane.Logger.warning("Could not align a resume of #{offset}: #{inspect(reason)}")
         max(offset - @rewind_bytes, 0)
     end
   end
 
-  # Another codec has frames of another shape, so this steps back and aligns
-  # nothing. A repeat of some audio is still better than a step over some.
-  def rewound(offset, _device, _format), do: max(offset - @rewind_bytes, 0)
+  # **A pipeline that begins with a skip does the skip here**, before a byte leaves
+  # this element, so the decoder reads one stream and never two. `MyHiFi.Player`
+  # builds the pipeline again for a codec whose decoder holds the state of the
+  # stream. See `MyHiFi.Player.Pipeline.decoder_holds_stream?/1`.
+  #
+  # The parent learns the time that this really moved, in the same notification that
+  # a skip of a running pipeline sends, so the count that a person reads follows the
+  # audio either way.
+  # **A decoder that reads a container needs the head of the file.** A stream that
+  # begins in the middle of the audio carries no STREAMINFO, so `flac` wrote a WAV
+  # header of `channels: 0` and `bits: 0` and `MyHiFi.Player.PortDecoder` stopped on
+  # it. `MyHiFi.Player.FlacFrame.header/1` gives the 42 bytes that answer it, and
+  # they go in front of the first frame.
+  #
+  # A start at the first byte needs none of this, because the file carries its own
+  # head. MP3 and AAC need none either: a frame of those names its own rate and
+  # width.
+  defp prefixed(%State{offset: 0} = state), do: state
+
+  defp prefixed(%State{format: :flac} = state) do
+    case FlacFrame.header(state.device) do
+      {:ok, header} ->
+        %State{state | prefix: header}
+
+      {:error, reason} ->
+        Membrane.Logger.warning("Could not read the head of the file: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp prefixed(%State{} = state), do: state
+
+  defp sought(%State{skip_ms: 0} = state), do: {state, []}
+
+  defp sought(%State{} = state) do
+    case placed(state, state.skip_ms) do
+      {:ok, place} ->
+        Membrane.Logger.info(
+          "A start at #{state.offset} with a skip of #{state.skip_ms} ms moved " <>
+            "#{place.ms} ms, to #{place.byte}."
+        )
+
+        state = %State{state | offset: place.byte, told: place.byte, skip_ms: 0}
+
+        {state, [notify_parent: {:skipped, place}]}
+
+      {:error, reason} ->
+        Membrane.Logger.warning("Could not skip #{state.skip_ms} ms: #{inspect(reason)}")
+
+        {%State{state | skip_ms: 0}, []}
+    end
+  end
+
+  # **A pending skip needs the byte that it was given, and no step back.** The step
+  # back belongs to a resume, where this element read further than a person heard. A
+  # skip names a place that no person has heard, so 96 KB before it is 96 KB of the
+  # wrong audio.
+  defp begun(offset, _device, %State{skip_ms: skip_ms}) when skip_ms != 0, do: offset
+
+  defp begun(offset, device, %State{format: format}), do: rewound(offset, device, format)
 
   # A place past the end of a whole file means the person reached the end, so this
   # begins there and the stream ends at once. A place past the end of a file that
@@ -356,8 +432,8 @@ defmodule MyHiFi.Player.FileSource do
 
         {actions, state} = telling(state)
 
-        {[buffer: {:output, %Membrane.Buffer{payload: payload}}] ++
-           actions ++ continuing(state), state}
+        {[buffer: {:output, %Membrane.Buffer{payload: state.prefix <> payload}}] ++
+           actions ++ continuing(state), %State{state | prefix: <<>>}}
 
       # The file is shorter than the count that the download reported, so the next
       # message says what it really is.
