@@ -1574,6 +1574,56 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       assert html =~ MyHiFi.Artwork.thumbnail_path(album.artwork_url)
     end
 
+    # **The line breaks are the publisher\'s, and HTML collapses them.** 43% of the
+    # descriptions of one real library on 2026-09-14 held one, so a biography of five
+    # paragraphs read as a single block of text.
+    test "the words keep the line breaks that a publisher wrote", %{conn: conn} do
+      {_artist, album} = collection_tree()
+
+      Playback.upsert_item!(%{
+        source: "podcasts",
+        source_ref: album.source_ref,
+        kind: :container,
+        title: album.title,
+        description: "One paragraph.\n\nAnd another."
+      })
+
+      {:ok, _view, html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      assert html =~ "whitespace-pre-line"
+    end
+
+    # That library gave a median of 1,793 bytes and a largest of 36,199, so the whole of
+    # one at the head of a list would bury the first row of it.
+    test "a long description clips, and a person can open it", %{conn: conn} do
+      {_artist, album} = collection_tree()
+
+      Playback.upsert_item!(%{
+        source: "podcasts",
+        source_ref: album.source_ref,
+        kind: :container,
+        title: album.title,
+        description: String.duplicate("A very long review of this record. ", 40)
+      })
+
+      {:ok, view, html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      assert html =~ "line-clamp-3"
+      assert html =~ "group-open:line-clamp-none"
+      assert has_element?(view, "details summary", "More")
+    end
+
+    # A person would otherwise press `More` and read what they had already read.
+    test "a description that three lines hold draws no control", %{conn: conn} do
+      {_artist, album} = collection_tree()
+
+      {:ok, view, html} = live(conn, "#{@podcasts}/subscriptions/#{album.id}")
+
+      assert html =~ "What the publisher wrote about it."
+      refute html =~ "line-clamp-3"
+      refute has_element?(view, "details summary")
+    end
+
     # A person reaches an album from the list of albums, from the favourites and from a
     # search, and no crumb of those paths names the artist.
     test "it names the collection that holds this one", %{conn: conn} do

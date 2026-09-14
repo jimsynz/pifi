@@ -1,0 +1,17 @@
+<!-- The Plex chevron, the mark that every Plex client shows. Traced from
+     https://commons.wikimedia.org/wiki/File:Plex_favicon.png, by Plex Inc.
+     Wikimedia holds it as public domain, because a chevron of six straight
+     sides carries no copyright. **The mark is a trademark of Plex Inc. even
+     so**, and this firmware draws it to name the service that a person linked,
+     which is what a trademark is for. See the note in
+     `MyHiFiWeb.CoreComponents`.
+
+     The six points come from a measurement of that file, at a threshold of the
+     red channel: the stroke is 31 wide at every row, the top runs from x=47 to
+     x=77 at y=23, the point is at (110, 75.5), and the notch is at (80, 75.5).
+     The bottom half is the mirror of the top. The viewBox holds the mark alone,
+     with none of the padding of the favicon, so it fills a span in the way that
+     `brand/jellyfin.svg` does. -->
+<svg viewBox="47 23 63 105" xmlns="http://www.w3.org/2000/svg">
+<path d="M47 23H77L110 75.5L77 128H47L80 75.5Z" fill="white"/>
+</svg>

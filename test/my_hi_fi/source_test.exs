@@ -33,7 +33,7 @@ defmodule MyHiFi.SourceTest do
       Source.enable(Source.Podcasts, false)
 
       refute Source.enabled?(Source.Podcasts)
-      assert Source.enabled() == [Source.InternetRadio, Source.Jellyfin]
+      assert Source.enabled() == [Source.InternetRadio, Source.Jellyfin, Source.Plex]
       assert Source.Podcasts in Source.all()
     end
 

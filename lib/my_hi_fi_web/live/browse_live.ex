@@ -473,6 +473,51 @@ defmodule MyHiFiWeb.BrowseLive do
     """
   end
 
+  attr :text, :string, default: nil
+
+  # What a publisher wrote about one collection.
+  #
+  # **The line breaks are the publisher\'s, and HTML collapses them.** 43% of the
+  # descriptions of one real library on 2026-09-14 held one, so a biography of five
+  # paragraphs read as a single block of text. `whitespace-pre-line` draws them.
+  #
+  # **The length is not this page to choose, and it cannot all be drawn either.** That
+  # same library gave a median of 1,793 bytes, 41% above 2,000, and a largest of 36,199.
+  # The whole of one at the head of a list would bury the first row of it, so three
+  # lines say what a thing is and a person who wants the rest presses.
+  #
+  # `<details>` is what holds that press, because it needs no state of the LiveView, no
+  # JavaScript, and no event to reset when a person opens another collection.
+  defp description(%{text: nil} = assigns), do: ~H""
+
+  defp description(%{text: ""} = assigns), do: ~H""
+
+  # **A description that three lines already hold draws no control**, or a person would
+  # press `More` and read what they had already read. The count of the bytes is a guess
+  # at what three lines hold, and it is a low one on purpose: a narrow screen fits fewer
+  # words in a line, so a description near the edge gets the control it may need.
+  defp description(%{text: text} = assigns) when byte_size(text) <= 120 do
+    ~H"""
+    <p class="mt-1 whitespace-pre-line text-xs text-ink-dim">{@text}</p>
+    """
+  end
+
+  defp description(assigns) do
+    ~H"""
+    <details class="group mt-1">
+      <summary class="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <span class="line-clamp-3 whitespace-pre-line text-xs text-ink-dim group-open:line-clamp-none">
+          {@text}
+        </span>
+        <span class="mt-0.5 block text-xs text-ink-faint group-hover:text-accent">
+          <span class="group-open:hidden">More</span>
+          <span class="hidden group-open:inline">Less</span>
+        </span>
+      </summary>
+    </details>
+    """
+  end
+
   attr :item, :any, required: true
   attr :playable?, :boolean, required: true
 
@@ -482,9 +527,7 @@ defmodule MyHiFiWeb.BrowseLive do
   # mean "play every track of every album of this artist", and a person who opened an
   # artist asked to read the albums. `tracks_only?/1` answers that with one count.
   #
-  # The description is what a publisher wrote, so its length is not this page to choose.
-  # Three lines is enough to know what a thing is, and it leaves the first rows of the
-  # list in sight on a telephone.
+  # `description/1` holds what a publisher wrote, and why three lines of it.
   defp collection_header(assigns) do
     assigns = assign(assigns, :parent, parent(assigns.item))
 
@@ -511,9 +554,7 @@ defmodule MyHiFiWeb.BrowseLive do
         <p :if={is_nil(@parent) and @item.subtitle} class="truncate text-xs text-ink-faint">
           {@item.subtitle}
         </p>
-        <p :if={@item.description} class="mt-1 line-clamp-3 text-xs text-ink-dim">
-          {@item.description}
-        </p>
+        <.description text={@item.description} />
       </div>
 
       <div class="flex shrink-0 items-center gap-1">

@@ -230,11 +230,25 @@ config :my_hi_fi, MyHiFi.Repo,
   cache_size: -4_000,
   pool_size: 10
 
-# **Two jobs at a time, because a job holds a connection while it runs.** The pool above
-# holds four, and a queue of ten would take every one of them and leave none for the web
-# interface and none for the player. Two also suits a board of four cores that must keep
-# enough of them for the sound.
-config :my_hi_fi, Oban, queues: [default: 2]
+# **Two jobs at a time, because a job holds a connection while it runs**, and because a
+# board of four cores must keep enough of them for the sound. The queue of ten that
+# `config/config.exs` names would leave neither.
+#
+# **`artwork` is one at a time, and it is a queue of its own.** A read of a library asks
+# for a picture of every container that it writes, so that worker arrives in thousands
+# while every other job arrives in ones, and each one reads a picture and then runs
+# `vipsthumbnail` over the bytes. Two of them at once was measured on a board on
+# 2026-09-14, during a read of a library of 63,010 tracks.
+#
+# **Lowering `default` instead would have starved the audio of a mark.**
+# `cache_audio` of `MyHiFi.Playback.Item` is in that queue, and so is a read of a
+# library that runs for 80 minutes, so a person who marked an album would have waited
+# for the read before a note of it reached the card.
+#
+# **This list replaces the one of `config/config.exs`, and does not add to it**, so a
+# queue that is absent here does not run on a device. That is why `artwork` is named in
+# both files.
+config :my_hi_fi, Oban, queues: [default: 2, artwork: 1]
 
 config :my_hi_fi, MyHiFiWeb.Endpoint,
   http: [ip: {0, 0, 0, 0}, port: 80],

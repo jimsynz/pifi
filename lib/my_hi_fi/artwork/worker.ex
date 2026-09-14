@@ -37,8 +37,19 @@ defmodule MyHiFi.Artwork.Worker do
   # `states` leaves a job that finished out, so a picture that an eviction took is read
   # again when something asks for it. The arguments hold one address and no nil, so the
   # trap of the SQLite engine that `CLAUDE.md` names does not reach this.
+  # **A queue of its own, and one job of it at a time.** A read of a library asks for a
+  # picture of every container that it writes, so this worker arrives in thousands and
+  # every other job of this firmware arrives in ones. Each job reads a picture over the
+  # network and then runs `vipsthumbnail` over the bytes, and this board holds four
+  # cores that a stream of audio also needs.
+  #
+  # **`default` cannot serve both.** Lowering that queue to one would put this behind a
+  # read of a library that runs for 80 minutes, and `cache_audio` of
+  # `MyHiFi.Playback.Item` is in it: a person who marked an album would then wait for
+  # the read before a note of it reached the card. A queue of its own holds the pictures
+  # to one at a time and leaves everything else as it was.
   use Oban.Worker,
-    queue: :default,
+    queue: :artwork,
     max_attempts: 3,
     unique: [
       period: :infinity,

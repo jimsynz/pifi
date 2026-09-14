@@ -22,10 +22,21 @@ defmodule MyHiFiWeb.CoreComponents do
   # A name of `brand-` is the mark of one service, and `assets/vendor/brand.js` draws
   # it in the way that `heroicons.js` draws the rest. Both become the mask of a span,
   # so a mark takes the accent colour of the interface like every other icon.
+  # **A mark carries a licence and a trademark, and the two are not the same question.**
+  # The Jellyfin mark is CC-BY-SA-4.0, and the Plex chevron carries no copyright at all,
+  # because six straight sides are not a work. Each one is still the trademark of the
+  # project that owns it, and this firmware draws it to name the service that a person
+  # linked. That is the use that a trademark exists for.
+  #
+  # **The row hides its text below the `sm` breakpoint**, so on a telephone the mark
+  # alone says which service a control opens. A wordmark is the wrong shape for that:
+  # the Plex logo of 2022 is the word `plex`, and 20 pixels of it is a smudge beside a
+  # label that already says Plex. `brand/plex.svg` is therefore the chevron.
   @source_icons %{
     cloud: "hero-cloud",
     jellyfin: "brand-jellyfin",
     library: "hero-rectangle-stack",
+    plex: "brand-plex",
     podcast: "hero-microphone",
     radio: "hero-signal",
     refresh: "hero-arrow-path",

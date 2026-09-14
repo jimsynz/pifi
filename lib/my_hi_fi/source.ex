@@ -504,7 +504,8 @@ defmodule MyHiFi.Source do
     Application.get_env(:my_hi_fi, :sources, [
       MyHiFi.Source.InternetRadio,
       MyHiFi.Source.Podcasts,
-      MyHiFi.Source.Jellyfin
+      MyHiFi.Source.Jellyfin,
+      MyHiFi.Source.Plex
     ])
   end
 

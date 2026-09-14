@@ -28,6 +28,15 @@ defmodule MyHiFi.Player.PipelineTest do
     })
   end
 
+  # A track of a library is a file that `MyHiFi.Player.Download` wrote, so it names a
+  # key and a place to begin at. See `MyHiFi.Player.FileSource`.
+  defp downloaded(overrides) do
+    Map.merge(
+      %{transport: :download, live?: false, key: "an-item", position_bytes: 0},
+      overrides
+    )
+  end
+
   describe "the combinations that a New Zealand station gives" do
     test "a plain HTTP stream of MP3" do
       assert {[spec: _spec], %{parent: _pid}} = init(%{transport: :http, format: :mp3})
@@ -50,6 +59,19 @@ defmodule MyHiFi.Player.PipelineTest do
     test "HLS with MP3 inside MPEG-TS, which 8 stations give" do
       assert {[spec: _spec], _state} =
                init(%{transport: :hls, container: :mpeg_ts, format: :mp3})
+    end
+  end
+
+  # **A sample of 550 tracks of one real Plex library on 2026-09-14 gave 311 FLAC, 161
+  # MP3 and 78 AAC in MP4.** The first two read as they are, and the third is one that
+  # the server converts, so it arrives as `:hls, :mpeg_ts, :mp3` above.
+  describe "the containers that a music library of a household gives" do
+    test "AAC in ADTS with no container" do
+      assert {[spec: _spec], _state} = init(downloaded(%{container: :none, format: :aac}))
+    end
+
+    test "FLAC as the server holds it" do
+      assert {[spec: _spec], _state} = init(downloaded(%{container: :none, format: :flac}))
     end
   end
 

@@ -225,6 +225,7 @@ defmodule MyHiFi.Playback.Item do
       accept [
         :source,
         :source_ref,
+        :source_key,
         :kind,
         :parent_id,
         :title,
@@ -391,6 +392,27 @@ defmodule MyHiFi.Playback.Item do
     attribute :source_ref, :string do
       description "What the source calls this item. It identifies the item there."
       allow_nil? false
+      public? true
+    end
+
+    attribute :source_key, :string do
+      description """
+      What a source needs to reach the audio, beside the address of the service.
+
+      **This is not `url`, and it is not `source_ref`.** `url` is the whole address,
+      and a source that keeps one there needs nothing here. `source_ref` identifies
+      the item, and a service that names the audio by something else writes that
+      thing here.
+
+      `MyHiFi.Source.Plex` is the one source that uses it. Plex serves the file as
+      it is, and it names the path of that file in the answer that lists a track. The
+      address of a play is that path with the access token of the moment behind it, so
+      the path keeps and the address does not. A track without this column would cost
+      a read of the server for each play and for each mark that reads on to the card.
+
+      A source that needs none leaves it empty.
+      """
+
       public? true
     end
 

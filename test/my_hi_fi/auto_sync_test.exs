@@ -3,6 +3,7 @@ defmodule MyHiFi.AutoSyncTest do
 
   alias MyHiFi.AutoSync
   alias MyHiFi.Jellyfin.Server
+  alias MyHiFi.Plex
   alias MyHiFi.Podcast.Index
   alias MyHiFi.Settings
   alias MyHiFi.Source
@@ -24,7 +25,8 @@ defmodule MyHiFi.AutoSyncTest do
           [
             Source.enabled_key(Source.InternetRadio),
             Source.enabled_key(Source.Podcasts),
-            Source.enabled_key(Source.Jellyfin)
+            Source.enabled_key(Source.Jellyfin),
+            Source.enabled_key(Source.Plex)
           ]
       )
     end)
@@ -185,6 +187,7 @@ defmodule MyHiFi.AutoSyncTest do
     test "it runs every job of a device that never synced" do
       configure_index()
       configure_jellyfin()
+      configure_plex()
 
       assert keys = AutoSync.run_due()
 
@@ -247,6 +250,11 @@ defmodule MyHiFi.AutoSyncTest do
     Settings.put!(Server.user_setting(), "a-user")
   end
 
+  defp configure_plex do
+    Settings.put!(Plex.Server.address_setting(), "http://plex.test:32400")
+    Settings.put!(Plex.Server.token_setting(), "a-token")
+  end
+
   defp service_keys do
     [
       Index.key_setting(),
@@ -254,7 +262,10 @@ defmodule MyHiFi.AutoSyncTest do
       Server.address_setting(),
       Server.token_setting(),
       Server.user_setting(),
-      Server.device_id_setting()
+      Server.device_id_setting(),
+      Plex.Server.address_setting(),
+      Plex.Server.token_setting(),
+      Plex.Server.client_id_setting()
     ]
   end
 

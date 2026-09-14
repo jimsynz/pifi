@@ -176,6 +176,16 @@ defmodule MyHiFi.Player.Pipeline do
     |> via_out(Pad.ref(:output, :audio), options: [stream_category: :audio])
   end
 
+  # **An m4a file is AAC in MP4, and it carries no ADTS header at all.** The frames sit
+  # in the `mdat` box and a table says where each one begins, so nothing in the bytes
+  # marks a frame and the decoder cannot find one. `Membrane.MP4.Demuxer.ISOM` reads
+  # that table and gives the frames, and `adapter/2` then writes the ADTS headers that
+  # the decoder wants.
+  #
+  # A music file holds one track, so `kind` is not needed. It is here because a file
+  # that carries a picture as a second track would otherwise link this pad to whichever
+  # track the demultiplexer reached first.
+  #
   defp demuxer(link, :none), do: link
 
   # An Ogg container needs no step here. The program that decodes it reads the

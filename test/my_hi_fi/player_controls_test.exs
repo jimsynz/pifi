@@ -54,7 +54,7 @@ defmodule MyHiFi.PlayerControlsTest do
          uri: "https://example.test/#{item.source_ref}.mp3",
          headers: [],
          transport: option(:transport, :download),
-         container: :none,
+         container: option(:container, :none),
          format: option(:format, :mp3),
          live?: option(:live?, false),
          position_ms: 0,

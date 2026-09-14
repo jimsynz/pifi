@@ -11,7 +11,8 @@ config :ash, default_string_length_count: :codepoints
 config :my_hi_fi, Oban,
   engine: Oban.Engines.Lite,
   notifier: Oban.Notifiers.PG,
-  queues: [default: 10],
+  # `artwork` is one at a time on purpose, and `MyHiFi.Artwork.Worker` says why.
+  queues: [default: 10, artwork: 1],
   repo: MyHiFi.Repo,
   # A job that finished stays in the table until something removes it, and this device
   # runs for years on an SD card. A week is long enough to read what happened and short
@@ -37,6 +38,7 @@ config :my_hi_fi,
     MyHiFi.Device,
     MyHiFi.Jellyfin,
     MyHiFi.Playback,
+    MyHiFi.Plex,
     MyHiFi.Podcast,
     MyHiFi.Radio,
     MyHiFi.Settings

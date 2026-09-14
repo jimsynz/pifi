@@ -140,6 +140,26 @@ defmodule MyHiFi.AutoSync do
       action: :cache_favourites,
       worker: MyHiFi.Jellyfin.Sync.Workers.Favourites,
       default_hours: 1
+    },
+    %{
+      key: "plex-library",
+      title: "Your Plex library",
+      description: "The artists, the albums and the tracks that the server holds.",
+      source: MyHiFi.Source.Plex,
+      resource: MyHiFi.Plex.Sync,
+      action: :sync_library,
+      worker: MyHiFi.Plex.Sync.Workers.Library,
+      default_hours: 24
+    },
+    %{
+      key: "plex-favourites",
+      title: "The audio of what you marked in Plex",
+      description: "The device reads each marked album and track on to the card.",
+      source: MyHiFi.Source.Plex,
+      resource: MyHiFi.Plex.Sync,
+      action: :cache_favourites,
+      worker: MyHiFi.Plex.Sync.Workers.Favourites,
+      default_hours: 1
     }
   ]
 
