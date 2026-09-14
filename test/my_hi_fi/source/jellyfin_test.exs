@@ -182,7 +182,7 @@ defmodule MyHiFi.Source.JellyfinTest do
   end
 
   describe "roots/0" do
-    test "the four branches read the catalogue and reach no server" do
+    test "the five branches read the catalogue and reach no server" do
       Req.Test.stub(Server, fn _conn -> raise "the server must not be asked" end)
 
       Fill.artists([
@@ -206,6 +206,7 @@ defmodule MyHiFi.Source.JellyfinTest do
                {"Artists", artists},
                {"Albums", albums},
                {"Recently added", recent},
+               {"Genres", genres},
                {"Favourites", favourites}
              ] = Jellyfin.roots()
 
@@ -216,6 +217,9 @@ defmodule MyHiFi.Source.JellyfinTest do
 
       assert [artists.kind, albums.kind, recent.kind, favourites.kind] ==
                [:item, :item, :item, :item]
+
+      # A genre is a facet, in the way that a country of a station is one.
+      assert genres.kind == :facet
 
       assert albums.facts == [:subtitle, :release_year]
       assert recent.facts == [:subtitle, :release_year]

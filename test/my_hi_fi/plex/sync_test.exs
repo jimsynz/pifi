@@ -5,6 +5,7 @@ defmodule MyHiFi.Plex.SyncTest do
   require Ash.Query
 
   alias MyHiFi.Event
+  alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
   alias MyHiFi.Plex
   alias MyHiFi.Plex.Fill
@@ -31,14 +32,15 @@ defmodule MyHiFi.Plex.SyncTest do
     }
   end
 
-  defp album(number, artist) do
+  defp album(number, artist, genres \\ []) do
     %{
       "ratingKey" => "album-#{number}",
       "title" => "Album #{number}",
       "parentRatingKey" => "artist-#{artist}",
       "parentTitle" => "Artist #{artist}",
       "summary" => "A review of album #{number}.",
-      "year" => 1998
+      "year" => 1998,
+      "Genre" => Enum.map(genres, &%{"tag" => &1})
     }
   end
 
@@ -140,6 +142,45 @@ defmodule MyHiFi.Plex.SyncTest do
       refute counts.skipped?
 
       assert length(all_items()) == 3
+    end
+
+    # **The genres arrive with the album, so a read asks the server for nothing more.**
+    # A genre becomes a facet, in the way that a country of a station does, and the
+    # Genres branch is then a plain read of the facets.
+    test "the genres of an album become facets of it" do
+      stub_library(one_section([artist(1)], [album(1, 1, ["Rap", "Trip Hop"])], []))
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      [album] = Item |> Ash.Query.filter(source_ref == "album-1") |> Ash.read!(load: [:facets])
+
+      assert Enum.map(album.facets, &to_string(&1.value.value)) |> Enum.sort() ==
+               ["Rap", "Trip Hop"]
+
+      assert Enum.map(album.facets, & &1.key) |> Enum.uniq() == [Fill.genre_key()]
+    end
+
+    # **The key names the source, so two libraries that both hold `Rock` hold two
+    # facets.** One shared key would count the albums of both libraries on one row.
+    test "the key of a genre names this source" do
+      assert Fill.genre_key() == "plex-genre"
+    end
+
+    test "an album that names no genre writes no facet" do
+      stub_library(one_section([artist(1)], [album(1, 1)], []))
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert Playback.facets_of_key!(Fill.genre_key()) == []
+    end
+
+    test "a second read of one genre writes one facet" do
+      stub_library(one_section([artist(1)], [album(1, 1, ["Rap"]), album(2, 1, ["Rap"])], []))
+
+      assert {:ok, _counts} = Plex.sync_library()
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert length(Playback.facets_of_key!(Fill.genre_key())) == 1
     end
 
     test "an album names its artist, and a track names its album" do

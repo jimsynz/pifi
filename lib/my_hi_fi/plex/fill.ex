@@ -66,9 +66,11 @@ defmodule MyHiFi.Plex.Fill do
   alias MyHiFi.Artwork
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
+  alias MyHiFi.Playback.ItemFacet
   alias MyHiFi.Plex.Server
 
   @source "plex"
+  @genre_key "plex-genre"
   @unknown_artist_ref "plex-artist-unknown"
 
   @doc """
@@ -100,10 +102,27 @@ defmodule MyHiFi.Plex.Fill do
   def albums(entries) do
     if Enum.any?(entries, &is_nil(&1.parent_ref)), do: unknown_artist()
 
-    entries
-    |> Enum.map(&%{&1 | parent_ref: &1.parent_ref || @unknown_artist_ref})
-    |> write(:container)
+    written =
+      entries
+      |> Enum.map(&%{&1 | parent_ref: &1.parent_ref || @unknown_artist_ref})
+      |> write(:container)
+
+    link_genres(entries)
+
+    written
   end
+
+  @doc """
+  The key that the genres of this source take in `MyHiFi.Playback.Facet`.
+
+  **The key names the source, and it must.** Two library sources both hold a genre
+  called `Rock`, and one shared key would give one facet row for the two of them. The
+  lists would still be right, because `MyHiFiWeb.BrowseLive` reads the items of a facet
+  by the source as well, and the count on the row of the facet would be the albums of
+  both libraries.
+  """
+  @spec genre_key() :: String.t()
+  def genre_key, do: @genre_key
 
   @doc "Write one page of tracks, and give the number that it wrote."
   @spec tracks([Server.entry()]) :: non_neg_integer()
@@ -194,6 +213,94 @@ defmodule MyHiFi.Plex.Fill do
         |> Ash.read!()
         |> Map.new(&{&1.source_ref, &1.id})
     end
+  end
+
+  # **The links go in one statement for each page, and not one for each genre.** A
+  # library of 4360 albums names about four genres each, so a write for each of those
+  # 17,000 links would cost the card a great deal, and a read of the library runs every
+  # day.
+  defp link_genres(entries) do
+    case Enum.reject(entries, &(Map.get(&1, :genres, []) == [])) do
+      [] -> :ok
+      named -> write_links(named, facet_ids(named), ids_of(named))
+    end
+  end
+
+  defp write_links(named, facets, items) do
+    wanted =
+      for entry <- named,
+          item_id = items[entry.ref],
+          name <- entry.genres,
+          facet_id = facets[name] do
+        {item_id, facet_id}
+      end
+
+    case Enum.reject(wanted, &MapSet.member?(held(items), &1)) do
+      [] -> :ok
+      rows -> insert_links(rows)
+    end
+  end
+
+  # **A link that the table already holds costs no write.** An upsert of every link
+  # would set the same values again, and that is a write of the card for each of the
+  # thousands of links of a library, on every read of it. A read that changed nothing
+  # therefore writes nothing at all now.
+  #
+  # `upsert?` stays for the rows that this does write, because a link is the identity of
+  # itself and a second writer must not raise.
+  defp held(items) do
+    ids = Map.values(items)
+
+    ItemFacet
+    |> Ash.Query.filter(item_id in ^ids)
+    |> Ash.read!()
+    |> MapSet.new(&{&1.item_id, &1.facet_id})
+  end
+
+  defp insert_links(rows) do
+    rows
+    |> Enum.map(fn {item_id, facet_id} -> %{item_id: item_id, facet_id: facet_id} end)
+    |> Ash.bulk_create!(ItemFacet, :upsert,
+      upsert?: true,
+      upsert_identity: :item_facet,
+      upsert_fields: [:item_id],
+      return_errors?: true
+    )
+
+    :ok
+  end
+
+  # **A facet that the table already holds costs no write.** A library names about a
+  # hundred genres, so after the first pages every name of a page is a row that this
+  # read finds. The read is of one key and it gives those hundred rows.
+  defp facet_ids(named) do
+    held =
+      @genre_key
+      |> Playback.facets_of_key!()
+      |> Map.new(&{to_string(&1.value.value), &1.id})
+
+    named
+    |> Enum.flat_map(& &1.genres)
+    |> Enum.uniq()
+    |> Enum.reduce(held, fn name, acc ->
+      Map.put_new_lazy(acc, name, fn -> written_facet(name) end)
+    end)
+  end
+
+  defp written_facet(name) do
+    Playback.upsert_facet!(%{
+      key: @genre_key,
+      value: %Ash.Union{type: :string, value: name}
+    }).id
+  end
+
+  defp ids_of(entries) do
+    refs = Enum.map(entries, & &1.ref)
+
+    Item
+    |> Ash.Query.filter(source == ^@source and source_ref in ^refs)
+    |> Ash.read!()
+    |> Map.new(&{&1.source_ref, &1.id})
   end
 
   defp to_item(entry, :container, parents) do

@@ -11,6 +11,7 @@ defmodule MyHiFi.Jellyfin.SyncTest do
   alias MyHiFi.Jellyfin.Fill
   alias MyHiFi.Jellyfin.Server
   alias MyHiFi.Jellyfin.Sync.Checkpoint
+  alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
   alias MyHiFi.Settings
   alias MyHiFi.Source
@@ -30,13 +31,14 @@ defmodule MyHiFi.Jellyfin.SyncTest do
     %{"Id" => "artist-#{number}", "Name" => "Artist #{number}"}
   end
 
-  defp album(number, artist) do
+  defp album(number, artist, genres \\ []) do
     %{
       "Id" => "album-#{number}",
       "Name" => "Album #{number}",
       "AlbumArtist" => "Artist #{artist}",
       "AlbumArtists" => [%{"Id" => "artist-#{artist}", "Name" => "Artist #{artist}"}],
-      "ProductionYear" => 1998
+      "ProductionYear" => 1998,
+      "Genres" => genres
     }
   end
 
@@ -87,6 +89,54 @@ defmodule MyHiFi.Jellyfin.SyncTest do
     |> Ash.Query.filter(^filter)
     |> Ash.Query.sort(title: :asc)
     |> Ash.read!()
+  end
+
+  describe "the genres of a record" do
+    # **The server names no genre unless a caller asks for one.** `Fields=Genres` is
+    # what asks, and a read of a real server gave four of them for one record.
+    test "they become facets of the album" do
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1, ["Rock", "Pop"])]
+      })
+
+      assert {:ok, _report} = Jellyfin.sync_library()
+
+      [album] = Item |> Ash.Query.filter(source_ref == "album-1") |> Ash.read!(load: [:facets])
+
+      assert album.facets |> Enum.map(&to_string(&1.value.value)) |> Enum.sort() == [
+               "Pop",
+               "Rock"
+             ]
+
+      assert album.facets |> Enum.map(& &1.key) |> Enum.uniq() == [Fill.genre_key()]
+    end
+
+    # **The key names the source, so two libraries that both hold `Rock` hold two
+    # facets.** One shared key would count the albums of both libraries on one row.
+    test "the key names this source" do
+      assert Fill.genre_key() == "jellyfin-genre"
+    end
+
+    test "an album that names none writes no facet" do
+      stub_library(%{"MusicArtist" => [artist(1)], "MusicAlbum" => [album(1, 1)]})
+
+      assert {:ok, _report} = Jellyfin.sync_library()
+
+      assert Playback.facets_of_key!(Fill.genre_key()) == []
+    end
+
+    test "a second read of one genre writes one facet" do
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1, ["Rock"]), album(2, 1, ["Rock"])]
+      })
+
+      assert {:ok, _report} = Jellyfin.sync_library()
+      assert {:ok, _report} = Jellyfin.sync_library()
+
+      assert length(Playback.facets_of_key!(Fill.genre_key())) == 1
+    end
   end
 
   describe "sync_library" do

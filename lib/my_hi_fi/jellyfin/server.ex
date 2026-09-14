@@ -119,7 +119,8 @@ defmodule MyHiFi.Jellyfin.Server do
           optional(:added_at) => DateTime.t() | nil,
           optional(:number) => pos_integer() | nil,
           optional(:disc) => pos_integer() | nil,
-          optional(:format) => :aac | :flac | :mp3
+          optional(:format) => :aac | :flac | :mp3,
+          optional(:genres) => [String.t()]
         }
 
   @typedoc """
@@ -438,9 +439,20 @@ defmodule MyHiFi.Jellyfin.Server do
           subtitle: presence(item["AlbumArtist"]),
           published_at: published_at(item),
           release_year: release_year(item["ProductionYear"]),
-          added_at: added_at(item)
+          added_at: added_at(item),
+          genres: genres(item)
         })
     end
+  end
+
+  # The server names each genre as a plain string, and a record of a real library gave
+  # four of them. A record that names none gives an empty list.
+  defp genres(item) do
+    item
+    |> Map.get("Genres", [])
+    |> List.wrap()
+    |> Enum.map(&presence/1)
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc """
@@ -575,7 +587,12 @@ defmodule MyHiFi.Jellyfin.Server do
   # all, and `DateCreated` only with `Fields=DateCreated`. The albums are the one
   # listing that asks, because `Recently added` is a list of albums and a page of
   # tracks is already the largest page that this source reads.
-  defp fields(:albums), do: [{"Fields", "DateCreated"}]
+  # **`Genres` is absent unless a caller asks for it as well.** A read of a server on
+  # 2026-09-14 gave `"Genres" => ["Indie Rock", "New Wave", "Post-Punk", "Rock"]` for a
+  # record with `Fields=Genres`, and no such key without it. The albums are the listing
+  # that asks, because a genre of this firmware is a facet of a record. See
+  # `MyHiFi.Jellyfin.Fill.genre_key/0`.
+  defp fields(:albums), do: [{"Fields", "DateCreated,Genres"}]
   defp fields(_kind), do: []
 
   defp parse(items, kind, address) do

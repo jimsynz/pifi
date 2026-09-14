@@ -76,8 +76,10 @@ defmodule MyHiFi.Source.Plex do
 
   require Ash.Query
 
+  alias MyHiFi.Playback.Facet
   alias MyHiFi.Playback.Item
   alias MyHiFi.Player.Hls
+  alias MyHiFi.Plex.Fill
   alias MyHiFi.Plex.Server
   alias MyHiFi.Plex.Sync
 
@@ -115,9 +117,15 @@ defmodule MyHiFi.Source.Plex do
       {"Albums", %{query: albums_query(), kind: :item, facts: [:subtitle, :release_year]}},
       {"Recently added",
        %{query: recently_added_query(), kind: :item, facts: [:subtitle, :release_year]}},
+      {"Genres", %{query: facet_query(Fill.genre_key()), kind: :facet}},
       {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle, :release_year]}}
     ]
   end
+
+  # A genre of this source is a facet, in the way that a country of a station is one, so
+  # the branch is a plain read of the facets and the page below it needs no rule of its
+  # own. See `MyHiFi.Plex.Fill.genre_key/0`.
+  defp facet_query(key), do: Ash.Query.for_read(Facet, :by_key, %{key: key})
 
   @doc """
   An album reads its tracks in the order that the record plays them.

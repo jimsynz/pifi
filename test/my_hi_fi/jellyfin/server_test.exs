@@ -96,7 +96,7 @@ defmodule MyHiFi.Jellyfin.ServerTest do
       assert {:ok, _page} = Server.page(:albums, 0)
 
       assert_receive {:request, "GET", "/Items", params, _headers}
-      assert params["Fields"] == "DateCreated"
+      assert params["Fields"] == "DateCreated,Genres"
     end
 
     # A page of tracks is the largest page that this source reads, and it needs the

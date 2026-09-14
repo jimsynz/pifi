@@ -153,7 +153,8 @@ defmodule MyHiFi.Plex.Server do
           optional(:disc) => pos_integer() | nil,
           optional(:part_key) => String.t() | nil,
           optional(:format) => :aac | :flac | :mp3 | :vorbis | :unknown,
-          optional(:container_format) => :none | :ogg
+          optional(:container_format) => :none | :ogg,
+          optional(:genres) => [String.t()]
         }
 
   @typedoc """
@@ -595,9 +596,21 @@ defmodule MyHiFi.Plex.Server do
           parent_ref: presence(ref_of(item["parentRatingKey"])),
           subtitle: presence(item["parentTitle"]),
           release_year: whole(item["year"]),
-          added_at: added_at(item["addedAt"])
+          added_at: added_at(item["addedAt"]),
+          genres: genres(item)
         })
     end
+  end
+
+  # **The genres arrive with the album, and this asks the server for nothing more.** A
+  # read of a real library on 2026-09-14 gave `"Genre" => [%{"tag" => "Rap"}]` in the
+  # answer that the sync already reads, so a genre costs no request of its own.
+  defp genres(item) do
+    item
+    |> Map.get("Genre", [])
+    |> List.wrap()
+    |> Enum.map(&presence(&1["tag"]))
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc """
