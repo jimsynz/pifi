@@ -10,19 +10,33 @@ defmodule MyHiFi.Plex.Companion.Router do
   Every command becomes a call of `MyHiFi.Playback`, so a person who presses pause on
   their telephone and a person who presses pause on the faceplate reach the same code.
 
-  ## Nothing here is a published specification
+  ## Plex documents none of this, so a real player was measured instead
 
-  Plex documents none of this. Every shape below comes from reading what a controller
-  library sends and what another player answers, so **each one is what an
-  implementation does and not what the protocol promises**. Two are worth naming,
-  because a measurement against a real controller will settle them and I could not:
+  Every shape below comes from a reading of Plexamp 4.13.2 on 2026-09-15, which is a
+  player of this protocol that works. Four answers of that measurement are the reason
+  that this module reads as it does, and each one corrected a guess:
 
-  - **The path of the timeline.** `python-plexapi` reads `/timeline/poll`, and the
-    plugin of another project answers `/player/timeline/poll`. This answers both, which
-    costs two lines and removes the question.
-  - **Which attributes a controller needs.** The lists below hold what those two
-    implementations name. A controller that wants one that is absent may draw nothing
-    at all rather than say so.
+  - **The path of the timeline is `/player/timeline/poll`.** The bare `/timeline/poll`
+    answers 404 on a real player, so this holds one path and not two.
+  - **`commandID` is not optional.** A poll that names none answers `400`, and the
+    answer of one that does names that number on the container. A controller counts it
+    up and it reads the answers against it.
+  - **The `machineIdentifier` of a timeline is the server and not the player.** It sits
+    beside the address, the port and the protocol, and the four together tell a
+    controller where to ask for the artwork of the track. `/resources` names the player
+    in that attribute, and the two are different identifiers. See
+    `MyHiFi.Plex.Server.machine_id/0`.
+  - **A path that a player does not hold answers 404**, and a command answers 200 with
+    no body at all. A player that answered every path would tell a controller that it
+    holds a control which does nothing.
+
+  ## What a controller cannot read here yet
+
+  A real player names `playQueueID`, `playQueueItemID`, `playQueueVersion` and
+  `containerKey` on its timeline, and this names none of them. The queue of this
+  firmware is `MyHiFi.Playback.Queue`, which is a list on the device and not a play
+  queue of the server, so there is no number of that kind to give. A controller can
+  therefore draw the track that plays and not the list that it came from.
 
   ## The navigation commands are absent, and they stay absent
 
@@ -66,13 +80,13 @@ defmodule MyHiFi.Plex.Companion.Router do
     send_xml(conn, resources())
   end
 
-  # Both paths, because two implementations disagree about which one a controller uses.
+  # **A real player answers this path alone**, and it refuses a poll that names no
+  # `commandID`. See the moduledoc.
   get "/player/timeline/poll" do
-    send_xml(conn, timeline())
-  end
-
-  get "/timeline/poll" do
-    send_xml(conn, timeline())
+    case conn.params["commandID"] do
+      nil -> send_resp(conn, 400, "")
+      id -> send_xml(conn, timeline(id))
+    end
   end
 
   get "/player/playback/play" do
@@ -124,25 +138,28 @@ defmodule MyHiFi.Plex.Companion.Router do
     end
   end
 
+  # **A path that this player does not hold answers 404**, in the way that a real player
+  # does. The line of the log names it, so a controller that wants something absent says
+  # so here and not in silence.
   match _ do
     Logger.info("A Plex controller asked for #{conn.method} #{conn.request_path}.")
 
-    send_xml(conn, container([]))
+    send_resp(conn, 404, "")
   end
 
-  # A command answers with an empty container, and a controller reads the timeline for
-  # the state that follows. A command that failed says so in the log and answers the
-  # same, because a controller has nowhere to draw the reason and a person is holding
-  # the telephone and not this device.
+  # A command answers 200 with no body, and a controller reads the timeline for the
+  # state that follows. A command that failed says so in the log and answers the same,
+  # because a controller has nowhere to draw the reason and a person is holding the
+  # telephone and not this device.
   defp answer(conn, {:error, reason}) do
     Logger.warning(
       "A Plex controller asked for something that did not happen: #{inspect(reason)}"
     )
 
-    send_xml(conn, container([]))
+    send_resp(conn, 200, "")
   end
 
-  defp answer(conn, _result), do: send_xml(conn, container([]))
+  defp answer(conn, _result), do: send_resp(conn, 200, "")
 
   defp resources do
     container([
@@ -156,6 +173,11 @@ defmodule MyHiFi.Plex.Companion.Router do
          {"product", Server.product()},
          {"platform", Server.platform()},
          {"platformVersion", Server.version()},
+         # **`version` is the version of the player, and `platformVersion` is the
+         # version of what it runs on.** A real player names both: Plexamp 4.13.2 on
+         # macOS 25.6.0 names each number in its own place. The firmware is both of
+         # those for this device, so the two carry the same number.
+         {"version", Server.version()},
          {"deviceClass", @device_class}
        ]}
     ])
@@ -164,23 +186,36 @@ defmodule MyHiFi.Plex.Companion.Router do
   # **The timeline is the state of the player in the words of Plex.** A controller draws
   # the whole of what a person sees from it, and it names one element for each kind of
   # media, because a player may hold a film and a song at once. This one holds music.
-  defp timeline do
+  #
+  # The container names the `commandID` of the request and no size, which is what a real
+  # player answers.
+  defp timeline(command_id) do
     state = Playback.state!()
 
-    container([
-      {"Timeline", music(state)},
-      {"Timeline", [{"type", "video"}, {"state", "stopped"}]},
-      {"Timeline", [{"type", "photo"}, {"state", "stopped"}]}
-    ])
+    container(
+      [
+        {"Timeline", music(state)},
+        {"Timeline", [{"type", "video"}, {"state", "stopped"}]},
+        {"Timeline", [{"type", "photo"}, {"state", "stopped"}]}
+      ],
+      [{"commandID", command_id}]
+    )
   end
 
+  # `controllable` names the controls that a person may press, and this list is what
+  # this firmware answers. A real player names `shuffle`, `repeat`, `stepBack` and
+  # `stepForward` as well, and `MyHiFi.Playback` holds none of those.
   defp music(state) do
     [
       {"type", "music"},
+      {"itemType", "music"},
       {"state", play_state(state)},
       {"time", to_string(state.position_ms)},
-      {"machineIdentifier", Server.client_id()},
-      {"protocol", @protocol},
+      {"shuffle", "0"},
+      {"repeat", "0"},
+      # A real player names the level whether it plays something or not, so a controller
+      # draws the control of it for a device that is quiet.
+      {"volume", to_string(volume())},
       {"controllable", "playPause,stop,skipNext,skipPrevious,seekTo,volume"}
     ] ++ track(state)
   end
@@ -193,27 +228,27 @@ defmodule MyHiFi.Plex.Companion.Router do
     [
       {"duration", to_string(item.duration_ms || 0)},
       {"key", "/library/metadata/#{item.source_ref}"},
-      {"ratingKey", item.source_ref},
-      {"volume", to_string(volume())}
+      {"ratingKey", item.source_ref}
     ] ++ server(state)
   end
 
   # **The controller reads the track from the server and not from this device**, so the
-  # timeline names where that server is. A track of another source names none, and a
-  # controller then shows the state and no artwork.
+  # timeline names where that server is: the identifier of the machine, the address, the
+  # port and the protocol, and a real player names the four together. A track of another
+  # source names none of them, and a controller then shows the state and no artwork.
   defp server(%{source: MyHiFi.Source.Plex}) do
-    case Server.link() do
-      {:ok, %{address: address}} ->
-        uri = URI.parse(address)
+    with {:ok, %{address: address}} <- Server.link(),
+         {:ok, machine_id} <- Server.machine_id() do
+      uri = URI.parse(address)
 
-        [
-          {"address", uri.host},
-          {"port", to_string(uri.port)},
-          {"protocol", uri.scheme}
-        ]
-
-      {:error, _reason} ->
-        []
+      [
+        {"machineIdentifier", machine_id},
+        {"address", uri.host},
+        {"port", to_string(uri.port)},
+        {"protocol", uri.scheme}
+      ]
+    else
+      _other -> []
     end
   end
 
@@ -256,11 +291,15 @@ defmodule MyHiFi.Plex.Companion.Router do
     |> send_resp(200, body)
   end
 
-  # The answer of every endpoint is a `MediaContainer`, and a command that says nothing
-  # answers an empty one.
-  defp container(children) do
-    ~s(<?xml version="1.0" encoding="UTF-8"?>\n<MediaContainer size="#{length(children)}">) <>
-      Enum.map_join(children, "", &element/1) <> "</MediaContainer>"
+  # **A `MediaContainer` names its size or the `commandID` of the request, and not
+  # both.** `/resources` answers the first and a timeline answers the second, which is
+  # what a real player does. It writes no declaration of XML, for the same reason.
+  defp container(children), do: container(children, [{"size", length(children)}])
+
+  defp container(children, attributes) do
+    "<MediaContainer" <>
+      Enum.map_join(attributes, "", &attribute/1) <>
+      ">" <> Enum.map_join(children, "", &element/1) <> "</MediaContainer>"
   end
 
   defp element({name, attributes}) do

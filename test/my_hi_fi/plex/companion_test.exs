@@ -31,6 +31,8 @@ defmodule MyHiFi.Plex.CompanionTest do
     |> Router.call(Router.init([]))
   end
 
+  defp poll(command_id), do: call("/player/timeline/poll?commandID=#{command_id}")
+
   defp attribute(body, element, name) do
     case Regex.run(~r/<#{element}([^>]*)\/>/, body) do
       [_whole, attributes] ->
@@ -90,18 +92,32 @@ defmodule MyHiFi.Plex.CompanionTest do
 
       assert conn.status == 200
       assert get_resp_header(conn, "content-type") |> hd() =~ "text/xml"
-      assert conn.resp_body =~ ~s(<?xml version="1.0" encoding="UTF-8"?>)
+      assert conn.resp_body =~ ~s(<MediaContainer size="1">)
     end
   end
 
+  # Each of these reads what Plexamp 4.13.2 answered on 2026-09-15. See the moduledoc
+  # of `MyHiFi.Plex.Companion.Router`.
   describe "the timeline" do
-    # Two implementations disagree about the path, so this answers both.
-    test "both paths that a controller may read give the same answer" do
-      assert call("/player/timeline/poll").resp_body == call("/timeline/poll").resp_body
+    test "the bare path of that name is not one that a player holds" do
+      assert call("/timeline/poll").status == 404
+    end
+
+    # A real player answers 400 for a poll that names no number, and a controller counts
+    # that number up and reads the answers against it.
+    test "a poll that names no commandID is refused" do
+      assert call("/player/timeline/poll").status == 400
+    end
+
+    test "the answer names the commandID of the request, and no size" do
+      body = poll("7").resp_body
+
+      assert body =~ ~s(commandID="7")
+      refute body =~ ~s(size=)
     end
 
     test "a device that plays nothing says that it is stopped" do
-      body = call("/timeline/poll").resp_body
+      body = poll("1").resp_body
 
       assert attribute(body, "Timeline", "type") == "music"
       assert attribute(body, "Timeline", "state") in ["stopped", "paused"]
@@ -110,7 +126,7 @@ defmodule MyHiFi.Plex.CompanionTest do
     # A controller draws one element for each kind of media, because a player may hold
     # a film and a song at once. This one holds music, and it says so of the others.
     test "it names the three kinds of media" do
-      body = call("/timeline/poll").resp_body
+      body = poll("1").resp_body
 
       assert body =~ ~s(type="music")
       assert body =~ ~s(type="video")
@@ -118,15 +134,17 @@ defmodule MyHiFi.Plex.CompanionTest do
     end
 
     test "it names the controls that a person may press" do
-      body = call("/timeline/poll").resp_body
+      body = poll("1").resp_body
 
       assert attribute(body, "Timeline", "controllable") =~ "playPause"
-      assert attribute(body, "Timeline", "skipNext") == nil
+      refute attribute(body, "Timeline", "controllable") =~ "shuffle"
     end
   end
 
   describe "a command" do
-    test "each one answers an empty container, and a controller reads the timeline" do
+    # A real player answers 200 with no body at all, and a controller reads the timeline
+    # for the state that follows.
+    test "each one answers with no body, and a controller reads the timeline" do
       for path <- [
             "/player/playback/pause",
             "/player/playback/stop",
@@ -137,7 +155,7 @@ defmodule MyHiFi.Plex.CompanionTest do
         conn = call(path)
 
         assert conn.status == 200
-        assert conn.resp_body =~ "MediaContainer"
+        assert conn.resp_body == ""
       end
     end
 
@@ -155,11 +173,11 @@ defmodule MyHiFi.Plex.CompanionTest do
       assert conn.status == 200
     end
 
-    test "a path that this player does not hold answers an empty container" do
-      conn = call("/player/navigation/moveUp")
-
-      assert conn.status == 200
-      assert conn.resp_body =~ ~s(size="0")
+    # **A player that answered every path would say that it holds a control that does
+    # nothing.** A real player answers 404, and `protocolCapabilities` names no
+    # navigation for the same reason.
+    test "a path that this player does not hold answers 404" do
+      assert call("/player/navigation/moveUp").status == 404
     end
   end
 

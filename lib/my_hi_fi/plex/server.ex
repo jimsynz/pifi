@@ -81,6 +81,7 @@ defmodule MyHiFi.Plex.Server do
   @code_setting "plex_link_code"
   @pin_setting "plex_link_pin"
   @account_setting "plex_account_token"
+  @machine_setting "plex_machine_id"
   @name_setting "plex_server_name"
   @token_setting "plex_token"
 
@@ -688,6 +689,40 @@ defmodule MyHiFi.Plex.Server do
     else
       {:error, :no_address} -> {:error, :no_address}
       _other -> {:error, :not_linked}
+    end
+  end
+
+  @doc """
+  The identifier that the server calls itself by.
+
+  **This is not `client_id/0`.** That one names this device, and this one names the
+  machine that holds the music. A controller reads it from the timeline of a player,
+  beside the address and the port, so that it knows where to ask for the artwork of
+  the track that plays. A measurement against a real player on 2026-09-15 gave the
+  same value in both places.
+
+  The server answers `/identity` with it, and that endpoint needs no token. The
+  settings keep the answer, because a controller reads a timeline again and again and
+  the identifier of a machine does not move.
+  """
+  @spec machine_id() :: {:ok, String.t()} | {:error, term()}
+  def machine_id do
+    case Settings.fetch(@machine_setting) do
+      {:ok, %{value: value}} -> {:ok, value}
+      {:error, _reason} -> read_machine_id()
+    end
+  end
+
+  defp read_machine_id do
+    with {:ok, %{address: address, token: token, client_id: client_id}} <- link(),
+         {:ok, body} <- request(:get, address, token, "/identity", [], [], client_id),
+         id when is_binary(id) <- container(body)["machineIdentifier"] do
+      Settings.put!(@machine_setting, id)
+
+      {:ok, id}
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :no_machine_id}
     end
   end
 
