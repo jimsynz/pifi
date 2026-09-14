@@ -1,6 +1,8 @@
 defmodule MyHiFi.PlaybackTest do
   use MyHiFi.DataCase, async: false
 
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Playback
   alias MyHiFi.Settings
   alias MyHiFi.Test.NoCardOutput
@@ -68,6 +70,10 @@ defmodule MyHiFi.PlaybackTest do
   end
 
   describe "play/2" do
+    # **A play answers before it starts, so the reason arrives on the `:player` topic
+    # and not in the answer.** A resolve reads the service of the source, and a person
+    # must not wait for that with a page that can draw nothing. See
+    # `MyHiFi.Player.handle_call({:play, _}, _, _)`.
     test "gives the reason when a track cannot play" do
       # An output that finds no card makes this fail on any machine. See
       # `MyHiFi.Test.NoCardOutput`.
@@ -75,7 +81,10 @@ defmodule MyHiFi.PlaybackTest do
 
       created = station(%{})
 
-      assert {:error, _reason} = Playback.play([created.id])
+      Event.subscribe(:player)
+
+      assert {:ok, :ok} = Playback.play([created.id])
+      assert_receive %Events.Failed{reason: :no_output_device}, 2000
     end
 
     test "it needs a list of items" do

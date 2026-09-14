@@ -149,6 +149,8 @@ defmodule MyHiFi.Event.Player do
 
     def message(:no_output_device), do: "No output is in use. Choose one in the settings."
 
+    def message(:not_playing), do: "The track did not answer, so nothing moved."
+
     def message(reason), do: "The player stopped: #{inspect(reason)}"
   end
 

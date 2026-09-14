@@ -1,6 +1,8 @@
 defmodule MyHiFi.PlayerTest do
   use MyHiFi.DataCase, async: false
 
+  alias MyHiFi.Event
+  alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Settings
   alias MyHiFi.Source.InternetRadio
   alias MyHiFi.Test.NoCardOutput
@@ -63,7 +65,12 @@ defmodule MyHiFi.PlayerTest do
 
       created = station(%{})
 
-      assert {:error, _reason} = MyHiFi.Player.play(created)
+      # A play answers before it starts, so the fault arrives on the topic. See
+      # `MyHiFi.Player.handle_call({:play, _}, _, _)`.
+      Event.subscribe(:player)
+
+      assert :ok = MyHiFi.Player.play(created)
+      assert_receive %Events.Failed{reason: :no_output_device}, 2000
       assert {:error, _reason} = Settings.fetch("last_item")
     end
 

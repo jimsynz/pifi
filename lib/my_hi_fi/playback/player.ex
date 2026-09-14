@@ -64,6 +64,10 @@ defmodule MyHiFi.Playback.Player do
       list", so `item_ids` is the list that they were looking at and `playing_index`
       names the row that they pressed. Next and previous then move through it. See
       `MyHiFi.Playback.Queue`.
+
+      **This answers before the track plays.** A resolve reads the service of the
+      source, so a fault of it arrives as `MyHiFi.Event.Player.Failed` and not in this
+      answer. See `MyHiFi.Player`.
       """
 
       argument :item_ids, {:array, :uuid}, allow_nil?: false

@@ -549,7 +549,11 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       assert has_element?(view, ~s(#play-#{station.id}[aria-current="true"]))
     end
 
-    test "a track that cannot play shows the reason", %{conn: conn} do
+    # **A play answers before it starts, so a resolve that fails reaches the `:player`
+    # topic and not this page.** The player bar of every page draws that reason, and
+    # `MyHiFiWeb.PlayerLiveTest` covers the drawing of it. This page keeps the flash for
+    # the faults that it can know at once, such as a source that is out of use.
+    test "a track that cannot play says so on the player topic", %{conn: conn} do
       created = show()
       {:ok, created} = Playback.set_favourite(created)
       one = episode(created, %{mime_type: "audio/x-m4a"})
@@ -558,9 +562,12 @@ defmodule MyHiFiWeb.BrowseLiveTest do
       open(view, "Subscriptions")
       view |> element("button", "Road Work") |> render_click()
 
+      Event.subscribe(:player)
+
       html = view |> element("#play-#{one.id}") |> render_click()
 
-      assert html =~ "Could not play that"
+      assert html =~ "Playing"
+      assert_receive %Events.Failed{reason: {:unsupported_format, _title}}, 2000
     end
 
     test "a stop takes the marker off", %{conn: conn} do

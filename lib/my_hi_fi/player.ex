@@ -13,6 +13,27 @@ defmodule MyHiFi.Player do
   `MyHiFi.Event.Player`. Nothing reads the state of this process directly, apart
   from `state/0` for a person at the console.
 
+  ## A control answers before the device does the work
+
+  **A play, a skip, and a move all answer at once, and the work follows in a
+  continue.** A resolve reads the service of the source: a Plex track that the server
+  converts costs two requests and the start of a transcode, and the old pipeline takes
+  up to 5 seconds to stop. A person pressed next and waited 15 seconds for a page that
+  said nothing at all, because the call that the page made had not answered and a
+  LiveView can draw nothing while it waits.
+
+  `buffering/1` publishes `MyHiFi.Event.Player.Buffering` with that answer, so every
+  user interface says that the device is working before the work starts.
+
+  **A fault of that work is an event, and not the answer of the call.** `fail/2`
+  publishes `MyHiFi.Event.Player.Failed`, and the player bar of the web interface and
+  the device screen both draw the reason. A check that costs one read stays in the
+  answer: a source that is out of use, a row that no source holds, and a track that
+  takes no skip are all of that kind, and a person who asks for one must be told so.
+
+  A continue runs before any message that waits, so a caller that asks for `state/0`
+  after a play still reads the track that it asked for.
+
   ## The controls
 
   A pause stops the pipeline and it keeps the track selected, so a play starts the
@@ -290,8 +311,45 @@ defmodule MyHiFi.Player do
     {:noreply, restore_station(%State{state | standby?: stored_standby?()})}
   end
 
-  # The place of the track that plays now goes to its source first. A person who picks
-  # another episode, or the next one, must find this one where they left it.
+  # **A continue runs before any message that waits**, so a caller that asks for the
+  # state after a play still reads the track that it asked for. The answer is what
+  # arrives early, and not the work.
+  @impl GenServer
+  def handle_continue({:play, source, item}, %State{} = state) do
+    {:noreply, played(source, item, state)}
+  end
+
+  @impl GenServer
+  def handle_continue(:resume, %State{} = state) do
+    case start(state.source, state.item, state) do
+      {:ok, state} -> {:noreply, state}
+      {:error, _reason, state} -> {:noreply, state}
+    end
+  end
+
+  @impl GenServer
+  def handle_continue({:skip, ms}, %State{} = state) do
+    if Pipeline.decoder_holds_stream?(state.playable) do
+      {:noreply, restarted(state, ms)}
+    else
+      ask_skip(state, ms)
+
+      {:noreply, state}
+    end
+  end
+
+  # **This answers before it plays, and the work is in the continue below.** A resolve
+  # reads the service of the source, and a Plex track that the server converts costs
+  # two requests and the start of a transcode. The old pipeline takes up to 5 seconds
+  # to stop as well. A person pressed next and waited 15 seconds for a page that said
+  # nothing at all, because the call that the page made had not answered yet and the
+  # page could draw no state until it did.
+  #
+  # The buffering event goes out with the answer, so every user interface says that the
+  # device is working before the work starts. A failure of the work arrives as
+  # `MyHiFi.Event.Player.Failed`, and `fail/2` publishes it. The two checks here stay
+  # in the answer, because both are one read and a person who asks for a source that is
+  # out of use must be told so.
   @impl GenServer
   def handle_call({:play, item}, _from, %State{} = state) do
     case Source.from_slug(item.source) do
@@ -299,7 +357,7 @@ defmodule MyHiFi.Player do
         if Source.enabled?(source) do
           # `waking/1` goes here and not at the head of the clause, so a play that
           # cannot happen leaves the device as quiet as it found it.
-          play_now(source, item, waking(state))
+          {:reply, :ok, buffering(waking(state)), {:continue, {:play, source, item}}}
         else
           {:reply, {:error, :source_not_in_use}, state}
         end
@@ -352,12 +410,7 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_call({:pause, false}, _from, %State{} = state) do
-    state = waking(state)
-
-    case start(state.source, state.item, state) do
-      {:ok, state} -> {:reply, :ok, state}
-      {:error, reason, state} -> {:reply, {:error, reason}, state}
-    end
+    {:reply, :ok, buffering(waking(state)), {:continue, :resume}}
   end
 
   # A move is a play of another row of the queue, so this gives the work to the clause
@@ -378,12 +431,15 @@ defmodule MyHiFi.Player do
     {:reply, {:error, :not_playing}, state}
   end
 
+  # A skip answers before it moves, in the way that a play does. The pipeline reads the
+  # frames of the file to find the place, and a card that is also writing a download
+  # takes its time over that.
   @impl GenServer
   def handle_call({:skip, ms}, _from, %State{} = state) do
-    cond do
-      not skippable?(state) -> {:reply, {:error, :cannot_skip}, state}
-      Pipeline.decoder_holds_stream?(state.playable) -> restarted(state, ms)
-      true -> {:reply, ask_skip(state, ms), state}
+    if skippable?(state) do
+      {:reply, :ok, state, {:continue, {:skip, ms}}}
+    else
+      {:reply, {:error, :cannot_skip}, state}
     end
   end
 
@@ -412,12 +468,7 @@ defmodule MyHiFi.Player do
 
   @impl GenServer
   def handle_call({:standby, false}, _from, %State{} = state) do
-    state = waking(state)
-
-    case start(state.source, state.item, state) do
-      {:ok, state} -> {:reply, :ok, state}
-      {:error, reason, state} -> {:reply, {:error, reason}, state}
-    end
+    {:reply, :ok, buffering(waking(state)), {:continue, :resume}}
   end
 
   @impl GenServer
@@ -615,10 +666,11 @@ defmodule MyHiFi.Player do
   defp start(source, item, %State{} = state) do
     state = state |> cancel_restart() |> stop_pipeline()
 
+    # **The buffering event is not here.** A person who presses a control hears the
+    # answer of it before this runs, and `buffering/1` says so then. `restart/1` says
+    # it for a start that no person asked for.
     with {:ok, playable} <- resolved(source, item),
          {:ok, sink} <- sink(state) do
-      Event.publish(:player, %Events.Buffering{percent: 0})
-
       case start_pipeline(playable, sink, state) do
         {:ok, pipeline} ->
           monitor = Process.monitor(pipeline)
@@ -781,20 +833,21 @@ defmodule MyHiFi.Player do
          {:ok, pipeline} <- start_pipeline(playable, sink, state) do
       Event.publish(:player, %Events.Buffering{percent: 0})
 
-      {:reply, :ok,
-       %State{
-         state
-         | playable: playable,
-           pipeline: pipeline,
-           monitor: Process.monitor(pipeline),
-           started_at: nil,
-           asked_at: System.monotonic_time(),
-           offset_ms: playable.position_ms
-       }}
+      %State{
+        state
+        | playable: playable,
+          pipeline: pipeline,
+          monitor: Process.monitor(pipeline),
+          started_at: nil,
+          asked_at: System.monotonic_time(),
+          offset_ms: playable.position_ms
+      }
     else
       {:error, reason} ->
         Logger.warning("A skip could not start the pipeline again: #{inspect(reason)}")
-        {:reply, {:error, reason}, state}
+        Event.publish(:player, %Events.Failed{reason: reason})
+
+        state
     end
   end
 
@@ -804,7 +857,9 @@ defmodule MyHiFi.Player do
   catch
     :exit, _reason ->
       Logger.warning("The pipeline did not answer a skip.")
-      {:error, :not_playing}
+      Event.publish(:player, %Events.Failed{reason: :not_playing})
+
+      :ok
   end
 
   defp chosen_device do
@@ -814,7 +869,7 @@ defmodule MyHiFi.Player do
     end
   end
 
-  defp play_now(source, item, %State{} = state) do
+  defp played(source, item, %State{} = state) do
     store_position(state)
     release_file(state)
 
@@ -823,11 +878,20 @@ defmodule MyHiFi.Player do
         # Only a new choice goes to the settings. Leaving standby and starting the
         # stream again both use the choice that is already there.
         Settings.put(@last_item_key, item.id)
-        {:reply, :ok, state}
+        state
 
-      {:error, reason, state} ->
-        {:reply, {:error, reason}, state}
+      # `fail/2` has published the reason, so a user interface reads it from the topic.
+      {:error, _reason, state} ->
+        state
     end
+  end
+
+  # Says that the device is working, before it starts the work. See
+  # `handle_call({:play, _}, _, _)`.
+  defp buffering(%State{} = state) do
+    Event.publish(:player, %Events.Buffering{percent: 0})
+
+    state
   end
 
   # The queue decides the order, so the row after this one is the row that plays next.
