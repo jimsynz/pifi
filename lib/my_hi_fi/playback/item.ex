@@ -378,6 +378,21 @@ defmodule MyHiFi.Playback.Item do
       # would hold the card for ever and nothing could ever name it again.
       change MyHiFi.Playback.Item.Changes.ReleaseAudio
     end
+
+    action :remove_cache, :integer do
+      description """
+      Remove what the cache holds for one source, and keep the rows of it. It returns
+      how many entries went.
+
+      A person who takes a source out of use asks for the room of it back, and the
+      eviction gives them that only when the card runs short. A mark holds nothing
+      against this. See `MyHiFi.Playback.Item.RemoveCache`.
+      """
+
+      argument :source, :string, allow_nil?: false
+
+      run MyHiFi.Playback.Item.RemoveCache
+    end
   end
 
   attributes do

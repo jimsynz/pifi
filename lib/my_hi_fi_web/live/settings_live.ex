@@ -1216,10 +1216,13 @@ defmodule MyHiFiWeb.SettingsLive do
     "#{Enum.count(peripherals, & &1.running?)} of #{length(peripherals)} running"
   end
 
+  # A job removes what the cache held for a source that goes out of use, and it takes
+  # a while for a library. The message therefore says that the work started, and not
+  # that it finished. See `MyHiFi.Playback.RemoveSourceCache`.
   defp in_use(module) do
     if Source.enabled?(module),
       do: "#{module.title()} is in use.",
-      else: "#{module.title()} is out of use."
+      else: "#{module.title()} is out of use. The device is removing what it kept for it."
   end
 
   defp state(true), do: "In use"

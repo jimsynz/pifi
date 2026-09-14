@@ -46,6 +46,7 @@ defmodule MyHiFi.Playback do
       define :mark_played, action: :mark_played
       define :clear_played, action: :clear_played
       define :destroy_item, action: :destroy
+      define :remove_source_cache, action: :remove_cache, args: [:source]
     end
 
     resource MyHiFi.Playback.Playlist do

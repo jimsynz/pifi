@@ -31,6 +31,9 @@ defmodule MyHiFi.Artwork do
   alias MyHiFi.Artwork.Thumbnail
   alias MyHiFi.Artwork.Worker
   alias MyHiFi.Cache
+  alias MyHiFi.Cache.Entry
+
+  require Ash.Query
 
   # Sobelow reads `@sobelow_skip` from the source. This registration stops the
   # compiler warning that no Elixir code reads the attribute.
@@ -235,6 +238,32 @@ defmodule MyHiFi.Artwork do
   end
 
   @doc """
+  Remove the picture of each address, and the thumbnail of each one. It returns how
+  many pictures went.
+
+  A person who takes a source out of use asks for the room of every picture of that
+  source, and one library names thousands of addresses. This is therefore a query for
+  each batch, and not a read of the cache for each address. See
+  `MyHiFi.Playback.Item.RemoveCache`.
+
+  The name of an entry is the hash of the address, so a caller passes the addresses
+  that it knows and reads nothing first. An address that the cache does not hold
+  removes nothing.
+
+  **The batch is 500, because each key is a value of one statement.** SQLite takes a
+  limited number of them, and a library of 53,105 items names more addresses than that.
+  """
+  @spec remove_each(Enumerable.t()) :: non_neg_integer()
+  def remove_each(urls) do
+    urls
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+    |> Enum.map(&hash/1)
+    |> Enum.chunk_every(500)
+    |> Enum.reduce(0, fn keys, removed -> removed + remove_keys(keys) end)
+  end
+
+  @doc """
   Whether this firmware can read one address.
 
   **4 of the 247 New Zealand stations name the text `"null"` as their logo**,
@@ -398,6 +427,17 @@ defmodule MyHiFi.Artwork do
     else
       _other -> :error
     end
+  end
+
+  # The count comes first, because `MyHiFi.Cache.purge_all/1` reports that it worked
+  # and no number. See that function.
+  defp remove_keys(keys) do
+    query = Ash.Query.filter(Entry, namespace == ^@namespace and entry_key in ^keys)
+    count = Ash.count!(query)
+
+    if count > 0, do: Cache.purge_all(query)
+
+    count
   end
 
   defp absent([]), do: []

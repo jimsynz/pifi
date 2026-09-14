@@ -218,9 +218,19 @@ defmodule MyHiFi.Cache do
   @spec limit() :: non_neg_integer()
   def limit do
     case Application.get_env(:my_hi_fi, :cache_limit) do
-      nil -> Kernel.max(MyHiFi.Device.storage!().free_bytes + bytes() - @reserve_bytes, 0)
+      nil -> Kernel.max(free_bytes_of_partition() + bytes() - @reserve_bytes, 0)
       bytes -> bytes
     end
+  end
+
+  # **A test names the free space, because `df` measures a machine that moves.** A
+  # test of the rule above writes a file and reads the limit again, and the two reads
+  # of `df` between them name a partition that another program is also writing. A
+  # build agent that wrote 12 KB in that moment therefore failed a test of this
+  # firmware. Nothing sets this in production, in the way that nothing sets
+  # `:cache_limit`.
+  defp free_bytes_of_partition do
+    Application.get_env(:my_hi_fi, :cache_free_bytes) || MyHiFi.Device.storage!().free_bytes
   end
 
   # An entry that a caller wrote a moment ago carries the time of that write, so a read

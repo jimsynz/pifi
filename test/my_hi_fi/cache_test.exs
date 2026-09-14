@@ -419,8 +419,14 @@ defmodule MyHiFi.CacheTest do
     # free, so a rule that read that number alone shrank its own ceiling with every
     # file that it wrote and the cache stopped at half of what it may have. A board on
     # 2026-09-14 gave 5,981 MB where 11,924 MB was free for it.
+    # **The free space comes from a setting here, and not from `df`.** This test reads
+    # the limit, writes a file, and reads the limit again, and `df` measures a machine
+    # that another program is also writing. A build agent that wrote 12 KB in that
+    # moment failed this test, and the rule that it covers was correct.
     test "it grows by what the cache already holds" do
       Application.delete_env(:my_hi_fi, :cache_limit)
+      Application.put_env(:my_hi_fi, :cache_free_bytes, 2 * 1024 * 1024 * 1024)
+      on_exit(fn -> Application.delete_env(:my_hi_fi, :cache_free_bytes) end)
 
       empty = Cache.limit()
 
@@ -436,7 +442,7 @@ defmodule MyHiFi.CacheTest do
       Cache.put_file!("download", "episode", %{path: path, content_type: "audio/mpeg"})
 
       assert Cache.bytes() == 4096
-      assert Cache.limit() >= empty
+      assert Cache.limit() == empty + 4096
     end
 
     test "a test may name a limit of its own" do

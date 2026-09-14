@@ -62,6 +62,7 @@ defmodule MyHiFi.Player do
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Output
   alias MyHiFi.Playback
+  alias MyHiFi.Playback.RemoveSourceCache
   alias MyHiFi.Player.Download
   alias MyHiFi.Player.Pipeline
   alias MyHiFi.Player.Prefetch
@@ -450,10 +451,14 @@ defmodule MyHiFi.Player do
   end
 
   # A person who takes a source away expects the sound of it to go as well, and they
-  # expect the device not to select it again after a restart.
+  # expect the device not to select it again after a restart. They also expect the room
+  # of it on the card back, and a job does that work. See
+  # `MyHiFi.Playback.RemoveSourceCache`.
   @impl GenServer
   def handle_call({:enable_source, source, enabled?}, _from, %State{} = state) do
     Source.enable(source, enabled?)
+
+    unless enabled?, do: RemoveSourceCache.ask(source)
 
     if enabled? or state.source != source do
       {:reply, :ok, state}
