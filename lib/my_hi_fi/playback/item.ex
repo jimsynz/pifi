@@ -74,20 +74,67 @@ defmodule MyHiFi.Playback.Item do
     # playback_items_source_kind_title_nocase_index (source=? AND kind=?)`, it sorts
     # nothing, and it stops at the hundredth row.
     #
-    # **`custom_indexes` cannot write this one**, because the last column needs a
-    # collation and that section takes a name alone. A list of items reads in the
-    # order of `sorted_title`, which is `title COLLATE NOCASE`, and an index of
-    # `title` alone holds the other order. A measurement of this table with 68,273
-    # rows gave `USE TEMP B-TREE FOR ORDER BY` for the plain index and
-    # `SEARCH USING INDEX` for this one.
+    # **`custom_indexes` cannot write these**, because each one holds an expression and
+    # that section takes a name alone.
+    #
+    # ## Each index names the expression that Ash writes, and it must
+    #
+    # **`kind` is `Ash.Type.Atom`, and Ash compares such a column as
+    # `CAST(kind AS TEXT) = CAST(? AS TEXT)`.** A cast of a column is an expression, and
+    # SQLite cannot use an index of the column for one. An index of
+    # `(source, kind, title COLLATE NOCASE)` therefore served no read of this table at
+    # all: the planner took `playback_items_source_ref_index` for `source=?` alone and
+    # built a temporary tree to order every row of that source.
+    #
+    # A measurement of the four branches of each source on a board on 2026-09-14 gave
+    # `SEARCH p0 USING INDEX playback_items_source_ref_index (source=?)` and
+    # `USE TEMP B-TREE FOR ORDER BY` for every one of them:
+    #
+    #     jellyfin / Artists          1810 ms
+    #     jellyfin / Albums           1090 ms
+    #     jellyfin / Recently added   1012 ms
+    #     jellyfin / Favourites        953 ms
+    #     plex / Recently added        649 ms
+    #     plex / Albums                369 ms
+    #
+    # A page reads a count beside the rows, so a person waited twice those numbers. The
+    # index of the cast gives `SEARCH p0 USING INDEX
+    # playback_items_source_kind_title_nocase_index (source=? AND <expr>=?)` and
+    # `USE TEMP B-TREE FOR LAST TERM OF ORDER BY`, and five reads of the Plex branch of
+    # 4360 albums took 7 to 17 ms where the same five took 317 to 335 ms without it.
+    #
+    # The last term of that order is `id`, which Ash adds so that a page of a keyset is
+    # stable. It orders the rows of one title, and there are few of those.
+    #
+    # `favourite?` is a boolean, and Ash writes `CAST(favourite AS INTEGER)` for the
+    # same reason. `added_at` is a date, and it needs no cast, so the branch that reads
+    # the newest records first needs the date and not the title.
     custom_statements do
       statement :source_kind_title_nocase do
         up """
         CREATE INDEX playback_items_source_kind_title_nocase_index
-        ON playback_items (source, kind, title COLLATE NOCASE)
+        ON playback_items (source, CAST(kind AS TEXT), title COLLATE NOCASE)
         """
 
         down "DROP INDEX playback_items_source_kind_title_nocase_index"
+      end
+
+      statement :source_kind_added_at do
+        up """
+        CREATE INDEX playback_items_source_kind_added_at_index
+        ON playback_items (source, CAST(kind AS TEXT), added_at)
+        """
+
+        down "DROP INDEX playback_items_source_kind_added_at_index"
+      end
+
+      statement :source_favourite_title_nocase do
+        up """
+        CREATE INDEX playback_items_source_favourite_title_nocase_index
+        ON playback_items (source, CAST(favourite AS INTEGER), title COLLATE NOCASE)
+        """
+
+        down "DROP INDEX playback_items_source_favourite_title_nocase_index"
       end
     end
   end
