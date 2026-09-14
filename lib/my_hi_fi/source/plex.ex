@@ -79,6 +79,7 @@ defmodule MyHiFi.Source.Plex do
   alias MyHiFi.Playback.Facet
   alias MyHiFi.Playback.Item
   alias MyHiFi.Player.Hls
+  alias MyHiFi.Plex.Companion
   alias MyHiFi.Plex.Fill
   alias MyHiFi.Plex.Server
   alias MyHiFi.Plex.Sync
@@ -269,7 +270,7 @@ defmodule MyHiFi.Source.Plex do
   @impl MyHiFi.Source
   def settings_actions do
     cond do
-      Server.configured?() -> [read_library(), remove_link()]
+      Server.configured?() -> [read_library(), player(), remove_link()]
       Server.linked_to_account?() -> [choose_server(), remove_link()]
       not is_nil(Server.pending_code()) -> [finish_link(), link()]
       true -> [link()]
@@ -277,6 +278,22 @@ defmodule MyHiFi.Source.Plex do
   end
 
   @impl MyHiFi.Source
+  def run_settings_action("start_player") do
+    Companion.enable(true)
+
+    if Companion.running?() do
+      {:ok, "This device is a Plex player now, on port #{Companion.port()}."}
+    else
+      {:error, "The device could not listen on port #{Companion.port()}."}
+    end
+  end
+
+  def run_settings_action("stop_player") do
+    Companion.enable(false)
+
+    {:ok, "This device is no longer a Plex player."}
+  end
+
   def run_settings_action("link") do
     case Server.start_link_to_account() do
       {:ok, %{code: code}} ->
@@ -344,6 +361,28 @@ defmodule MyHiFi.Source.Plex do
       description: "The device asks your account which servers answer on this network.",
       icon: :refresh
     }
+  end
+
+  # **The control says what it will do and not what it is**, because a person who turns
+  # this on opens a port on their device. See `MyHiFi.Plex.Companion`.
+  defp player do
+    if Companion.enabled?() do
+      %{
+        name: "stop_player",
+        title: "Stop being a Plex player",
+        description: "The device closes the port and no other Plex application can control it.",
+        icon: :radio
+      }
+    else
+      %{
+        name: "start_player",
+        title: "Be a Plex player",
+        description:
+          "Another Plex application can then control this device. " <>
+            "The device listens on port #{Companion.port()} of your network while it is on.",
+        icon: :radio
+      }
+    end
   end
 
   defp read_library do

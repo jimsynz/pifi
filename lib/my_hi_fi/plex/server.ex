@@ -254,6 +254,23 @@ defmodule MyHiFi.Plex.Server do
   end
 
   @doc """
+  What this device calls itself to Plex.
+
+  `MyHiFi.Plex.Companion.Router` names these to a controller and the headers of each
+  request name them to a server, so the three of them live here and in no other place.
+  """
+  @spec product() :: String.t()
+  def product, do: @product
+
+  @doc "The platform that this device names to Plex. See `product/0`."
+  @spec platform() :: String.t()
+  def platform, do: @platform
+
+  @doc "The version of this firmware, as Plex reads it. See `product/0`."
+  @spec version() :: String.t()
+  def version, do: @version
+
+  @doc """
   The name that the account lists this device under.
 
   It is the name that a person gave the device, so a household with two of them reads

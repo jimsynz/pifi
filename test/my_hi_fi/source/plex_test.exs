@@ -7,6 +7,7 @@ defmodule MyHiFi.Source.PlexTest do
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
   alias MyHiFi.Player.Hls
+  alias MyHiFi.Plex.Companion
   alias MyHiFi.Plex.Server
   alias MyHiFi.Settings
   alias MyHiFi.Source
@@ -155,11 +156,24 @@ defmodule MyHiFi.Source.PlexTest do
                Source.Plex.settings_actions() |> Enum.map(& &1.name)
     end
 
-    test "a device that chose a server offers the read and the removal" do
+    test "a device that chose a server offers the read, the player and the removal" do
       put_account()
       put_link()
 
-      assert ["read_library", "remove_link"] =
+      assert ["read_library", "start_player", "remove_link"] =
+               Source.Plex.settings_actions() |> Enum.map(& &1.name)
+    end
+
+    # **A port is a door, so the control says what it will do and not what it is.** A
+    # person who turns this on opens a port of their device. See `MyHiFi.Plex.Companion`.
+    test "the control of the player offers the opposite of what a person chose" do
+      put_account()
+      put_link()
+
+      on_exit(fn -> Companion.enable(false) end)
+      Companion.enable(true)
+
+      assert ["read_library", "stop_player", "remove_link"] =
                Source.Plex.settings_actions() |> Enum.map(& &1.name)
     end
   end
