@@ -414,6 +414,31 @@ defmodule MyHiFi.CacheTest do
       assert Cache.limit() >= 0
     end
 
+    # **What the cache already holds is a part of the space that it may hold.** The
+    # free space of a partition is what is free now, and the files of the cache are not
+    # free, so a rule that read that number alone shrank its own ceiling with every
+    # file that it wrote and the cache stopped at half of what it may have. A board on
+    # 2026-09-14 gave 5,981 MB where 11,924 MB was free for it.
+    test "it grows by what the cache already holds" do
+      Application.delete_env(:my_hi_fi, :cache_limit)
+
+      empty = Cache.limit()
+
+      # The file must sit on the partition that holds the cache, or the move gives
+      # `:exdev`, in the way that the setup of `put_file` says.
+      directory = Path.join(Path.dirname(Cache.directory()), "limit_test")
+
+      File.mkdir_p!(directory)
+      on_exit(fn -> File.rm_rf(directory) end)
+      path = Path.join(directory, "episode")
+      File.write!(path, String.duplicate("a", 4096))
+
+      Cache.put_file!("download", "episode", %{path: path, content_type: "audio/mpeg"})
+
+      assert Cache.bytes() == 4096
+      assert Cache.limit() >= empty
+    end
+
     test "a test may name a limit of its own" do
       Application.put_env(:my_hi_fi, :cache_limit, 4242)
 

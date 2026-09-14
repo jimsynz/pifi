@@ -198,14 +198,27 @@ defmodule MyHiFi.Cache do
   @doc """
   How many bytes the cache may hold.
 
-  It is the free space of the partition, less a reserve of 1 GB, and it never falls
-  below nothing. The old rule stopped at 64 MB, which was chosen when 247 station
-  logos meant 5 MB. A podcast cover is 1.2 MB.
+  It is the space of the partition that nothing else holds, less a reserve of 1 GB,
+  and it never falls below nothing. The old rule stopped at 64 MB, which was chosen
+  when 247 station logos meant 5 MB. A podcast cover is 1.2 MB.
+
+  **What the cache already holds is a part of that space, and the count must add it
+  back.** The free space of the partition is what is free now, and the files of the
+  cache are not free, so a rule that read that number alone shrank its own ceiling
+  with every file that it wrote. The cache then stopped at half of what it may have:
+
+      C = free - reserve, and free = total - other - C, so C = (total - other - reserve) / 2
+
+  A board on 2026-09-14 held a card of 14,539 MB with 1,591 MB of other files. The
+  rule gave 5,981 MB and the cache held 5,943 MB of it, where 11,924 MB was free for
+  it. Every picture of a library of 5,169 covers was read and then removed, because
+  the audio of a marked album carries `keep?` and a picture is what an eviction can
+  take.
   """
   @spec limit() :: non_neg_integer()
   def limit do
     case Application.get_env(:my_hi_fi, :cache_limit) do
-      nil -> Kernel.max(MyHiFi.Device.storage!().free_bytes - @reserve_bytes, 0)
+      nil -> Kernel.max(MyHiFi.Device.storage!().free_bytes + bytes() - @reserve_bytes, 0)
       bytes -> bytes
     end
   end
