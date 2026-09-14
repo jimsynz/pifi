@@ -158,10 +158,25 @@ defmodule MyHiFi.Output.APlayPort do
 
   defp ended(%{port: port} = state) do
     stop_program(port)
-
-    if Port.info(port), do: Port.close(port)
+    close_port(port)
 
     %{state | port: nil, key: nil}
+  end
+
+  # **A port that has already gone is the state that this wants.** `stop_program/1`
+  # ends the program, and the port of a program that ended closes by itself, so a read
+  # of `Port.info/1` and a close after it are two steps with a race between them. A
+  # build on 2026-09-14 raised `ArgumentError` in that gap.
+  #
+  # **The raise mattered because of which process this is.** It holds the sound card
+  # across every pipeline, and a person who presses stop calls this. A stop that killed
+  # the holder of the card would leave the next play with no port and no program.
+  defp close_port(port) do
+    Port.close(port)
+
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # The program owns the sound card and it reads at the rate of the clock of the DAC,

@@ -74,6 +74,19 @@ defmodule MyHiFi.Output.APlayPortTest do
       assert :ok = APlayPort.close()
       assert :ok = APlayPort.close()
     end
+
+    # **A stop ends the program, and the port of a program that ended closes by
+    # itself**, so a close is a race with that. A build raised `ArgumentError` in the
+    # gap, and the raise took the process that holds the sound card with it, so the next
+    # play had no port and no program.
+    test "it answers when the program has already gone" do
+      {:ok, port} = APlayPort.hold("cat", [])
+      Port.close(port)
+
+      assert :ok = APlayPort.close()
+      assert APlayPort.held() == nil
+      assert Process.alive?(Process.whereis(APlayPort))
+    end
   end
 
   describe "a program that ends by itself" do

@@ -548,6 +548,11 @@ defmodule MyHiFi.Player do
   def handle_info({:pipeline_playing, pipeline}, %State{pipeline: pipeline} = state) do
     artwork_path = artwork_path(state.item)
 
+    # **The history is written before the event goes out.** A part that hears that the
+    # sound began may read the history, and a page that drew it from an event that came
+    # first would draw the row that was there before this track.
+    remember(state.item)
+
     Event.publish(:player, %Events.Started{
       source: state.source,
       track: state.item,
@@ -1077,6 +1082,21 @@ defmodule MyHiFi.Player do
     end
 
     %State{state | restart_timer: nil}
+  end
+
+  # **The history is what a person heard, and a write of it must not stop the music.**
+  # An item that a sync removed while it played is gone, and the row of the history with
+  # it, so this raises nothing. See the `:mark_started` action of
+  # `MyHiFi.Playback.Item`.
+  defp remember(nil), do: :ok
+
+  defp remember(item) do
+    case Playback.mark_started(item) do
+      {:ok, _item} -> :ok
+      {:error, reason} -> Logger.warning("The history kept nothing: #{inspect(reason)}")
+    end
+
+    :ok
   end
 
   defp fail(reason, %State{} = state) do

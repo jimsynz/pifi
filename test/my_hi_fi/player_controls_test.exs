@@ -132,6 +132,33 @@ defmodule MyHiFi.PlayerControlsTest do
     Enum.at(episodes, number - 1)
   end
 
+  # **Sound is the proof for the history.** A stream that never arrives builds a
+  # pipeline each time, and a person heard none of those. See the `:mark_started` action
+  # of `MyHiFi.Playback.Item`.
+  describe "the history of what a person heard" do
+    test "a track that makes a sound goes into the history" do
+      one = playing(1)
+
+      assert %{last_started_at: %DateTime{}} = Playback.get_item!(one.id)
+    end
+
+    test "a track that this device never played holds no time" do
+      [_first, second | _rest] = Episodes.episodes()
+
+      playing(1)
+
+      assert %{last_started_at: nil} = Playback.get_item!(second.id)
+    end
+
+    # A person is not done with a track that they started, so the column of the podcast
+    # rule must stay empty. See `MyHiFiWeb.HistoryLive`.
+    test "it writes no mark of a track that a person is done with" do
+      one = playing(1)
+
+      assert %{last_played_at: nil, played?: false} = Playback.get_item!(one.id)
+    end
+  end
+
   describe "a pause" do
     test "it stops the audio and it keeps the track" do
       playing(1)

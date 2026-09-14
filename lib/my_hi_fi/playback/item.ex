@@ -128,6 +128,19 @@ defmodule MyHiFi.Playback.Item do
         down "DROP INDEX playback_items_source_kind_added_at_index"
       end
 
+      # The history reads every source together, so this index names no source. It
+      # holds the rows that carry a date, because `:history` reads those alone, and a
+      # library of 137,575 rows holds a few hundred of them.
+      statement :last_started_at do
+        up """
+        CREATE INDEX playback_items_last_started_at_index
+        ON playback_items (last_started_at)
+        WHERE last_started_at IS NOT NULL
+        """
+
+        down "DROP INDEX playback_items_last_started_at_index"
+      end
+
       statement :source_favourite_title_nocase do
         up """
         CREATE INDEX playback_items_source_favourite_title_nocase_index
@@ -252,6 +265,39 @@ defmodule MyHiFi.Playback.Item do
 
       filter expr(not is_nil(audio_file.id))
       prepare build(load: [:audio_file])
+    end
+
+    read :history do
+      description """
+      Every item that this device has played, the most recent first.
+
+      A person who heard something and wants it again reads this. It holds one row for
+      each item and not one for each play, because a person who played an album twelve
+      times wants to find the album and not twelve rows of it. `last_started_at` is
+      therefore the last time and not a list of times.
+      """
+
+      filter expr(not is_nil(last_started_at))
+
+      prepare build(sort: [last_started_at: :desc])
+    end
+
+    update :mark_started do
+      description """
+      Say that this device began to make a sound of this item.
+
+      `MyHiFi.Player` runs this when the pipeline says that the sound began, and not
+      when a person presses a control: a stream that never arrives is not something
+      that they heard.
+
+      **This writes one row for each track that plays**, and a track is minutes long, so
+      the cost to the card is small. A live stream that the network broke restarts, and
+      each restart writes this again, which `MyHiFi.Player` bounds to five.
+      """
+
+      accept []
+
+      change set_attribute(:last_started_at, &DateTime.utc_now/0)
     end
 
     create :upsert do
@@ -698,6 +744,22 @@ defmodule MyHiFi.Playback.Item do
 
     attribute :last_played_at, :utc_datetime_usec do
       description "When the item last reached its end, or when a person marked it played."
+      public? true
+    end
+
+    attribute :last_started_at, :utc_datetime_usec do
+      description """
+      When this device last began to make a sound of this item.
+
+      **This is not `last_played_at`.** That one says that a person is done with the
+      item, and it carries the podcast rule: an episode that reached its end is one to
+      leave behind. This one says that they heard it, and it is what the history reads.
+      A station never reaches an end, so it never held the other column, and a station
+      is the very thing that a person wants to find again.
+
+      It is nil for an item that this device has not played.
+      """
+
       public? true
     end
 

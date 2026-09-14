@@ -51,6 +51,17 @@
         </.faceplate_control>
 
         <.faceplate_control
+          id="history-link"
+          navigate={~p"/history"}
+          label="History"
+          current?={false}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
+        >
+          <.icon name="hero-clock" class="size-5" />
+        </.faceplate_control>
+
+        <.faceplate_control
           id="settings-link"
           navigate={~p"/settings"}
           label="Settings"
