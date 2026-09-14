@@ -13,6 +13,11 @@ defmodule MyHiFi.Podcast.RefreshTest do
   setup do
     Application.put_env(:my_hi_fi, Feed, plug: {Req.Test, Feed})
     on_exit(fn -> Application.delete_env(:my_hi_fi, Feed) end)
+
+    # Podcasts needs a key of the Podcast Index, so it is out of use until a person
+    # sets it up. See `MyHiFi.Source.enabled?/1`.
+    MyHiFi.Source.enable(MyHiFi.Source.Podcasts, true)
+
     :ok
   end
 

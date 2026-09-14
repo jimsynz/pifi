@@ -473,6 +473,10 @@ defmodule MyHiFi.Source do
   reach nothing. `MyHiFi.AutoSync` asks both before it runs the work of a source, so a
   device with no key asks the index nothing and writes no job that can only fail.
 
+  It is also the answer that `enabled?/1` gives for a source that no person has
+  changed. A source that needs an address or a key is therefore out of use until a
+  person gives it one, and it needs no second setting to say so.
+
   A source that needs no such thing leaves this out, and `ready?/1` then gives `true`.
   """
   @callback ready?() :: boolean()
@@ -598,14 +602,22 @@ defmodule MyHiFi.Source do
   @doc """
   Whether a person has left this source in use.
 
-  A source that no person has changed is in use, so a new source works on the
-  first start.
+  **A source that no person has changed is in use when it is ready.** Internet radio
+  needs nothing, so it plays on the first start. Jellyfin, Plex and podcasts each need
+  an address or a key, and a top row that drew a control for all three gave a person
+  three lists that hold nothing. Such a source therefore comes into use when a person
+  sets it up, and `c:ready?/0` is the one fact that says so.
+
+  A person answers this as well, and their answer wins over that rule. A source with
+  `"false"` stays out of use after they set it up, and one with `"true"` stays in use
+  when it is not ready.
   """
   @spec enabled?(module()) :: boolean()
   def enabled?(module) do
     case MyHiFi.Settings.fetch(enabled_key(module)) do
       {:ok, %{value: "false"}} -> false
-      _other -> true
+      {:ok, %{value: "true"}} -> true
+      _other -> ready?(module)
     end
   end
 

@@ -12,6 +12,14 @@ defmodule MyHiFiWeb.SearchLiveTest do
   @radio Source.slug(Source.InternetRadio)
   @podcasts Source.slug(Source.Podcasts)
 
+  setup do
+    # A source that needs an address or a key is out of use until a person sets it up,
+    # and these tests read the page of one. See `MyHiFi.Source.enabled?/1`.
+    for module <- Source.all(), do: Source.enable(module, true)
+
+    :ok
+  end
+
   # Cinder draws the search input inside the form that holds the filters of the
   # collection, and the name of it is `search`.
   # The player of a test before this one may still hold a track, and the name of it is

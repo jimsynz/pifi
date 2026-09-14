@@ -21,6 +21,10 @@ defmodule MyHiFiWeb.BrowseLiveTest do
   @podcasts "/browse/podcasts"
 
   setup do
+    # A source that needs an address or a key is out of use until a person sets it up,
+    # and these tests read the page of one. See `MyHiFi.Source.enabled?/1`.
+    for module <- MyHiFi.Source.all(), do: MyHiFi.Source.enable(module, true)
+
     # `MyHiFi.Player` is one process for the whole node, so its state outlives a test.
     MyHiFi.Player.stop()
     on_exit(fn -> MyHiFi.Player.stop() end)

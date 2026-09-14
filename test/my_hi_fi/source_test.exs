@@ -3,6 +3,7 @@ defmodule MyHiFi.SourceTest do
 
   doctest MyHiFi.Source, import: true
 
+  alias MyHiFi.Podcast.Index
   alias MyHiFi.Settings
   alias MyHiFi.Source
   alias MyHiFi.Test.PlainSource
@@ -24,21 +25,43 @@ defmodule MyHiFi.SourceTest do
   end
 
   describe "which sources are in use" do
-    test "a source that no person changed is in use" do
+    test "a source that no person changed, and that needs nothing, is in use" do
       assert Source.enabled?(Source.InternetRadio)
-      assert Source.enabled() == Source.all()
+      assert Source.enabled() == [Source.InternetRadio]
+    end
+
+    test "a source that needs setup is out of use until a person sets it up" do
+      refute Source.enabled?(Source.Podcasts)
+
+      give_index_a_key()
+
+      assert Source.enabled?(Source.Podcasts)
+      assert Source.enabled() == [Source.InternetRadio, Source.Podcasts]
+    end
+
+    test "a source that a person took out of use stays out after they set it up" do
+      Source.enable(Source.Podcasts, false)
+      give_index_a_key()
+
+      refute Source.enabled?(Source.Podcasts)
     end
 
     test "a source out of use leaves the list, and it stays in `all/0`" do
-      Source.enable(Source.Podcasts, false)
+      Source.enable(Source.InternetRadio, false)
 
-      refute Source.enabled?(Source.Podcasts)
-      assert Source.enabled() == [Source.InternetRadio, Source.Jellyfin, Source.Plex]
-      assert Source.Podcasts in Source.all()
+      refute Source.enabled?(Source.InternetRadio)
+      assert Source.enabled() == []
+      assert Source.InternetRadio in Source.all()
     end
 
     test "a source comes back" do
-      Source.enable(Source.Podcasts, false)
+      Source.enable(Source.InternetRadio, false)
+      Source.enable(Source.InternetRadio, true)
+
+      assert Source.enabled?(Source.InternetRadio)
+    end
+
+    test "a person can put a source that is not ready in use" do
       Source.enable(Source.Podcasts, true)
 
       assert Source.enabled?(Source.Podcasts)
@@ -57,6 +80,7 @@ defmodule MyHiFi.SourceTest do
     end
 
     test "a choice stays, and it survives a restart because it is a row" do
+      Source.enable(Source.Podcasts, true)
       Source.choose(Source.Podcasts)
 
       assert Source.chosen() == Source.Podcasts
@@ -136,5 +160,14 @@ defmodule MyHiFi.SourceTest do
         assert is_atom(action.icon)
       end
     end
+  end
+
+  # Podcasts is ready when it holds a key of the Podcast Index, and that is the setup
+  # that puts the source in use. See `MyHiFi.Source.enabled?/1`.
+  defp give_index_a_key do
+    Settings.put!(Index.key_setting(), "a-key")
+    Settings.put!(Index.secret_setting(), "a-secret")
+
+    :ok
   end
 end

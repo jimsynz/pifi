@@ -83,7 +83,7 @@ defmodule MyHiFiWeb.SettingsLiveTest do
     test "each row says what the section holds", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
-      assert html =~ "4 of 4 in use"
+      assert html =~ "1 of 4 in use"
       assert html =~ "free of"
     end
 
@@ -666,25 +666,26 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   end
 
   describe "the source list" do
-    test "holds one row for each source, and each one is in use", %{conn: conn} do
-      {:ok, view, html} = live(conn, ~p"/settings/sources")
+    # A source that needs an address or a key is out of use until a person sets it up,
+    # and the list is where they find it. See `MyHiFi.Source.enabled?/1`.
+    test "holds one row for each source, and it says which are in use", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      assert has_element?(view, "#source-row-#{@radio}")
-      assert has_element?(view, "#source-row-#{@podcasts}")
-      refute html =~ "Out of use"
+      assert has_element?(view, "#source-row-#{@radio}", "In use")
+      assert has_element?(view, "#source-row-#{@podcasts}", "Out of use")
     end
 
     test "a person takes a source out of use, and the top row loses it", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      html = view |> element("#enable-source-#{@podcasts}") |> render_click()
+      html = view |> element("#enable-source-#{@radio}") |> render_click()
 
-      assert html =~ "Podcasts is out of use."
-      refute Source.enabled?(Source.Podcasts)
-      assert Source.enabled() == [Source.InternetRadio, Source.Jellyfin, Source.Plex]
+      assert html =~ "Internet radio is out of use."
+      refute Source.enabled?(Source.InternetRadio)
+      assert Source.enabled() == []
 
       {:ok, _view, html} = live(conn, ~p"/settings")
-      refute html =~ ~s(id="source-#{@podcasts}")
+      refute html =~ ~s(id="source-#{@radio}")
     end
 
     test "a person puts a source back in use", %{conn: conn} do
@@ -701,9 +702,9 @@ defmodule MyHiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/sources")
       view |> element("#enable-source-#{@radio}") |> render_click()
 
-      {:ok, _view, html} = live(conn, ~p"/settings/sources")
+      {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      assert html =~ "Out of use"
+      assert has_element?(view, "#source-row-#{@radio}", "Out of use")
     end
   end
 
