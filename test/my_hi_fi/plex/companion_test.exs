@@ -133,11 +133,18 @@ defmodule MyHiFi.Plex.CompanionTest do
       assert body =~ ~s(type="photo")
     end
 
-    test "it names the controls that a person may press" do
-      body = poll("1").resp_body
+    # **A real player drops `skipNext` when it holds nothing to play next**, and a
+    # controller reads this list to decide which controls to draw.
+    test "a device that holds nothing names the level and no other control" do
+      assert attribute(poll("1").resp_body, "Timeline", "controllable") == "volume"
+    end
 
-      assert attribute(body, "Timeline", "controllable") =~ "playPause"
-      refute attribute(body, "Timeline", "controllable") =~ "shuffle"
+    test "it never names a control that this firmware does not hold" do
+      list = attribute(poll("1").resp_body, "Timeline", "controllable")
+
+      for absent <- ["shuffle", "repeat", "stepBack", "stepForward"] do
+        refute list =~ absent
+      end
     end
   end
 
@@ -178,6 +185,20 @@ defmodule MyHiFi.Plex.CompanionTest do
     # navigation for the same reason.
     test "a path that this player does not hold answers 404" do
       assert call("/player/navigation/moveUp").status == 404
+    end
+  end
+
+  # A controller sends a play queue and not a track, and these read what it sends.
+  describe "a command that plays" do
+    test "a queue that the server does not answer uses the one track of the command" do
+      conn =
+        call("/player/playback/playMedia?key=/library/metadata/404&containerKey=/playQueues/1")
+
+      assert conn.status == 200
+    end
+
+    test "a command that names neither a queue nor a track answers" do
+      assert call("/player/playback/playMedia").status == 200
     end
   end
 

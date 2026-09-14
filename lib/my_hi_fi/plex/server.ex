@@ -693,6 +693,42 @@ defmodule MyHiFi.Plex.Server do
   end
 
   @doc """
+  The tracks of one play queue of the server, and which one a person pressed.
+
+  **A controller does not send a track, it sends a play queue.** A person who presses
+  an album in Plexamp makes a queue of it on the server, and the command that reaches
+  the player names that queue in `containerKey`. A player that read the one `key` of
+  the command would play one song of the record and stop.
+
+  It returns the `ratingKey` of each track in the order that they play, and the place
+  in that list of the one that a person pressed. A read of a real queue on 2026-09-15
+  gave 35 tracks and `playQueueSelectedItemOffset` of 28.
+
+  `key` is what the command carries, such as `/playQueues/26009`.
+  """
+  @spec play_queue(String.t()) ::
+          {:ok, %{refs: [String.t()], selected: non_neg_integer()}} | {:error, term()}
+  def play_queue(key) do
+    with {:ok, %{address: address, token: token, client_id: client_id}} <- link(),
+         {:ok, body} <- request(:get, address, token, path_of(key), [], [], client_id) do
+      container = container(body)
+
+      refs =
+        container
+        |> Map.get("Metadata", [])
+        |> List.wrap()
+        |> Enum.map(&to_string(&1["ratingKey"]))
+
+      {:ok, %{refs: refs, selected: whole(container["playQueueSelectedItemOffset"]) || 0}}
+    end
+  end
+
+  # A controller names the queue as a path, and a controller that names only the number
+  # of it means the same thing.
+  defp path_of("/" <> _rest = key), do: key
+  defp path_of(key), do: "/playQueues/" <> to_string(key)
+
+  @doc """
   The identifier that the server calls itself by.
 
   **This is not `client_id/0`.** That one names this device, and this one names the

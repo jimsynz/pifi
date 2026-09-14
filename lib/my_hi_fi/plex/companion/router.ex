@@ -128,14 +128,22 @@ defmodule MyHiFi.Plex.Companion.Router do
     end
   end
 
-  # **`key` names the track of the server, and `source_ref` of an item is that name.**
-  # `MyHiFi.Plex.Fill` writes the `ratingKey` of Plex into that column, so the last
-  # segment of the key of a controller finds the row with no map of its own.
+  # **A controller does not send a track, it sends a play queue.** A person who presses
+  # an album makes a queue of it on the server, and `containerKey` names that queue. A
+  # player that read the one `key` would play one song of the record and stop, and the
+  # skip of that person would then do nothing.
+  #
+  # `key` is the answer for a controller that names no queue, and `source_ref` of an
+  # item is the `ratingKey` that both of them carry, so a row is found with no map of
+  # its own.
+  #
+  # **`offset` is not honoured, and a controller may send one.** It names the place to
+  # start at, and this firmware has no way to start a song at a place: the position of
+  # an item belongs to the items that keep their place, and a song of a library keeps
+  # none. A person who moves a controller to the middle of a track and sends it here
+  # hears that track from the beginning.
   get "/player/playback/playMedia" do
-    case item_of(conn.params["key"]) do
-      {:ok, item} -> answer(conn, Playback.play([item.id]))
-      {:error, reason} -> answer(conn, {:error, reason})
-    end
+    answer(conn, played(conn.params["containerKey"], conn.params["key"]))
   end
 
   # **A path that this player does not hold answers 404**, in the way that a real player
@@ -202,9 +210,6 @@ defmodule MyHiFi.Plex.Companion.Router do
     )
   end
 
-  # `controllable` names the controls that a person may press, and this list is what
-  # this firmware answers. A real player names `shuffle`, `repeat`, `stepBack` and
-  # `stepForward` as well, and `MyHiFi.Playback` holds none of those.
   defp music(state) do
     [
       {"type", "music"},
@@ -216,8 +221,36 @@ defmodule MyHiFi.Plex.Companion.Router do
       # A real player names the level whether it plays something or not, so a controller
       # draws the control of it for a device that is quiet.
       {"volume", to_string(volume())},
-      {"controllable", "playPause,stop,skipNext,skipPrevious,seekTo,volume"}
+      {"controllable", Enum.join(controllable(state), ",")}
     ] ++ track(state)
+  end
+
+  # **The list answers what a person may press now, and it is not a constant.** A real
+  # player drops `skipNext` from it when it holds nothing to play next, and a controller
+  # reads the list to decide which of its controls to draw. A list that never changed
+  # would give a person a control that does nothing, which is the same fault as claiming
+  # a capability that this player does not answer.
+  #
+  # `shuffle`, `repeat`, `stepBack` and `stepForward` are never in it, because
+  # `MyHiFi.Playback` holds none of those.
+  defp controllable(%{item: nil}), do: ["volume"]
+
+  defp controllable(state) do
+    ["playPause", "stop", "volume"] ++ seeking(state) ++ moving()
+  end
+
+  # **A live stream has no place to move to.** A station plays until a person stops it,
+  # so a controller must not draw a progress bar that they can press.
+  defp seeking(%{live?: true}), do: []
+  defp seeking(_state), do: ["seekTo"]
+
+  # The queue decides what next and previous mean, so an empty one holds neither. It
+  # lives in memory, so this costs no read of the card. See `MyHiFi.Playback.Queue`.
+  defp moving do
+    case Playback.queue!() do
+      rows when length(rows) > 1 -> ["skipNext", "skipPrevious"]
+      _rows -> []
+    end
   end
 
   # A device that plays nothing names no track, and a controller then draws the empty
@@ -262,6 +295,54 @@ defmodule MyHiFi.Plex.Companion.Router do
     case Playback.volume!() do
       %{enabled?: true, percent: percent} -> percent
       _other -> 100
+    end
+  end
+
+  # The queue of the server decides the order and the row, so a person who pressed the
+  # ninth track of a record hears the record from there.
+  defp played(nil, key), do: one_track(key)
+
+  defp played(container_key, key) do
+    case Server.play_queue(container_key) do
+      {:ok, %{refs: refs, selected: selected}} -> queued(refs, selected, key)
+      {:error, _reason} -> one_track(key)
+    end
+  end
+
+  # **A queue of the server holds the tracks that this device has read, and no others.**
+  # A read of the library writes a row for each track, so a queue of a library that the
+  # device knows maps whole. A track that is absent leaves the list, and the place of
+  # the person moves with it.
+  defp queued(refs, selected, key) do
+    items = items_of(refs)
+    ids = refs |> Enum.map(&items[&1]) |> Enum.reject(&is_nil/1)
+
+    case ids do
+      [] -> one_track(key)
+      ids -> Playback.play(ids, %{playing_index: place(refs, items, selected)})
+    end
+  end
+
+  # The place of the row that a person pressed, counted over the tracks that this
+  # device holds. A track that the device does not hold is not in the list, so the
+  # place of every row after it moves.
+  defp place(refs, items, selected) do
+    refs
+    |> Enum.take(selected)
+    |> Enum.count(&items[&1])
+  end
+
+  defp items_of(refs) do
+    "plex"
+    |> Playback.items_of_source!()
+    |> Enum.filter(&(&1.source_ref in refs))
+    |> Map.new(&{&1.source_ref, &1.id})
+  end
+
+  defp one_track(key) do
+    case item_of(key) do
+      {:ok, item} -> Playback.play([item.id])
+      {:error, reason} -> {:error, reason}
     end
   end
 
