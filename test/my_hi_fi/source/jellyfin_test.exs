@@ -158,8 +158,18 @@ defmodule MyHiFi.Source.JellyfinTest do
     # **A skip needs a reader for every codec of the library**, or it works for one
     # track and not the next. `MyHiFi.Player.Skip.frames/1` holds MP3, AAC and FLAC,
     # which is every codec that `MyHiFi.Jellyfin.Server` asks a server for.
-    test "it holds a skip, and no search" do
-      assert Jellyfin.capabilities() == [:skip]
+    #
+    # A search reaches no server: the catalogue holds the whole library, so it reads the
+    # card and it works when the server is off.
+    test "it holds a search and a skip" do
+      assert Jellyfin.capabilities() == [:search, :skip]
+    end
+
+    # An artist and an album are both containers, so `kinds/0` cannot tell them apart.
+    test "it names three groups for a search, which is finer than its kinds" do
+      labels = Jellyfin.search_groups("") |> Enum.map(&elem(&1, 0))
+
+      assert labels == ["Artists", "Albums", "Tracks"]
     end
 
     test "a device with no link is not ready, so no job asks the server" do

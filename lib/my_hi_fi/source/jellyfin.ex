@@ -77,10 +77,11 @@ defmodule MyHiFi.Source.Jellyfin do
   # `MyHiFi.Player.AdtsFrame` read the other two codecs that
   # `MyHiFi.Jellyfin.Server` asks a server for, so the list is whole.
   #
-  # A search is absent because the catalogue has the whole library already, and
-  # `MyHiFiWeb.SearchLive` needs a source to say so. That comes later.
+  # **A search reaches no server.** The catalogue holds the whole library, because
+  # `MyHiFi.Jellyfin.Sync.Library` reads every artist, album and track of it, so a
+  # search of this source is a read of the card and it works when the server is off.
   @impl MyHiFi.Source
-  def capabilities, do: [:skip]
+  def capabilities, do: [:search, :skip]
 
   @impl MyHiFi.Source
   def kinds, do: [container: "Albums", track: "Tracks"]
@@ -164,6 +165,30 @@ defmodule MyHiFi.Source.Jellyfin do
     Item
     |> Ash.Query.filter(source == ^@source and favourite? == true)
     |> Ash.Query.sort(sorted_title: :asc)
+  end
+
+  defp tracks_query do
+    Item
+    |> Ash.Query.filter(source == ^@source and kind == :track)
+    |> Ash.Query.sort(sorted_title: :asc)
+  end
+
+  @impl MyHiFi.Source
+  def search(_text) do
+    Item
+    |> Ash.Query.filter(source == ^@source)
+    |> Ash.Query.sort(sorted_title: :asc)
+  end
+
+  # **An artist and an album are both containers, so `kinds/0` cannot tell them
+  # apart.** See `c:MyHiFi.Source.search_groups/1`.
+  @impl MyHiFi.Source
+  def search_groups(_text) do
+    [
+      {"Artists", %{query: artists_query(), kind: :item, title_label: "Name"}},
+      {"Albums", %{query: albums_query(), kind: :item, facts: [:subtitle, :release_year]}},
+      {"Tracks", %{query: tracks_query(), kind: :item, facts: [:subtitle, :duration_ms]}}
+    ]
   end
 
   @impl MyHiFi.Source

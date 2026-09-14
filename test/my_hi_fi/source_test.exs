@@ -162,6 +162,41 @@ defmodule MyHiFi.SourceTest do
     end
   end
 
+  describe "the groups of a search" do
+    test "a source that names none gets one group for each of its kinds" do
+      labels = Enum.map(Source.search_groups(Source.Podcasts, ""), &elem(&1, 0))
+
+      assert labels == ["Shows", "Episodes"]
+    end
+
+    test "a source of one kind gets one group" do
+      labels = Enum.map(Source.search_groups(Source.InternetRadio, ""), &elem(&1, 0))
+
+      assert labels == ["Stations"]
+    end
+
+    # An artist and an album are both containers, so `kinds/0` cannot tell them apart.
+    test "a library names its own groups, and they are finer than its kinds" do
+      for module <- [Source.Jellyfin, Source.Plex] do
+        labels = Enum.map(Source.search_groups(module, ""), &elem(&1, 0))
+
+        assert labels == ["Artists", "Albums", "Tracks"]
+      end
+    end
+
+    test "a source that offers no search holds no group" do
+      assert Source.search_groups(PlainSource, "") == []
+    end
+
+    test "each group names a query and a kind of row" do
+      for module <- Source.all(), {label, listing} <- Source.search_groups(module, "") do
+        assert is_binary(label)
+        assert %Ash.Query{} = listing.query
+        assert listing.kind == :item
+      end
+    end
+  end
+
   # Podcasts is ready when it holds a key of the Podcast Index, and that is the setup
   # that puts the source in use. See `MyHiFi.Source.enabled?/1`.
   defp give_index_a_key do

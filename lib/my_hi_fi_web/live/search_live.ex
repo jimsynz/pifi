@@ -12,6 +12,14 @@ defmodule MyHiFiWeb.SearchLive do
   parameter itself. A reload and a bookmark therefore both work, in the way that they do
   on the browse page.
 
+  ## One group of a source
+
+  `MyHiFiWeb.SearchAllLive` draws a heading for each group that a source names, and a
+  person who presses one reads that group here. `?group=Albums` is what carries it, and
+  the query of that group takes the place of the query of the whole source. A name that
+  the source does not hold reads the whole source, because a person may keep such an
+  address after a source renames a group.
+
   ## The control that chooses a kind
 
   A source with more than one kind of item gets a control to choose between them, and
@@ -42,6 +50,7 @@ defmodule MyHiFiWeb.SearchLive do
      socket
      |> assign(:page_title, "Search")
      |> assign(:collection_id, @collection)
+     |> assign(:group, nil)
      |> assign(:list_query, nil)
      |> assign(:url_state, nil)}
   end
@@ -55,7 +64,7 @@ defmodule MyHiFiWeb.SearchLive do
 
       {:noreply,
        socket
-       |> at(module, params["search"] || "")
+       |> at(module, params["search"] || "", params["group"])
        |> then(&Cinder.UrlSync.handle_params(params, uri, &1))}
     else
       _other -> {:noreply, push_navigate(socket, to: ~p"/browse/#{slug}")}
@@ -64,19 +73,38 @@ defmodule MyHiFiWeb.SearchLive do
 
   # A source may reach a service to answer, so the query is built one time for each text
   # and not one time for each press of a control. See `c:MyHiFi.Source.search/1`.
-  defp at(socket, module, text) do
-    if socket.assigns[:source] == module and socket.assigns[:text] == text do
+  defp at(socket, module, text, group) do
+    if socket.assigns[:source] == module and socket.assigns[:text] == text and
+         socket.assigns[:group] == group do
       socket
     else
       socket
       |> assign(:source, module)
       |> assign(:current_source, Source.slug(module))
       |> assign(:text, text)
-      |> assign(:page_title, "Search #{module.title()}")
+      |> assign(:group, group)
+      |> assign(:page_title, title(module, group))
       |> assign(:kinds, options_of(module))
-      |> assign(:query, module.search(text))
+      |> assign(:query, query(module, text, group))
     end
   end
+
+  # **A group narrows the query, and a name that the source does not hold does not.**
+  # `MyHiFiWeb.SearchAllLive` sends a person here with the group that they pressed, and
+  # a person may keep that address. A source that drops a group, or renames one, must
+  # therefore leave the page whole: it reads the whole source then, which is what the
+  # page did before any group existed. See `c:MyHiFi.Source.search_groups/1`.
+  defp query(module, text, nil), do: module.search(text)
+
+  defp query(module, text, group) do
+    case Enum.find(Source.search_groups(module, text), fn {label, _listing} -> label == group end) do
+      {_label, %{query: query}} -> query
+      nil -> module.search(text)
+    end
+  end
+
+  defp title(module, nil), do: "Search " <> module.title()
+  defp title(module, group), do: "Search the " <> group <> " of " <> module.title()
 
   # A source names what a person calls its items, and the control to choose between them
   # is worth drawing only for a source with more than one kind. Internet radio has

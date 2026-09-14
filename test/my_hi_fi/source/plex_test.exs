@@ -89,8 +89,18 @@ defmodule MyHiFi.Source.PlexTest do
 
     # A skip works for MP3, for AAC and for FLAC, which is every codec that this source
     # can play but Vorbis. `MyHiFi.Player` refuses the skip when it sees that track.
-    test "it offers a skip, and it offers no search yet" do
-      assert Source.Plex.capabilities() == [:skip]
+    #
+    # A search reaches no server: the catalogue holds the whole library, so it reads the
+    # card and it works when the server is off.
+    test "it offers a search and a skip" do
+      assert Source.Plex.capabilities() == [:search, :skip]
+    end
+
+    # An artist and an album are both containers, so `kinds/0` cannot tell them apart.
+    test "it names three groups for a search, which is finer than its kinds" do
+      labels = Source.Plex.search_groups("") |> Enum.map(&elem(&1, 0))
+
+      assert labels == ["Artists", "Albums", "Tracks"]
     end
 
     test "it gives four branches at the top of the tree" do

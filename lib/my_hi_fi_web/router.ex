@@ -44,6 +44,9 @@ defmodule MyHiFiWeb.Router do
     # level. See `MyHiFiWeb.BrowseLive`.
     live("/browse/:source", BrowseLive)
     live("/browse/:source/*path", BrowseLive)
+    # The search of the whole device comes first, and the search of one source keeps its
+    # own address. See `MyHiFiWeb.SearchAllLive`.
+    live("/search", SearchAllLive)
     live("/search/:source", SearchLive)
     live("/queue", QueueLive)
     live("/playlists", PlaylistLive, :index)

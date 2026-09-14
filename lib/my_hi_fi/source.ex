@@ -12,6 +12,7 @@ defmodule MyHiFi.Source do
   else.
   """
 
+  require Ash.Query
   require Logger
 
   # **What a container held before a source could say otherwise.** The oldest item
@@ -411,6 +412,30 @@ defmodule MyHiFi.Source do
   @callback search(String.t()) :: Ash.Query.t()
 
   @doc """
+  How the results of a search group, and in what order a person reads the groups.
+
+  The search of the whole device shows one heading for each group, with a count beside
+  it, and a person who presses a heading reads that group alone.
+
+  **The kinds of `c:kinds/0` are not fine enough for every source.** A library holds
+  artists and albums, and both are containers: a person who searches for a name wants
+  the artist above the records of it, and one heading that read `Albums` for both says
+  the wrong word for half of the rows. A source therefore names its own groups, in the
+  way that `c:roots/0` names its own branches, and each group carries a `t:listing/0`
+  so that the page draws the facts that the source chose.
+
+  A source that implements none gets one group for each pair of `c:kinds/0`, over the
+  query that `c:search/1` gives. Podcasts reads `Shows` and `Episodes` that way, and
+  internet radio reads `Stations`.
+
+  The text comes here as well as to `c:search/1`, because a source that reaches a
+  service must read it one time and not one time for each group.
+
+  `capabilities/0` names `:search` for a source that offers this.
+  """
+  @callback search_groups(String.t()) :: [{String.t(), listing()}]
+
+  @doc """
   Turn an item into something that the player can play.
 
   This is the one thing that only a source can do. A station gives the address of a
@@ -489,6 +514,7 @@ defmodule MyHiFi.Source do
                       ready?: 0,
                       refresh: 1,
                       search: 1,
+                      search_groups: 1,
                       settings: 0,
                       put_settings: 1,
                       settings_actions: 0,
@@ -737,6 +763,31 @@ defmodule MyHiFi.Source do
 
   defp default_inside(nil), do: @default_under_facet
   defp default_inside(_item), do: @default_inside
+
+  @doc """
+  How the results of a search of one source group.
+
+  See `c:search_groups/1`. A source that names none gets one group for each pair of
+  `c:kinds/0`, and a source that offers no search at all gets none.
+  """
+  @spec search_groups(module(), String.t()) :: [{String.t(), listing()}]
+  def search_groups(module, text) do
+    cond do
+      implements?(module, :search_groups, 1) -> module.search_groups(text)
+      implements?(module, :search, 1) -> default_groups(module, text)
+      true -> []
+    end
+  end
+
+  # One group for each kind, over the query that the source gave. The kind is a column
+  # of the item, so this needs no knowledge of any source.
+  defp default_groups(module, text) do
+    query = module.search(text)
+
+    Enum.map(module.kinds(), fn {one, title} ->
+      {title, %{query: Ash.Query.filter(query, kind == ^one), kind: :item}}
+    end)
+  end
 
   @doc """
   The values that a person can change for one source.
