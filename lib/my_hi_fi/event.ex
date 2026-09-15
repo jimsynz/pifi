@@ -37,6 +37,20 @@ defmodule MyHiFi.Event do
   end
 
   @doc """
+  Stop listening to a topic.
+
+  **A process that answers one request and then serves another must stop listening.**
+  `MyHiFi.Plex.Companion.Router` waits for an event of the player while it holds a poll
+  of a controller, and the process that holds it serves the next request of that
+  connection. A subscription that stayed would put the events of the player in the
+  mailbox of a request that wants none.
+  """
+  @spec unsubscribe(atom()) :: :ok
+  def unsubscribe(topic) when topic in @topics do
+    Phoenix.PubSub.unsubscribe(MyHiFi.PubSub, to_string(topic))
+  end
+
+  @doc """
   Send one event to each subscriber of a topic.
   """
   @spec publish(topic(), t()) :: :ok

@@ -282,13 +282,7 @@ defmodule MyHiFi.Source.Plex do
   # the players of an account and Plexamp on a telephone reads nothing else.
   @impl MyHiFi.Source
   def run_settings_action("start_player") do
-    case Server.start_link_as_player() do
-      {:ok, code} ->
-        {:ok, "Type the code #{code} at plex.tv/link, and then press Finish the player."}
-
-      {:error, reason} ->
-        {:error, "plex.tv did not answer: #{inspect(reason)}"}
-    end
+    if Server.registered_as_player?(), do: opened_player(), else: asked_to_be_a_player()
   end
 
   def run_settings_action("finish_player") do
@@ -388,11 +382,37 @@ defmodule MyHiFi.Source.Plex do
   # this on opens a port on their device. The three states follow the link of the
   # library: a person asks, a person types a code, and then it is done. See
   # `MyHiFi.Plex.Companion`.
+  # **A device that is a player already asks no person to authorise it again.** The
+  # account holds the row for as long as a person leaves it there, so a person who turns
+  # the player off and on again wants the port open and nothing else.
   defp player do
     cond do
       Companion.enabled?() -> stop_player()
+      Server.registered_as_player?() -> start_player()
       Server.player_code() -> finish_player()
       true -> start_player()
+    end
+  end
+
+  # The account holds this device already, so this opens the port and the announcement
+  # tells the account where to find it. See `MyHiFi.Plex.Companion.Announcement`.
+  defp opened_player do
+    Companion.enable(true)
+
+    if Companion.running?() do
+      {:ok, "This device is a Plex player now, on port #{Companion.port()}."}
+    else
+      {:error, "The device could not listen on port #{Companion.port()}."}
+    end
+  end
+
+  defp asked_to_be_a_player do
+    case Server.start_link_as_player() do
+      {:ok, code} ->
+        {:ok, "Type the code #{code} at plex.tv/link, and then press Finish the player."}
+
+      {:error, reason} ->
+        {:error, "plex.tv did not answer: #{inspect(reason)}"}
     end
   end
 

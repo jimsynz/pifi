@@ -71,6 +71,17 @@ defmodule MyHiFi.PlayerFinishTest do
       })
     end
 
+    def another do
+      Playback.upsert_item!(%{
+        source: @slug,
+        source_ref: "another",
+        title: "Another episode",
+        kind: :track,
+        duration_ms: 600_000,
+        keeps_place?: true
+      })
+    end
+
     @doc "Say whether the next resolve gives a live stream."
     def live!(live?), do: Application.put_env(:my_hi_fi, :recorder_live?, live?)
 
@@ -124,6 +135,22 @@ defmodule MyHiFi.PlayerFinishTest do
       refute_receive %Events.Buffering{}, 500
 
       assert %{playing?: false} = Player.state()
+    end
+
+    # **The music stopped only when nothing follows it.** This published the end of the
+    # track and then started the next one, so every change of track said that the device
+    # had stopped. A Plex controller read that as the end of the music and told the
+    # player to stop, and a person heard the first track of a playlist and then silence.
+    test "a track that has another after it says that the music stopped never" do
+      one = Recorder.episode()
+      two = Recorder.another()
+
+      assert {:ok, :ok} = Playback.play([one.id, two.id])
+
+      assert_receive %Events.Started{track: %{source_ref: "only"}}, 2000
+      assert_receive %Events.Started{track: %{source_ref: "another"}}, 5000
+
+      refute_received %Events.Stopped{reason: :finished}
     end
 
     test "it marks the item played" do

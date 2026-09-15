@@ -162,7 +162,7 @@ defmodule MyHiFi.Plex.Companion do
   # plex.tv where this player is, and a controller that read the address before the port
   # answered would meet nothing. See `MyHiFi.Plex.Companion.Announcement`.
   defp start_listener do
-    for child <- [listener(), announcement()], do: start_child(child)
+    for child <- [queue(), listener(), announcement()], do: start_child(child)
 
     :ok
   end
@@ -186,7 +186,7 @@ defmodule MyHiFi.Plex.Companion do
   end
 
   defp stop_listener do
-    for id <- [:announcement, :listener] do
+    for id <- [:announcement, :listener, :queue] do
       Supervisor.terminate_child(__MODULE__, id)
       Supervisor.delete_child(__MODULE__, id)
     end
@@ -204,5 +204,11 @@ defmodule MyHiFi.Plex.Companion do
 
   defp announcement do
     %{id: :announcement, start: {MyHiFi.Plex.Companion.Announcement, :start_link, [[]]}}
+  end
+
+  # It holds the play queue that a controller named, and the timeline reads it. See
+  # `MyHiFi.Plex.Companion.Queue`.
+  defp queue do
+    %{id: :queue, start: {MyHiFi.Plex.Companion.Queue, :start_link, [[]]}}
   end
 end

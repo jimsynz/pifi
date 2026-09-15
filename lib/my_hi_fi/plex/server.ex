@@ -162,6 +162,21 @@ defmodule MyHiFi.Plex.Server do
         }
 
   @typedoc """
+  One play queue of the server.
+
+  `id` names the queue, `rows` gives the identifier of each track inside it, and a
+  controller reads both from the timeline of a player. See
+  `MyHiFi.Plex.Companion.Queue`.
+  """
+  @type queue :: %{
+          id: integer() | nil,
+          version: integer() | nil,
+          refs: [String.t()],
+          rows: %{String.t() => integer() | nil},
+          selected: non_neg_integer()
+        }
+
+  @typedoc """
   One page of a listing.
 
   `total` is how many entries the whole listing has, and `count` is how many the
@@ -764,9 +779,21 @@ defmodule MyHiFi.Plex.Server do
           {:ok, :waiting}
       end
     else
-      {:error, :not_found} -> {:error, :ran_out_of_time}
-      {:error, reason} -> {:error, reason}
-      _other -> {:error, :no_pin}
+      # **A code that ran out of time must go.** The control of a person reads the code
+      # that waits, so a code that stayed after it died offered them the end of a link
+      # that could never finish, and the control that starts a new one was not there to
+      # press. A board held a person in that corner on 2026-09-15. A fault of the
+      # network keeps the code, because that code is still good.
+      {:error, :not_found} ->
+        forget_player_code()
+
+        {:error, :ran_out_of_time}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _other ->
+        {:error, :no_pin}
     end
   end
 
@@ -887,27 +914,148 @@ defmodule MyHiFi.Plex.Server do
 
   `key` is what the command carries, such as `/playQueues/26009`.
   """
-  @spec play_queue(String.t()) ::
-          {:ok, %{refs: [String.t()], selected: non_neg_integer()}} | {:error, term()}
+  @spec play_queue(String.t()) :: {:ok, queue()} | {:error, term()}
   def play_queue(key) do
     with {:ok, %{address: address, token: token, client_id: client_id}} <- link(),
          {:ok, body} <- request(:get, address, token, path_of(key), [], [], client_id) do
-      container = container(body)
-
-      refs =
-        container
-        |> Map.get("Metadata", [])
-        |> List.wrap()
-        |> Enum.map(&to_string(&1["ratingKey"]))
-
-      {:ok, %{refs: refs, selected: whole(container["playQueueSelectedItemOffset"]) || 0}}
+      {:ok, queue_of(body)}
     end
+  end
+
+  @doc """
+  The metadata of one track, as the server writes it.
+
+  **A controller asks the player to put this in its timeline**, with
+  `includeMetadata=1`, and it draws the title, the record, the artist and the artwork
+  from it. A player that gave a timeline with no metadata gave a controller nothing to
+  draw, and Plexamp showed an empty screen and a spinner for it on 2026-09-15.
+
+  It returns the element of XML that sits inside the container of the answer, because
+  that is what a real player puts inside its timeline. **This firmware writes none of
+  that shape itself**: the element comes from the server, holds `Media` and `Part`
+  inside it, and a reading of a real player gave the same element in the same place.
+
+  It asks for XML and not for JSON, so the answer goes into the timeline as it arrives
+  and no part of this firmware turns one into the other.
+  """
+  @spec metadata(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def metadata(rating_key) do
+    with {:ok, %{address: address, token: token, client_id: client_id}} <- link(),
+         {:ok, body} <- xml(address, token, "/library/metadata/#{rating_key}", client_id) do
+      {:ok, inside_container(body)}
+    end
+  end
+
+  # The body of an answer of XML, as it arrived.
+  defp xml(address, token, path, client_id) do
+    headers =
+      token
+      |> headers(client_id)
+      |> Map.put("accept", "application/xml")
+      |> Map.to_list()
+
+    [base_url: address, url: path, headers: headers, receive_timeout: @timeout]
+    |> Keyword.merge(Application.get_env(:my_hi_fi, __MODULE__, []))
+    |> Req.new()
+    |> Req.request(method: :get)
+    |> case do
+      {:ok, %{status: status, body: body}} when status in [200, 201] and is_binary(body) ->
+        {:ok, body}
+
+      {:ok, %{status: status}} ->
+        {:error, {:unexpected_status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # **The container of the answer says how many rows it holds, and a timeline holds the
+  # rows alone.** A declaration of XML and a container that named a size would both be
+  # inside the timeline of the player, and neither belongs there.
+  defp inside_container(body) do
+    case Regex.run(~r/<MediaContainer[^>]*>(.*)<\/MediaContainer>/s, body) do
+      [_whole, inside] -> String.trim(inside)
+      nil -> ""
+    end
+  end
+
+  @doc """
+  Make a play queue of one thing of the library, and give the tracks of it.
+
+  **A controller does not always name a queue that exists.** It asks the player to make
+  one instead, with `createPlayQueue` and the address of a record, an artist or a
+  playlist. The server resolves that address, so this passes it through and reads no
+  part of it.
+
+  `uri` is of the form
+  `server://<machine>/com.plexapp.plugins.library/library/metadata/<key>`. A POST of one
+  album on 2026-09-15 gave a queue of 18 tracks, and the answer holds the shape that
+  `play_queue/1` reads.
+  """
+  @spec create_play_queue(String.t()) :: {:ok, queue()} | {:error, term()}
+  def create_play_queue(uri) do
+    params = [
+      {"type", "music"},
+      {"uri", uri},
+      {"shuffle", "0"},
+      {"repeat", "0"},
+      {"continuous", "0"}
+    ]
+
+    with {:ok, %{address: address, token: token, client_id: client_id}} <- link(),
+         {:ok, body} <- request(:post, address, token, "/playQueues", params, [], client_id) do
+      {:ok, queue_of(body)}
+    end
+  end
+
+  # The tracks of a queue in the order that they play, and the place of the one that a
+  # person pressed. A queue that a controller made and a queue that it named read the
+  # same.
+  #
+  # **The identifier of the queue and of each row in it belong to the answer.** A
+  # controller draws its screen from the queue that it asked for, so a player that knew
+  # the tracks and not the queue told it nothing that it could use. See
+  # `MyHiFi.Plex.Companion.Queue`.
+  defp queue_of(body) do
+    container = container(body)
+    rows = container |> Map.get("Metadata", []) |> List.wrap()
+
+    %{
+      id: whole(container["playQueueID"]),
+      version: whole(container["playQueueVersion"]),
+      refs: Enum.map(rows, &to_string(&1["ratingKey"])),
+      rows: Map.new(rows, &{to_string(&1["ratingKey"]), whole(&1["playQueueItemID"])}),
+      selected: whole(container["playQueueSelectedItemOffset"]) || 0
+    }
   end
 
   # A controller names the queue as a path, and a controller that names only the number
   # of it means the same thing.
   defp path_of("/" <> _rest = key), do: key
   defp path_of(key), do: "/playQueues/" <> to_string(key)
+
+  @doc """
+  The address of a list of tracks, for `create_play_queue/1`.
+
+  **One address names many tracks.** `library/metadata/1,2,3` is a path of the server,
+  so a queue of the tracks that this device holds needs one request and not one for each
+  track. A read of a real server on 2026-09-15 gave a queue of three for three keys.
+
+  **It takes 100 of them at most.** Each key goes in the address of the request, and an
+  address has a length that a server will take. A person who queues more than that reads
+  the first hundred in their controller, and the device plays every one of them.
+  """
+  @spec play_queue_uri([String.t()]) :: {:ok, String.t()} | {:error, term()}
+  def play_queue_uri([]), do: {:error, :no_tracks}
+
+  def play_queue_uri(refs) do
+    with {:ok, machine} <- machine_id() do
+      keys = refs |> Enum.take(100) |> Enum.join(",")
+
+      {:ok, "server://#{machine}/com.plexapp.plugins.library/library/metadata/#{keys}"}
+    end
+  end
 
   @doc """
   The identifier that the server calls itself by.

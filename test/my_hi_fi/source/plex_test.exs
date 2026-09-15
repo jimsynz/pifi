@@ -248,6 +248,43 @@ defmodule MyHiFi.Source.PlexTest do
       assert control.description =~ "WXYZ"
     end
 
+    # **A code that ran out of time must go.** The control of a person reads the code
+    # that waits, so a code that stayed offered them the end of a link that could never
+    # finish, and the control that starts a new one was not there to press. A board held
+    # a person in that corner on 2026-09-15.
+    test "a code that ran out of time leaves, so a person may start again" do
+      put_account()
+      put_link()
+      stub_player([])
+      Source.Plex.run_settings_action("start_player")
+      assert Server.player_code() == "WXYZ"
+
+      Req.Test.stub(Server, fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
+
+      assert {:error, message} = Source.Plex.run_settings_action("finish_player")
+
+      assert message =~ "ran out of time"
+      assert Server.player_code() == nil
+      assert "start_player" in (Source.Plex.settings_actions() |> Enum.map(& &1.name))
+    end
+
+    # **A device that is a player already asks no person to authorise it again.** The
+    # account holds the row for as long as a person leaves it there.
+    test "a device that is a player already opens the port and asks for no code" do
+      put_account()
+      put_link()
+      Settings.put!("plex_device_id", "4242")
+      on_exit(fn -> Companion.enable(false) end)
+
+      stub_player([])
+
+      assert {:ok, message} = Source.Plex.run_settings_action("start_player")
+
+      assert message =~ "Plex player now"
+      refute_received {:request, "POST", "/api/v2/pins", _params}
+      assert Companion.enabled?()
+    end
+
     test "a person who has not typed the code yet reads it again" do
       stub_player([])
       Source.Plex.run_settings_action("start_player")

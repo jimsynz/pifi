@@ -52,8 +52,10 @@ defmodule MyHiFi.Plex.Companion.Router do
   require Ash.Query
   require Logger
 
+  alias MyHiFi.Event
   alias MyHiFi.Playback
   alias MyHiFi.Playback.Item
+  alias MyHiFi.Plex.Companion.Queue
   alias MyHiFi.Plex.Server
   alias MyHiFi.Source
 
@@ -75,6 +77,9 @@ defmodule MyHiFi.Plex.Companion.Router do
   @protocol_version "1"
   @protocol "plex"
 
+  # How long a poll of `wait=1` holds when the player says nothing. See `state_of/1`.
+  @wait :timer.seconds(5)
+
   @doc "What this player tells a controller that it can do."
   @spec capabilities() :: String.t()
   def capabilities, do: @capabilities
@@ -87,8 +92,13 @@ defmodule MyHiFi.Plex.Companion.Router do
   # `commandID`. See the moduledoc.
   get "/player/timeline/poll" do
     case conn.params["commandID"] do
-      nil -> send_resp(conn, 400, "")
-      id -> send_xml(conn, timeline(id, Playback.state!()))
+      nil ->
+        send_resp(conn, 400, "")
+
+      id ->
+        state = state_of(conn.params["wait"])
+
+        send_xml(conn, timeline(id, state, metadata_of(conn.params["includeMetadata"], state)))
     end
   end
 
@@ -149,6 +159,20 @@ defmodule MyHiFi.Plex.Companion.Router do
     answer(conn, playing(conn.params["containerKey"], conn.params["key"]))
   end
 
+  # **A controller does not always name a queue that exists, and it asks the player to
+  # make one.** `uri` names a record, an artist or a playlist of the library, and the
+  # server resolves it, so this reads no part of that address.
+  #
+  # **Whether a controller sends `playMedia` after this is not known.** A real player
+  # answers 200 with no body for this command, as it does for every other, and a
+  # measurement could not see what a controller does next. This player therefore plays
+  # what it makes, because a person who pressed a record must hear it. A `playMedia`
+  # that followed would name the queue that this made, so it would play the same
+  # tracks from the same place.
+  get "/player/playback/createPlayQueue" do
+    answer(conn, made(conn.params["uri"]))
+  end
+
   # **A path that this player does not hold answers 404**, in the way that a real player
   # does.
   #
@@ -162,10 +186,14 @@ defmodule MyHiFi.Plex.Companion.Router do
   # meant to serve, and `/library/metadata` is the server asked of the wrong machine, so
   # that one goes to the level that a device does not keep.
   match _ do
+    # **The parameters are the whole of what a control needs to answer**, and a line
+    # that named the path alone said which control a controller wanted and nothing about
+    # what it wanted done. `createPlayQueue` was found that way, and then it had to be
+    # asked for again to learn what it carries.
     Logger.log(
       level_of(conn.request_path),
       "A Plex controller asked this player for #{conn.method} #{conn.request_path}, " <>
-        "which it does not answer."
+        "which it does not answer. It named #{inspect(Map.drop(conn.params, ["commandID"]))}."
     )
 
     send_resp(conn, 404, "")
@@ -230,6 +258,34 @@ defmodule MyHiFi.Plex.Companion.Router do
   # the whole of what a person sees from it, and it names one element for each kind of
   # media, because a player may hold a film and a song at once. This one holds music.
   #
+  # **A controller asks this player to hold the poll until something changes.** `wait=1`
+  # is what asks, and a player that answered at once turned a controller into a loop:
+  # a board on 2026-09-15 answered 25 of these in the few seconds that a probe watched,
+  # and each one is a read of the state and a write of the network on a board of four
+  # small cores.
+  #
+  # **It waits for an event of the player, and it gives up before a controller does.**
+  # Every change that a controller draws publishes one: the track, the place, the pause
+  # and the level. Answering early costs nothing, because the controller asks again, and
+  # holding longer than the controller waits would make it drop the answer that it asked
+  # for. The measurement that would name the number of a real player could not be taken,
+  # so this is the short side of the guess.
+  defp state_of("1") do
+    :ok = Event.subscribe(:player)
+
+    receive do
+      %_{} -> :ok
+    after
+      @wait -> :ok
+    end
+
+    Event.unsubscribe(:player)
+
+    Playback.state!()
+  end
+
+  defp state_of(_wait), do: Playback.state!()
+
   # The container names the `commandID` of the request and no size, which is what a real
   # player answers.
   @doc """
@@ -241,17 +297,34 @@ defmodule MyHiFi.Plex.Companion.Router do
   state that holds a track reaches the attributes of the server. See
   `MyHiFi.Plex.CompanionTest`.
   """
-  @spec timeline(String.t(), map()) :: String.t()
-  def timeline(command_id, state) do
+  @spec timeline(String.t(), map(), String.t() | nil) :: String.t()
+  def timeline(command_id, state, metadata \\ nil) do
     container(
       [
-        {"Timeline", music(state)},
+        {"Timeline", music(state), metadata},
         {"Timeline", [{"type", "video"}, {"state", "stopped"}]},
         {"Timeline", [{"type", "photo"}, {"state", "stopped"}]}
       ],
       [{"commandID", command_id}]
     )
   end
+
+  # **A controller asks the player to put the metadata of the track in the timeline**,
+  # and it draws the title, the record, the artist and the artwork from it. A timeline
+  # with none gave Plexamp nothing to draw, and it showed an empty screen and a spinner.
+  #
+  # The element comes from the server, and this firmware writes no part of that shape.
+  # A track of another source names none: only a Plex server holds the metadata that a
+  # Plex controller reads.
+  defp metadata_of("1", %{item: %{source_ref: ref}, source: MyHiFi.Source.Plex})
+       when is_binary(ref) do
+    case Server.metadata(ref) do
+      {:ok, xml} -> xml
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp metadata_of(_include, _state), do: nil
 
   defp music(state) do
     [
@@ -305,7 +378,7 @@ defmodule MyHiFi.Plex.Companion.Router do
       {"duration", to_string(item.duration_ms || 0)},
       {"key", "/library/metadata/#{item.source_ref}"},
       {"ratingKey", item.source_ref}
-    ] ++ server(state)
+    ] ++ queue_named(item.source_ref) ++ server(state)
   end
 
   # **The controller reads the track from the server and not from this device**, so the
@@ -330,8 +403,66 @@ defmodule MyHiFi.Plex.Companion.Router do
 
   defp server(_state), do: []
 
+  # **A track that no controller asked for still needs a queue.** A person plays a
+  # record from the page of the device, or the device comes back from a restart with the
+  # track that it held, and then a controller reaches it. That controller draws its
+  # screen from a play queue, so a track with none leaves it waiting: a person cast to
+  # this device on 2026-09-15 and watched a spinner for a track that was sitting there
+  # paused.
+  #
+  # **The queue is made when a controller asks and not before.** A device that plays to
+  # a room with no controller in it needs no queue of the server, and a request of that
+  # server for every track that a person played would be a cost for nothing.
+  defp queue_named(ref) do
+    case Queue.of(ref) do
+      [] -> Queue.of(made_for(ref))
+      named -> named
+    end
+  end
+
+  # The tracks that this device holds in its own queue, in the order that it plays them,
+  # so a controller reads the list that a person made and not the one track that plays.
+  #
+  # **A device that came back from a restart holds a track and no queue.**
+  # `MyHiFi.Playback.Queue` lives in memory, so it goes when the power does, and
+  # `MyHiFi.Player` restores the one track that a person left. The queue of that device
+  # is that track, and a queue of one is the truth for it.
+  defp made_for(ref) do
+    with {:ok, uri} <- Server.play_queue_uri(with_playing(plex_refs(), ref)),
+         {:ok, queue} <- Server.create_play_queue(uri) do
+      Queue.keep(queue)
+    end
+
+    ref
+  end
+
+  # **A queue that holds no row for the track that plays is no use at all**, because the
+  # row of that track is what the timeline names. The track goes first when the queue of
+  # the device does not hold it.
+  defp with_playing(refs, ref) do
+    if ref in refs, do: refs, else: [ref | refs]
+  end
+
+  defp plex_refs do
+    ids = Playback.queue!() |> Enum.sort_by(& &1.position) |> Enum.map(& &1.item_id)
+
+    Item
+    |> Ash.Query.filter(source == "plex" and id in ^ids)
+    |> Ash.Query.select([:id, :source_ref])
+    |> Ash.read!()
+    |> Map.new(&{&1.id, &1.source_ref})
+    |> then(fn refs -> ids |> Enum.map(&refs[&1]) |> Enum.reject(&is_nil/1) end)
+  end
+
   defp play_state(%{playing?: true}), do: "playing"
   defp play_state(%{paused?: true}), do: "paused"
+
+  # **A track that holds the player and makes no sound yet is buffering, and it is not
+  # stopped.** The player reads the service of the source and builds a pipeline before
+  # the first sound, and a Plex track that the server converts takes seconds over it. A
+  # controller that read `stopped` there took it for the end of the music and told the
+  # player to stop: a person heard the first track of a playlist and then silence.
+  defp play_state(%{item: item}) when not is_nil(item), do: "buffering"
   defp play_state(_state), do: "stopped"
 
   defp volume do
@@ -362,13 +493,24 @@ defmodule MyHiFi.Plex.Companion.Router do
     end
   end
 
+  defp made(nil), do: {:error, :no_uri}
+
+  defp made(uri) do
+    with {:ok, queue} <- Server.create_play_queue(uri),
+         {:ok, _result} = played <- from_queue(queue) do
+      Source.choose(MyHiFi.Source.Plex)
+
+      played
+    end
+  end
+
   # The queue of the server decides the order and the row, so a person who pressed the
   # ninth track of a record hears the record from there.
   defp played(nil, key), do: one_track(key)
 
   defp played(container_key, key) do
     case Server.play_queue(container_key) do
-      {:ok, %{refs: refs, selected: selected}} -> queued(refs, selected, key)
+      {:ok, queue} -> queued(queue, key)
       {:error, _reason} -> one_track(key)
     end
   end
@@ -377,13 +519,31 @@ defmodule MyHiFi.Plex.Companion.Router do
   # A read of the library writes a row for each track, so a queue of a library that the
   # device knows maps whole. A track that is absent leaves the list, and the place of
   # the person moves with it.
-  defp queued(refs, selected, key) do
+  defp queued(queue, key) do
+    case from_queue(queue) do
+      {:error, {:no_track_of_that_queue, _count}} -> one_track(key)
+      answer -> answer
+    end
+  end
+
+  # **A queue of the server holds the tracks that the server holds, and this device
+  # holds the ones that it has read.** A queue that maps to none of them plays nothing,
+  # and the count says how many the controller named, because a person whose library
+  # the device has not finished reading meets that and no other fault.
+  defp from_queue(%{refs: refs, selected: selected} = queue) do
     items = items_of(refs)
     ids = refs |> Enum.map(&items[&1]) |> Enum.reject(&is_nil/1)
 
     case ids do
-      [] -> one_track(key)
-      ids -> Playback.play(ids, %{playing_index: place(refs, items, selected)})
+      [] ->
+        {:error, {:no_track_of_that_queue, length(refs)}}
+
+      ids ->
+        # **The controller reads its screen from the queue**, so the player holds the one
+        # that it was given. See `MyHiFi.Plex.Companion.Queue`.
+        Queue.keep(queue)
+
+        Playback.play(ids, %{playing_index: place(refs, items, selected)})
     end
   end
 
@@ -464,8 +624,16 @@ defmodule MyHiFi.Plex.Companion.Router do
       ">" <> Enum.map_join(children, "", &element/1) <> "</MediaContainer>"
   end
 
-  defp element({name, attributes}) do
+  defp element({name, attributes}), do: element({name, attributes, nil})
+
+  defp element({name, attributes, nil}) do
     "<#{name}" <> Enum.map_join(attributes, "", &attribute/1) <> " />"
+  end
+
+  # **An element that holds another one cannot close itself.** The metadata of a track
+  # sits inside the timeline of the player, and a real player writes it that way.
+  defp element({name, attributes, inside}) do
+    "<#{name}" <> Enum.map_join(attributes, "", &attribute/1) <> ">" <> inside <> "</#{name}>"
   end
 
   defp attribute({name, value}) do

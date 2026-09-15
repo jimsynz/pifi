@@ -1149,34 +1149,50 @@ defmodule MyHiFi.Player do
   #
   # The row stays in the queue and the mark moves past it, so a person can go back to
   # what they heard.
+  # **The music stopped only when nothing follows it.** This published the end of the
+  # track and then started the next one, so every change of track said that the device
+  # had stopped. A person reading a page saw that for as long as the next track took to
+  # start, and a Plex controller read it as the end of the music and told the player to
+  # stop.
   defp finish(%State{item: item} = state) do
     track_stopped(state, :finished)
     state = stop_pipeline(state)
     Playback.mark_played(item)
-    Event.publish(:player, %Events.Stopped{reason: :finished})
 
-    advance(%State{
-      state
-      | playable: nil,
-        stream_title: nil,
-        artwork_path: nil,
-        offset_ms: 0,
-        position_bytes: nil
-    })
+    ended =
+      %State{
+        state
+        | playable: nil,
+          stream_title: nil,
+          artwork_path: nil,
+          offset_ms: 0,
+          position_bytes: nil
+      }
+
+    case advanced(ended) do
+      {:ok, state} ->
+        state
+
+      :none ->
+        Event.publish(:player, %Events.Stopped{reason: :finished})
+
+        ended
+    end
   end
 
   # The end of one track is the start of the next one. A queue with no more
   # leaves the device with the track that ended still selected, so a person reads what
   # they heard last and a play control starts it again.
-  defp advance(%State{} = state) do
+  defp advanced(%State{} = state) do
     with {:ok, item} <- moved(:next),
          {:ok, source} <- Source.from_slug(item.source),
          true <- Source.enabled?(source),
          {:ok, state} <- start(source, item, state) do
       Settings.put(@last_item_key, item.id)
-      state
+
+      {:ok, state}
     else
-      _other -> state
+      _other -> :none
     end
   end
 

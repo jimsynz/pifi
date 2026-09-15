@@ -21,8 +21,19 @@ defmodule MyHiFi.Plex.CompanionTest do
   setup do
     # `MyHiFi.Player` is one process for the whole node, so a track that one test plays
     # is a track that the next one reads. See `MyHiFiWeb.BrowseLiveTest`.
-    MyHiFi.Player.stop()
-    on_exit(fn -> MyHiFi.Player.stop() end)
+    #
+    # **A control of that player answers before it does the work**, and the work writes
+    # the settings and the card. A test that ended while that work was in flight left it
+    # writing to a sandbox that had gone, and the database of another test then answered
+    # `Database busy`. `state/0` is a call, so it waits for the work that is already
+    # running, and it is the one line that drains the player. See `MyHiFi.Player`.
+    drain = fn ->
+      MyHiFi.Player.stop()
+      MyHiFi.Player.state()
+    end
+
+    drain.()
+    on_exit(drain)
 
     # **A test that turns the player on leaves a listener and an announcement behind**,
     # and both are registered by the name of their module, so the next test that starts
@@ -142,6 +153,23 @@ defmodule MyHiFi.Plex.CompanionTest do
 
       assert body =~ ~s(commandID="7")
       refute body =~ ~s(size=)
+    end
+
+    # **A track that holds the player and makes no sound yet is buffering, and it is not
+    # stopped.** The player reads the service of the source and builds a pipeline before
+    # the first sound, and a Plex track that the server converts takes seconds over it. A
+    # controller that read `stopped` there took it for the end of the music and told the
+    # player to stop.
+    test "a track that makes no sound yet reads as buffering" do
+      state = %{playing_a_plex_track() | playing?: false, paused?: false}
+
+      assert attribute(Router.timeline("1", state), "Timeline", "state") == "buffering"
+    end
+
+    test "a device that holds no track at all reads as stopped" do
+      state = %{playing_a_plex_track() | item: nil, playing?: false, paused?: false}
+
+      assert attribute(Router.timeline("1", state), "Timeline", "state") == "stopped"
     end
 
     test "a device that plays nothing says that it is stopped" do
@@ -338,6 +366,61 @@ defmodule MyHiFi.Plex.CompanionTest do
     end
   end
 
+  # **A controller asks the player to put the metadata of the track in the timeline**,
+  # and it draws the title, the record, the artist and the artwork from it. A timeline
+  # with none gave Plexamp nothing to draw on 2026-09-15: an empty screen and a spinner.
+  describe "the metadata of the track that plays" do
+    test "a timeline that a controller asked for it holds the element of the server" do
+      body = Router.timeline("1", playing_a_plex_track(), ~s(<Track ratingKey="470959" />))
+
+      assert body =~ ~s(<Track ratingKey="470959" />)
+      # The timeline holds it, so that element cannot close itself.
+      assert body =~ ~s(</Timeline>)
+    end
+
+    test "a timeline that no controller asked for it closes itself and holds none" do
+      body = Router.timeline("1", playing_a_plex_track())
+
+      refute body =~ "Track"
+      refute body =~ "</Timeline>"
+    end
+
+    # A real player writes the element of the server inside the timeline, with the
+    # `Media` and the `Part` of it. This firmware writes no part of that shape.
+    test "the element of the server goes in as it arrived" do
+      inside = ~s(<Track title="A song"><Media id="1"><Part id="2" /></Media></Track>)
+
+      assert Router.timeline("1", playing_a_plex_track(), inside) =~ inside
+    end
+  end
+
+  # **A controller holds the poll open until something changes.** `wait=1` is what asks,
+  # and a player that answered at once turned a controller into a loop: a board answered
+  # 25 polls in the few seconds that a probe watched on 2026-09-15.
+  describe "a poll that waits" do
+    test "a poll that names no wait answers at once" do
+      {microseconds, conn} = :timer.tc(fn -> call("/player/timeline/poll?commandID=1") end)
+
+      assert conn.status == 200
+      assert microseconds < 1_000_000
+    end
+
+    # Every change that a controller draws publishes an event of the player, so the
+    # answer follows the change and not the clock.
+    test "a poll that waits answers as soon as the player says something" do
+      task = Task.async(fn -> call("/player/timeline/poll?wait=1&commandID=2") end)
+
+      # The subscription of the poll happens in that task, so this waits for it.
+      Process.sleep(100)
+      Event.publish(:player, %MyHiFi.Event.Player.Stopped{reason: :requested})
+
+      {microseconds, conn} = :timer.tc(fn -> Task.await(task, 10_000) end)
+
+      assert conn.status == 200
+      assert microseconds < 4_000_000
+    end
+  end
+
   # **A controller asks for a handful of tracks and a library holds tens of thousands.**
   # A read of the whole source and a filter in memory made a board give up: it read
   # 63,010 rows of a table of 137,575, and the connection of the database stopped after
@@ -479,6 +562,150 @@ defmodule MyHiFi.Plex.CompanionTest do
 
       refute_received {:request, _method, _path, _params}
       assert Process.alive?(pid)
+    end
+  end
+
+  # **A controller does not always name a queue that exists.** It asks the player to
+  # make one instead, and a board answered 404 for that on 2026-09-15:
+  # `A Plex controller asked this player for GET /player/playback/createPlayQueue`.
+  describe "a controller that asks this player to make a queue" do
+    setup do
+      Source.enable(Source.Plex, true)
+      Application.put_env(:my_hi_fi, Server, plug: {Req.Test, Server}, retry: false)
+      on_exit(fn -> Application.delete_env(:my_hi_fi, Server) end)
+      Req.Test.set_req_test_from_context(%{async: false})
+
+      Settings.put!(Server.address_setting(), "https://plex.test:32400")
+      Settings.put!(Server.token_setting(), "THETOKEN")
+
+      for ref <- ["11", "12"] do
+        Playback.upsert_item!(%{
+          source: "plex",
+          source_ref: ref,
+          kind: :track,
+          title: "Track " <> ref,
+          transport: :download,
+          format: :flac,
+          container_format: :none,
+          source_key: "/library/parts/#{ref}/1/file.flac",
+          keeps_place?: false
+        })
+      end
+
+      test = self()
+
+      Req.Test.stub(Server, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        send(test, {:request, conn.method, conn.request_path, conn.params})
+
+        Req.Test.json(conn, %{
+          "MediaContainer" => %{
+            "playQueueID" => 26_058,
+            "playQueueVersion" => 3,
+            "playQueueSelectedItemOffset" => 1,
+            "Metadata" => [
+              %{"ratingKey" => "11", "playQueueItemID" => 900},
+              %{"ratingKey" => "12", "playQueueItemID" => 901}
+            ]
+          }
+        })
+      end)
+
+      :ok
+    end
+
+    test "it asks the server to make the queue, and it plays what comes back" do
+      conn = call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
+
+      assert conn.status == 200
+      assert_receive {:request, "POST", "/playQueues", params}
+      assert params["uri"] == "server://abc/library/metadata/9"
+      assert params["type"] == "music"
+
+      # The second track of the queue, because the server named that place.
+      assert Playback.state!().item.source_ref == "12"
+    end
+
+    # The switch of the device follows the music, in the way that it does for a play.
+    test "the switch of the device moves to Plex" do
+      Source.choose(Source.InternetRadio)
+
+      call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
+
+      assert Source.chosen() == Source.Plex
+    end
+
+    test "a command that names no address plays nothing" do
+      assert call("/player/playback/createPlayQueue").status == 200
+      refute_received {:request, "POST", "/playQueues", _params}
+    end
+
+    # **A controller draws its screen from the queue and not from the track.** A person
+    # cast a playlist on 2026-09-15, the music played, and the telephone of that person
+    # showed a spinner, because the timeline named the track and no queue.
+    test "the timeline then names the queue that the controller asked for" do
+      start_supervised!(MyHiFi.Plex.Companion.Queue)
+
+      call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
+
+      body = poll("5").resp_body
+
+      assert body =~ ~s(playQueueID="26058")
+      assert body =~ ~s(containerKey="/playQueues/26058")
+      assert body =~ ~s(playQueueVersion="3")
+      # The second track of the queue is the one that plays, so its row is the one named.
+      assert body =~ ~s(playQueueItemID="901")
+    end
+
+    # **A track that no controller asked for still needs a queue.** A person plays a
+    # record from the page of the device, or the device comes back from a restart with
+    # the track that it held, and then a controller reaches it. A track with no queue
+    # left that controller waiting.
+    test "a track that no controller asked for gets a queue made for it" do
+      # The address of the queue names the machine that holds the music.
+      Settings.put!("plex_machine_id", "abc123")
+      start_supervised!(MyHiFi.Plex.Companion.Queue)
+
+      # The device plays it, and no controller named a queue for it.
+      call("/player/playback/playMedia?key=/library/metadata/11")
+      refute_received {:request, "POST", "/playQueues", _params}
+
+      body = poll("7").resp_body
+
+      assert_received {:request, "POST", "/playQueues", params}
+      assert params["uri"] =~ "library/metadata/"
+      assert body =~ ~s(playQueueID="26058")
+    end
+
+    # **A device that came back from a restart holds a track and no queue.** The queue of
+    # this device lives in memory, so it goes when the power does, and the player
+    # restores the one track that a person left. A board was in that state on
+    # 2026-09-15, and a controller that reached it waited for a queue that no list could
+    # make.
+    test "a device that holds a track and no queue makes a queue of that track" do
+      Settings.put!("plex_machine_id", "abc123")
+      start_supervised!(MyHiFi.Plex.Companion.Queue)
+
+      call("/player/playback/playMedia?key=/library/metadata/11")
+      Playback.clear_queue!()
+      assert Playback.queue!() == []
+
+      body = poll("8").resp_body
+
+      assert_received {:request, "POST", "/playQueues", params}
+      assert params["uri"] =~ "library/metadata/11"
+      assert body =~ ~s(playQueueID="26058")
+    end
+
+    # A person plays a station, or a track that no controller named, and the queue of
+    # the controller says nothing about that.
+    test "a track that the queue does not hold names no queue" do
+      start_supervised!(MyHiFi.Plex.Companion.Queue)
+
+      call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
+      MyHiFi.Player.stop()
+
+      refute poll("6").resp_body =~ "playQueueID"
     end
   end
 
