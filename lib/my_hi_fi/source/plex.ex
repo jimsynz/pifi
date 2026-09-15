@@ -277,14 +277,35 @@ defmodule MyHiFi.Source.Plex do
     end
   end
 
+  # **A player is two things, and a person asks for both with one control.** The device
+  # must listen, and the account must know where to reach it, because a controller reads
+  # the players of an account and Plexamp on a telephone reads nothing else.
   @impl MyHiFi.Source
   def run_settings_action("start_player") do
-    Companion.enable(true)
+    case Server.start_link_as_player() do
+      {:ok, code} ->
+        {:ok, "Type the code #{code} at plex.tv/link, and then press Finish the player."}
 
-    if Companion.running?() do
-      {:ok, "This device is a Plex player now, on port #{Companion.port()}."}
-    else
-      {:error, "The device could not listen on port #{Companion.port()}."}
+      {:error, reason} ->
+        {:error, "plex.tv did not answer: #{inspect(reason)}"}
+    end
+  end
+
+  def run_settings_action("finish_player") do
+    case Server.finish_link_as_player(Companion.addresses()) do
+      {:ok, :linked} ->
+        Companion.enable(true)
+
+        {:ok, "This device is a Plex player now. Your Plex applications can find it."}
+
+      {:ok, :waiting} ->
+        {:error, "Type the code #{Server.player_code()} at plex.tv/link first."}
+
+      {:error, :ran_out_of_time} ->
+        {:error, "That code ran out of time. Press Be a Plex player again."}
+
+      {:error, reason} ->
+        {:error, "plex.tv did not answer: #{inspect(reason)}"}
     end
   end
 
@@ -364,25 +385,44 @@ defmodule MyHiFi.Source.Plex do
   end
 
   # **The control says what it will do and not what it is**, because a person who turns
-  # this on opens a port on their device. See `MyHiFi.Plex.Companion`.
+  # this on opens a port on their device. The three states follow the link of the
+  # library: a person asks, a person types a code, and then it is done. See
+  # `MyHiFi.Plex.Companion`.
   defp player do
-    if Companion.enabled?() do
-      %{
-        name: "stop_player",
-        title: "Stop being a Plex player",
-        description: "The device closes the port and no other Plex application can control it.",
-        icon: :radio
-      }
-    else
-      %{
-        name: "start_player",
-        title: "Be a Plex player",
-        description:
-          "Another Plex application can then control this device. " <>
-            "The device listens on port #{Companion.port()} of your network while it is on.",
-        icon: :radio
-      }
+    cond do
+      Companion.enabled?() -> stop_player()
+      Server.player_code() -> finish_player()
+      true -> start_player()
     end
+  end
+
+  defp start_player do
+    %{
+      name: "start_player",
+      title: "Be a Plex player",
+      description:
+        "Another Plex application can then control this device. " <>
+          "The device listens on port #{Companion.port()} of your network while it is on.",
+      icon: :radio
+    }
+  end
+
+  defp finish_player do
+    %{
+      name: "finish_player",
+      title: "Finish the player",
+      description: "Type the code #{Server.player_code()} at plex.tv/link, and press this.",
+      icon: :refresh
+    }
+  end
+
+  defp stop_player do
+    %{
+      name: "stop_player",
+      title: "Stop being a Plex player",
+      description: "The device closes the port and no other Plex application can control it.",
+      icon: :radio
+    }
   end
 
   defp read_library do

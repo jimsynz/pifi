@@ -49,10 +49,13 @@ defmodule MyHiFi.Plex.Companion.Router do
 
   use Plug.Router
 
+  require Ash.Query
   require Logger
 
   alias MyHiFi.Playback
+  alias MyHiFi.Playback.Item
   alias MyHiFi.Plex.Server
+  alias MyHiFi.Source
 
   plug :match
   plug Plug.Parsers, parsers: [:urlencoded], pass: ["*/*"]
@@ -85,7 +88,7 @@ defmodule MyHiFi.Plex.Companion.Router do
   get "/player/timeline/poll" do
     case conn.params["commandID"] do
       nil -> send_resp(conn, 400, "")
-      id -> send_xml(conn, timeline(id))
+      id -> send_xml(conn, timeline(id, Playback.state!()))
     end
   end
 
@@ -143,17 +146,49 @@ defmodule MyHiFi.Plex.Companion.Router do
   # none. A person who moves a controller to the middle of a track and sends it here
   # hears that track from the beginning.
   get "/player/playback/playMedia" do
-    answer(conn, played(conn.params["containerKey"], conn.params["key"]))
+    answer(conn, playing(conn.params["containerKey"], conn.params["key"]))
   end
 
   # **A path that this player does not hold answers 404**, in the way that a real player
-  # does. The line of the log names it, so a controller that wants something absent says
-  # so here and not in silence.
+  # does.
+  #
+  # **A line of the log for each such request fills the log of the device.** A
+  # controller asked a board for `/library/metadata/470959` on 2026-09-15 and it asked
+  # again when the answer was 404, and 1020 of those lines filled the ring of 1024 and
+  # pushed out every error that a person needed to read.
+  #
+  # A path under `/player` is a control that a controller wanted and this player does
+  # not answer, which is worth a line. Any other path is one that a player was never
+  # meant to serve, and `/library/metadata` is the server asked of the wrong machine, so
+  # that one goes to the level that a device does not keep.
   match _ do
-    Logger.info("A Plex controller asked for #{conn.method} #{conn.request_path}.")
+    Logger.log(
+      level_of(conn.request_path),
+      "A Plex controller asked this player for #{conn.method} #{conn.request_path}, " <>
+        "which it does not answer."
+    )
 
     send_resp(conn, 404, "")
   end
+
+  @doc """
+  The level of the log that an unanswered path is worth.
+
+  A path under `/player` is a control that a controller wanted and this player does not
+  hold, and a person who reads the log of a device must find it. Any other path is one
+  that a player was never meant to serve, and `/library/metadata` is the server asked of
+  the wrong machine.
+
+      iex> MyHiFi.Plex.Companion.Router.level_of("/player/playback/stepForward")
+      :info
+
+      iex> MyHiFi.Plex.Companion.Router.level_of("/library/metadata/470959")
+      :debug
+
+  """
+  @spec level_of(String.t()) :: :info | :debug
+  def level_of("/player/" <> _rest), do: :info
+  def level_of(_path), do: :debug
 
   # A command answers 200 with no body, and a controller reads the timeline for the
   # state that follows. A command that failed says so in the log and answers the same,
@@ -197,9 +232,17 @@ defmodule MyHiFi.Plex.Companion.Router do
   #
   # The container names the `commandID` of the request and no size, which is what a real
   # player answers.
-  defp timeline(command_id) do
-    state = Playback.state!()
+  @doc """
+  The timeline of one state of the player, as a controller reads it.
 
+  **It takes the state and it reads none**, so a test may give it a device that plays a
+  track of a library and read the XML that a controller would. That matters for one
+  fault in particular: an element that names an attribute twice is not XML, and only a
+  state that holds a track reaches the attributes of the server. See
+  `MyHiFi.Plex.CompanionTest`.
+  """
+  @spec timeline(String.t(), map()) :: String.t()
+  def timeline(command_id, state) do
     container(
       [
         {"Timeline", music(state)},
@@ -298,6 +341,27 @@ defmodule MyHiFi.Plex.Companion.Router do
     end
   end
 
+  # **A device that a controller drives leaves standby and it takes the switch with
+  # it.** The player wakes by itself, because a play is a play whoever asked for it. The
+  # switch does not: `MyHiFi.Source.choose/1` is what the pages of a person call when
+  # they move to a source, and a controller moves no page. A person who hears their
+  # record and then walks to the device must find it where the music is.
+  #
+  # **It goes here and not in `MyHiFi.Player`.** A play of that module is every play,
+  # and a track of the queue that follows the one a person chose would move the switch
+  # under them. A controller is the caller that has no page of its own.
+  defp playing(container_key, key) do
+    case played(container_key, key) do
+      {:ok, _result} = played ->
+        Source.choose(MyHiFi.Source.Plex)
+
+        played
+
+      other ->
+        other
+    end
+  end
+
   # The queue of the server decides the order and the row, so a person who pressed the
   # ninth track of a record hears the record from there.
   defp played(nil, key), do: one_track(key)
@@ -332,28 +396,45 @@ defmodule MyHiFi.Plex.Companion.Router do
     |> Enum.count(&items[&1])
   end
 
+  # **The database does the matching, and this reads no row that it did not ask for.**
+  # A queue of a controller names a handful of tracks and a library holds tens of
+  # thousands, so a read of the source and a filter in memory made a board give up: a
+  # controller asked for one record, the read took 63,010 rows of a table of 137,575,
+  # and the connection of the database stopped after 15 seconds with `interrupted`.
+  #
+  # `(source, source_ref)` is a unique index of this table, so each batch below is an
+  # indexed read. **The batch is 500, because each reference is a value of one
+  # statement**, and SQLite takes a limited number of them.
   defp items_of(refs) do
-    "plex"
-    |> Playback.items_of_source!()
-    |> Enum.filter(&(&1.source_ref in refs))
+    refs
+    |> Enum.chunk_every(500)
+    |> Enum.reduce(%{}, fn batch, held -> Map.merge(held, items_of_batch(batch)) end)
+  end
+
+  defp items_of_batch(refs) do
+    Item
+    |> Ash.Query.filter(source == "plex" and source_ref in ^refs)
+    |> Ash.Query.select([:id, :source_ref])
+    |> Ash.read!()
     |> Map.new(&{&1.source_ref, &1.id})
   end
 
   defp one_track(key) do
     case item_of(key) do
-      {:ok, item} -> Playback.play([item.id])
+      {:ok, id} -> Playback.play([id])
       {:error, reason} -> {:error, reason}
     end
   end
 
   defp item_of(nil), do: {:error, :no_key}
 
+  # One row of the unique index, and not a read of the whole source. See `items_of/1`.
   defp item_of(key) do
     ref = key |> to_string() |> String.split("/") |> List.last()
 
-    case Playback.items_of_source!("plex") |> Enum.find(&(&1.source_ref == ref)) do
-      nil -> {:error, {:no_such_track, ref}}
-      item -> {:ok, item}
+    case items_of_batch([ref]) do
+      %{^ref => id} -> {:ok, id}
+      _none -> {:error, {:no_such_track, ref}}
     end
   end
 

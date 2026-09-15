@@ -117,6 +117,40 @@ defmodule MyHiFi.Plex.Companion do
     :ok
   end
 
+  @doc """
+  Every address that a controller may reach this player on.
+
+  **A real player publishes each one of them.** Plexamp on a laptop published three on
+  a measurement of 2026-09-15: two of its networks and the address of its overlay
+  network. A device with one network gives one, and a controller takes the first that
+  answers.
+
+  It leaves out the loopback address, which reaches this device from this device alone,
+  and every address of IPv6: a connection of plex.tv names a port and a host, and the
+  colons of an IPv6 address make an address that no controller parses.
+  """
+  @spec addresses() :: [String.t()]
+  def addresses do
+    case :inet.getifaddrs() do
+      {:ok, interfaces} -> Enum.flat_map(interfaces, &addresses_of/1)
+      {:error, _reason} -> []
+    end
+  end
+
+  defp addresses_of({_name, options}) do
+    options
+    |> Keyword.get_values(:addr)
+    |> Enum.filter(&reachable?/1)
+    |> Enum.map(fn address -> "http://#{:inet.ntoa(address)}:#{@port}" end)
+  end
+
+  defp reachable?({127, _b, _c, _d}), do: false
+
+  defp reachable?({a, b, c, d})
+       when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d), do: true
+
+  defp reachable?(_address), do: false
+
   @doc false
   @impl Supervisor
   def init(_options), do: Supervisor.init([], strategy: :one_for_one)
@@ -124,27 +158,38 @@ defmodule MyHiFi.Plex.Companion do
   @doc false
   def start_link(options), do: Supervisor.start_link(__MODULE__, options, name: __MODULE__)
 
+  # **The listener comes first, and the announcement follows it.** That one tells
+  # plex.tv where this player is, and a controller that read the address before the port
+  # answered would meet nothing. See `MyHiFi.Plex.Companion.Announcement`.
   defp start_listener do
-    case Supervisor.start_child(__MODULE__, listener()) do
+    for child <- [listener(), announcement()], do: start_child(child)
+
+    :ok
+  end
+
+  defp start_child(child) do
+    case Supervisor.start_child(__MODULE__, child) do
       {:ok, _pid} ->
-        Logger.info("The Plex player listens on port #{@port}.")
+        Logger.info("The Plex player started #{inspect(child.id)} on port #{@port}.")
 
       {:error, :already_present} ->
-        Supervisor.restart_child(__MODULE__, :listener)
+        Supervisor.restart_child(__MODULE__, child.id)
 
       {:error, {:already_started, _pid}} ->
         :ok
 
       {:error, reason} ->
-        Logger.warning("The Plex player did not start: #{inspect(reason)}")
+        Logger.warning("The Plex player did not start #{inspect(child.id)}: #{inspect(reason)}")
     end
 
     :ok
   end
 
   defp stop_listener do
-    Supervisor.terminate_child(__MODULE__, :listener)
-    Supervisor.delete_child(__MODULE__, :listener)
+    for id <- [:announcement, :listener] do
+      Supervisor.terminate_child(__MODULE__, id)
+      Supervisor.delete_child(__MODULE__, id)
+    end
 
     :ok
   end
@@ -155,5 +200,9 @@ defmodule MyHiFi.Plex.Companion do
       start:
         {Bandit, :start_link, [[plug: MyHiFi.Plex.Companion.Router, port: @port, scheme: :http]]}
     }
+  end
+
+  defp announcement do
+    %{id: :announcement, start: {MyHiFi.Plex.Companion.Announcement, :start_link, [[]]}}
   end
 end

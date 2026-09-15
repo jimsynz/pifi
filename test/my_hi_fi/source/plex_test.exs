@@ -178,6 +178,102 @@ defmodule MyHiFi.Source.PlexTest do
     end
   end
 
+  # **A player is two things**: the device listens, and the account knows where to reach
+  # it. Each answer below was measured against plex.tv on 2026-09-15. See
+  # `MyHiFi.Plex.Server.publish_player/1`.
+  describe "becoming a player" do
+    # The stub answers by path, because one flow makes three requests of plex.tv.
+    defp stub_player(options) do
+      test = self()
+      token = Keyword.get(options, :token)
+
+      Req.Test.stub(Server, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        send(test, {:request, conn.method, conn.request_path, conn.params})
+
+        body =
+          cond do
+            conn.request_path == "/api/v2/pins" ->
+              %{"id" => 999, "code" => "WXYZ"}
+
+            String.starts_with?(conn.request_path, "/api/v2/pins/") ->
+              %{"authToken" => token}
+
+            conn.request_path == "/api/v2/devices" ->
+              [%{"clientIdentifier" => Server.client_id(), "id" => 4242}]
+
+            true ->
+              %{}
+          end
+
+        Req.Test.json(conn, body)
+      end)
+    end
+
+    test "a device that never asked offers the control that starts it" do
+      put_account()
+      put_link()
+
+      assert "start_player" in (Source.Plex.settings_actions() |> Enum.map(& &1.name))
+    end
+
+    test "it asks plex.tv for a code, and it tells a person where to type it" do
+      stub_player([])
+
+      assert {:ok, message} = Source.Plex.run_settings_action("start_player")
+
+      assert message =~ "WXYZ"
+      assert message =~ "plex.tv/link"
+      assert Server.player_code() == "WXYZ"
+    end
+
+    # **A device that names no `X-Plex-Provides` is not a player.** A measurement linked
+    # this device with no such header and plex.tv listed it nowhere at all.
+    test "the request says that this device is a player" do
+      stub_player([])
+
+      Source.Plex.run_settings_action("start_player")
+
+      assert_receive {:request, "POST", "/api/v2/pins", _params}
+      assert Server.player_provides() == "client,player,pubsub-player"
+    end
+
+    test "a device that asked for a code offers the control that finishes it" do
+      put_account()
+      put_link()
+      Settings.put!(Server.player_code_setting(), "WXYZ")
+
+      [control] = Source.Plex.settings_actions() |> Enum.filter(&(&1.name == "finish_player"))
+
+      assert control.description =~ "WXYZ"
+    end
+
+    test "a person who has not typed the code yet reads it again" do
+      stub_player([])
+      Source.Plex.run_settings_action("start_player")
+
+      assert {:error, message} = Source.Plex.run_settings_action("finish_player")
+
+      assert message =~ "WXYZ"
+    end
+
+    # **The endpoint that publishes an address is the old one.** `/api/v2/devices/{id}`
+    # answers 200 and writes nothing.
+    test "a code that a person typed publishes the address of the player" do
+      on_exit(fn -> Companion.enable(false) end)
+      stub_player(token: "THETOKEN")
+      Source.Plex.run_settings_action("start_player")
+
+      assert {:ok, message} = Source.Plex.run_settings_action("finish_player")
+
+      assert message =~ "Plex player now"
+      assert_receive {:request, "PUT", "/devices/4242.xml", params}
+      assert params["Connection"] |> hd() |> Map.get("uri") =~ ":#{Companion.port()}"
+      assert Companion.enabled?()
+      assert Server.player_code() == nil
+    end
+  end
+
   describe "the link" do
     test "it asks plex.tv for a code, and it tells a person where to type it" do
       stub(%{"id" => 12_345, "code" => "ABCD"})

@@ -4,7 +4,13 @@ import Config
 # See https://ring-logger.hexdocs.pm/readme.html for more information on
 # configuring ring_logger.
 
-config :logger, backends: [RingLogger]
+# **The log of a device holds 1024 lines, and a line for each request fills it.** A
+# Plex controller asked a board for a path that no player serves on 2026-09-15, it
+# asked again for each answer of 404, and 1020 of those lines pushed out every error
+# that a person needed to read. The level is therefore `info` here, where the default
+# of Logger is `debug`, so a line that helps a developer never costs a person the log
+# of their device. A developer reads the rest with `RingLogger.attach(level: :debug)`.
+config :logger, backends: [RingLogger], level: :info
 
 # Use shoehorn to start the main application. See the shoehorn
 # library documentation for more control in ordering how OTP

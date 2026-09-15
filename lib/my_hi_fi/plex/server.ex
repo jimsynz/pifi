@@ -80,7 +80,10 @@ defmodule MyHiFi.Plex.Server do
   @client_id_setting "plex_client_id"
   @code_setting "plex_link_code"
   @pin_setting "plex_link_pin"
+  @player_code_setting "plex_player_code"
+  @player_pin_setting "plex_player_pin"
   @account_setting "plex_account_token"
+  @device_id_setting "plex_device_id"
   @machine_setting "plex_machine_id"
   @name_setting "plex_server_name"
   @token_setting "plex_token"
@@ -690,6 +693,184 @@ defmodule MyHiFi.Plex.Server do
       {:error, :no_address} -> {:error, :no_address}
       _other -> {:error, :not_linked}
     end
+  end
+
+  @doc """
+  What this device tells plex.tv that it can do, when it asks to be a player.
+
+  **A device that names none of this is not a player.** A measurement on 2026-09-15
+  linked this device with no such header and plex.tv listed it nowhere at all. The same
+  device, linked again with these three words, appeared in `/api/v2/devices` at once.
+  Plexamp on a telephone and Plex for Apple TV both name the same three.
+  """
+  @spec player_provides() :: String.t()
+  def player_provides, do: "client,player,pubsub-player"
+
+  @doc "The settings key of the code that a person types to make this device a player."
+  @spec player_code_setting() :: String.t()
+  def player_code_setting, do: @player_code_setting
+
+  @doc "The code that a person types at plex.tv to make this device a player."
+  @spec player_code() :: String.t() | nil
+  def player_code do
+    case Settings.fetch(@player_code_setting) do
+      {:ok, %{value: code}} -> code
+      {:error, _reason} -> nil
+    end
+  end
+
+  @doc """
+  Ask plex.tv for a code that makes this device a player.
+
+  It is the flow that `start_link_to_account/0` runs, and the headers are the
+  difference: `player_provides/0` is what turns the answer into a player. The code is
+  the short one, of four characters, because plex.tv/link takes no other.
+  """
+  @spec start_link_as_player() :: {:ok, String.t()} | {:error, term()}
+  def start_link_as_player do
+    with {:ok, body} <- request(:post, @account, nil, "/api/v2/pins", [], player_headers()) do
+      case {body["id"], body["code"]} do
+        {pin, code} when not is_nil(pin) and is_binary(code) ->
+          Settings.put!(@player_pin_setting, to_string(pin))
+          Settings.put!(@player_code_setting, code)
+
+          {:ok, code}
+
+        _other ->
+          {:error, :no_code}
+      end
+    end
+  end
+
+  @doc """
+  Has a person typed the code that makes this device a player?
+
+  It publishes the address of the player when they have, because a device with no
+  address reaches no controller. See `publish_player/1`.
+  """
+  @spec finish_link_as_player([String.t()]) :: {:ok, :linked} | {:ok, :waiting} | {:error, term()}
+  def finish_link_as_player(addresses) do
+    with {:ok, %{value: pin}} <- Settings.fetch(@player_pin_setting),
+         {:ok, body} <- request(:get, @account, nil, "/api/v2/pins/#{pin}", [], player_headers()) do
+      case body["authToken"] do
+        token when is_binary(token) ->
+          forget_player_code()
+          keep_account_token(token)
+          publish_player(addresses)
+
+          {:ok, :linked}
+
+        _other ->
+          {:ok, :waiting}
+      end
+    else
+      {:error, :not_found} -> {:error, :ran_out_of_time}
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :no_pin}
+    end
+  end
+
+  @doc """
+  Tell plex.tv where a controller reaches this player.
+
+  **A player with no address appears nowhere.** A measurement on 2026-09-15 gave a
+  device that was in `/api/v2/devices` with `connections` of `[]`, and
+  `/api/v2/resources` held nothing for it, so no controller could find it. The same
+  device with one address answered in both.
+
+  **The endpoint that works is the old one.** `PUT /api/v2/devices/{id}` answers 200
+  and it writes nothing, whichever shape the connection takes: a query, a form, or
+  JSON. `PUT /devices/{id}.xml` writes it. A real player publishes each address that it
+  answers on, and Plexamp on a laptop publishes three of them.
+  """
+  @spec publish_player([String.t()]) :: :ok | {:error, term()}
+  def publish_player([]), do: {:error, :no_address}
+
+  def publish_player(addresses) do
+    with {:ok, id} <- player_device_id() do
+      query = Enum.map(addresses, &{"Connection[][uri]", &1})
+
+      case request(:put, @account, nil, "/devices/#{id}.xml", query, player_headers()) do
+        {:ok, _body} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  Has a person made this device a player?
+
+  **It reads the settings and it asks plex.tv nothing.** A device that no person linked
+  as a player has no row of the account to publish to, so a caller that asked anyway
+  would reach the network to be told what one read of the card already says.
+  """
+  @spec registered_as_player?() :: boolean()
+  def registered_as_player?, do: match?({:ok, _setting}, Settings.fetch(@device_id_setting))
+
+  @doc """
+  The number that plex.tv calls this device by.
+
+  **It is not `client_id/0`.** That one is the identifier that this device made for
+  itself, and this one is the row of the account. `/devices/{id}.xml` takes this one,
+  and the list of the account is the one place that holds both.
+  """
+  @spec player_device_id() :: {:ok, integer()} | {:error, term()}
+  def player_device_id do
+    case Settings.fetch(@device_id_setting) do
+      {:ok, %{value: value}} -> {:ok, String.to_integer(value)}
+      {:error, _reason} -> read_player_device_id()
+    end
+  end
+
+  defp read_player_device_id do
+    with {:ok, body} <- request(:get, @account, nil, "/api/v2/devices", [], player_headers()),
+         %{"id" => id} <- device_of(body) do
+      Settings.put!(@device_id_setting, to_string(id))
+
+      {:ok, id}
+    else
+      {:error, reason} -> {:error, reason}
+      _other -> {:error, :not_a_player_yet}
+    end
+  end
+
+  # The list holds every device of the account, and the identifier of this one is what
+  # picks the row out of it.
+  defp device_of(body) when is_list(body) do
+    Enum.find(body, &(to_string(&1["clientIdentifier"]) == client_id()))
+  end
+
+  defp device_of(_body), do: nil
+
+  defp forget_player_code do
+    for key <- [@player_pin_setting, @player_code_setting] do
+      case Settings.fetch(key) do
+        {:ok, setting} -> Settings.delete!(setting)
+        {:error, _reason} -> :ok
+      end
+    end
+
+    :ok
+  end
+
+  # A device that linked its library already holds this, and the two are the same token
+  # for the same account. A device that became a player first keeps it now.
+  defp keep_account_token(token) do
+    case Settings.fetch(@account_setting) do
+      {:ok, _setting} -> :ok
+      {:error, _reason} -> Settings.put!(@account_setting, token) && :ok
+    end
+  end
+
+  # The headers of a request that speaks for a player. `device_name/0` is what the
+  # account lists it under, so a household with two of them reads which is which.
+  defp player_headers do
+    [
+      {"X-Plex-Provides", player_provides()},
+      {"X-Plex-Device", @product},
+      {"X-Plex-Device-Name", device_name()},
+      {"X-Plex-Model", "PiFi"}
+    ]
   end
 
   @doc """
