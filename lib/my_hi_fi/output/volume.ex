@@ -140,7 +140,12 @@ defmodule MyHiFi.Output.Volume do
     # two is a card that nothing tells.
     :ok = Event.subscribe(:device)
 
-    state = %{percent: stored_percent(), enabled?: stored_enabled?()}
+    state = %{
+      percent: stored_percent(),
+      enabled?: stored_enabled?(),
+      device: nil,
+      supported?: false
+    }
 
     {:ok, state, {:continue, :apply}}
   end
@@ -151,11 +156,23 @@ defmodule MyHiFi.Output.Volume do
   @doc false
   @impl GenServer
   def handle_continue(:apply, state) do
+    state = card(state, device())
+
     write(state)
 
     {:noreply, state}
   end
 
+  # **This answers from what it keeps, and it asks the player nothing.** A read of the
+  # card in use is a call to `MyHiFi.Player`, and that process is busy for as long as a
+  # change of track takes: it stops one pipeline and starts the next inside the call
+  # that it is answering. Every page of the web interface reads the level, so each of
+  # them waited behind that work and then logged
+  # `The volume did not say what it is: {:timeout, ...}` after five seconds.
+  #
+  # `MyHiFi.Event.Device.OutputChanged` names the card in use, and it arrives for a card
+  # that comes or goes and for a card that a person chooses, so what this keeps stays
+  # right without a question.
   @doc false
   @impl GenServer
   def handle_call(:state, _from, state), do: {:reply, report(state), state}
@@ -189,11 +206,13 @@ defmodule MyHiFi.Output.Volume do
     {:reply, :ok, state}
   end
 
-  # **A card that a person plugs in has never been told the level.** The player names
-  # the card in use, and this event is the one thing that says that it changed.
+  # **A card that a person plugs in has never been told the level.** The event names
+  # the card in use, so this keeps that card and asks the player nothing.
   @doc false
   @impl GenServer
-  def handle_info(%DeviceEvents.OutputChanged{}, state) do
+  def handle_info(%DeviceEvents.OutputChanged{in_use: in_use}, state) do
+    state = card(state, in_use)
+
     write(state)
 
     {:noreply, state}
@@ -203,19 +222,15 @@ defmodule MyHiFi.Output.Volume do
 
   # Off means 0 dB, and not the last number that a person chose. See the module
   # documentation.
-  defp write(%{enabled?: true} = state), do: put(state.percent)
-  defp write(%{enabled?: false}), do: put(@default_percent)
+  defp write(%{enabled?: true} = state), do: put(state, state.percent)
+  defp write(%{enabled?: false} = state), do: put(state, @default_percent)
 
-  defp put(percent) do
-    case device() do
-      nil ->
-        :ok
+  defp put(%{device: nil}, _percent), do: :ok
 
-      device_id ->
-        case Output.put_volume(device_id, percent) do
-          :ok -> :ok
-          {:error, reason} -> Logger.debug("The card took no level: #{inspect(reason)}")
-        end
+  defp put(%{device: device_id}, percent) do
+    case Output.put_volume(device_id, percent) do
+      :ok -> :ok
+      {:error, reason} -> Logger.debug("The card took no level: #{inspect(reason)}")
     end
   end
 
@@ -225,21 +240,25 @@ defmodule MyHiFi.Output.Volume do
     %{
       percent: state.percent,
       enabled?: state.enabled?,
-      supported?: supported?()
+      supported?: state.supported?
     }
   end
 
-  # A device with no card has no level, and a card that this firmware cannot set
-  # has none that a person can move.
-  defp supported? do
-    case device() do
-      nil -> false
-      device_id -> Output.volume?(device_id)
-    end
-  end
+  # The card that makes the sound, and whether a person can move its level. **The read
+  # of the card runs here and never in a call**, because `amixer` is a program of its
+  # own and a page that waited for one waited for the card to answer. A device with no
+  # card has no level, and a card that this firmware cannot set has none that a person
+  # can move.
+  defp card(state, nil), do: %{state | device: nil, supported?: false}
+
+  defp card(state, device_id),
+    do: %{state | device: device_id, supported?: Output.volume?(device_id)}
 
   # The card in use, and not the one that a person chose. A chosen card that is absent
   # plays through another one, and the level belongs to the card that makes the sound.
+  #
+  # **This runs at the start of the process and nowhere else.** The event carries the
+  # card after that. See `handle_call(:state, ...)`.
   defp device do
     case MyHiFi.Player.output() do
       %{in_use: in_use} -> in_use

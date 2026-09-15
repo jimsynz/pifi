@@ -128,6 +128,49 @@ defmodule MyHiFi.Output.VolumeTest do
     end
   end
 
+  # **A page that reads the level must never wait for the player.** The player stops one
+  # pipeline and starts the next inside the call that it answers, so a change of track
+  # holds it for seconds. This read asked it for the card in use, so every page of the
+  # web interface waited behind that work and then logged
+  # `The volume did not say what it is: {:timeout, ...}`. See #157.
+  describe "a player that is busy" do
+    test "the level answers while the player answers nothing" do
+      start_volume()
+      :ok = Volume.enable(true)
+      :ok = Volume.set_percent(40)
+
+      :sys.suspend(MyHiFi.Player)
+
+      try do
+        answer = Task.async(fn -> Volume.state() end)
+
+        assert %{percent: 40, enabled?: true, supported?: true} = Task.await(answer, 500)
+      after
+        :sys.resume(MyHiFi.Player)
+      end
+    end
+  end
+
+  # The card in use changes when a person chooses another one, and no uevent says so.
+  # `MyHiFi.Output.Volume` keeps the card that this event names, so a firmware that
+  # published it for a card that arrives alone left that process with the old one.
+  describe "a person who chooses another card" do
+    # The second card of `MyHiFi.Test.TwoCardOutput` holds no level, in the way that the
+    # PCM5102A of a Pirate Audio board holds none, so this reads as the control going
+    # away.
+    test "the control follows the card that the person chose" do
+      start_volume()
+      :ok = Volume.enable(true)
+      :ok = Volume.set_percent(40)
+
+      assert %{supported?: true} = Volume.state()
+
+      :ok = MyHiFi.Player.select_output("rate48:CARD=second,DEV=0")
+
+      assert eventually(fn -> Volume.state().supported? == false end)
+    end
+  end
+
   describe "what it publishes" do
     setup do
       start_volume()

@@ -80,6 +80,7 @@ defmodule MyHiFi.Player do
 
   alias MyHiFi.Artwork
   alias MyHiFi.Event
+  alias MyHiFi.Event.Device, as: DeviceEvents
   alias MyHiFi.Event.Player, as: Events
   alias MyHiFi.Output
   alias MyHiFi.Playback
@@ -488,18 +489,7 @@ defmodule MyHiFi.Player do
   end
 
   @impl GenServer
-  def handle_call(:output, _from, %State{} = state) do
-    devices = Output.module().devices()
-    chosen = chosen_device()
-
-    in_use =
-      case device_in_use(devices, chosen) do
-        %{id: id} -> id
-        nil -> nil
-      end
-
-    {:reply, %{devices: devices, selected: chosen, in_use: in_use}, state}
-  end
+  def handle_call(:output, _from, %State{} = state), do: {:reply, output_report(), state}
 
   # A person who takes a source away expects the sound of it to go as well, and they
   # expect the device not to select it again after a restart. They also expect the room
@@ -519,11 +509,22 @@ defmodule MyHiFi.Player do
     end
   end
 
+  # **A person who chooses a card changes the card in use, and no uevent says so.**
+  # `MyHiFi.Device.Monitor` publishes `MyHiFi.Event.Device.OutputChanged` for a card
+  # that arrives or goes, which is the other half of that event, and a reader that
+  # keeps the card of this device therefore held the one that the person left. See
+  # `MyHiFi.Output.Volume`.
   @impl GenServer
   def handle_call({:select_output, id}, _from, %State{} = state) do
     case Settings.put(@output_device_key, id) do
-      {:ok, _setting} -> {:reply, :ok, restart_for_output(state)}
-      {:error, reason} -> {:reply, {:error, reason}, state}
+      {:ok, _setting} ->
+        state = restart_for_output(state)
+        Event.publish(:device, struct(DeviceEvents.OutputChanged, output_report()))
+
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -767,6 +768,22 @@ defmodule MyHiFi.Player do
   # of the settings is a query. A board with five cards made six of the same query.
   defp device_in_use(devices, chosen) do
     Enum.find(devices, List.first(devices), &(&1.id == chosen))
+  end
+
+  # What the cards of this device are, which one a person chose, and which one makes
+  # the sound. `MyHiFi.Event.Device.OutputChanged` carries the same three fields, so a
+  # reader keeps them and asks this process for none of them.
+  defp output_report do
+    devices = Output.module().devices()
+    chosen = chosen_device()
+
+    in_use =
+      case device_in_use(devices, chosen) do
+        %{id: id} -> id
+        nil -> nil
+      end
+
+    %{devices: devices, selected: chosen, in_use: in_use}
   end
 
   # A page shows the local copy of a logo, and never the address of the station.
