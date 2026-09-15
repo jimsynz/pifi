@@ -106,8 +106,16 @@ defmodule MyHiFiWeb.CinderTheme do
   # The table. A row of it draws its own cells, so these hold the rules between the rows
   # and the head of each column, and nothing else. `whitespace-nowrap` of Cinder goes,
   # because the column of the title carries the longest text on the page and it must wrap.
+  #
+  # **`table-fixed` is what makes a long title end in an ellipsis.** A table of the
+  # automatic layout gives each column the width of the longest thing in it, so a cell
+  # that says `truncate` has nothing to truncate against: one album of real tracks made
+  # the table 3076 pixels wide, the page carried a bar to move it sideways, and the
+  # number of the track and the controls of the row sat outside the window. A fixed
+  # layout reads the widths of the first row instead, and the column of the title takes
+  # what the other three leave. See `MyHiFiWeb.ItemList.title_cell/1`.
   set :table_wrapper_class, "overflow-x-auto"
-  set :table_class, "w-full border-collapse"
+  set :table_class, "w-full table-fixed border-collapse"
   set :thead_class, "border-b border-edge"
 
   set :th_class,
