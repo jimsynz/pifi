@@ -49,8 +49,9 @@ defmodule MyHiFiWeb.Shell do
   """
 
   import Phoenix.Component
-  import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1]
+  import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1, push_event: 3]
 
+  alias MyHiFi.Artwork
   alias MyHiFi.Event
   alias MyHiFi.Event.Input
   alias MyHiFi.Event.Player, as: Events
@@ -71,7 +72,10 @@ defmodule MyHiFiWeb.Shell do
   end
 
   def on_mount(:default, params, _session, socket) do
-    if connected?(socket), do: Event.subscribe(:player)
+    if connected?(socket) do
+      Event.subscribe(:player)
+      Artwork.subscribe()
+    end
 
     socket =
       socket
@@ -79,6 +83,7 @@ defmodule MyHiFiWeb.Shell do
       |> assign(:current_source, nil)
       |> assign(:standby?, Playback.state!().standby?)
       |> attach_hook(:standby, :handle_info, &standby/2)
+      |> attach_hook(:artwork_ready, :handle_info, &artwork_ready/2)
       |> attach_hook(:page_used, :handle_event, &page_used/3)
       |> attach_page_moved(params)
 
@@ -93,6 +98,23 @@ defmodule MyHiFiWeb.Shell do
   end
 
   defp standby(_message, socket), do: {:cont, socket}
+
+  # **The browser keeps the answer that it got for an address.** A list draws the
+  # address of each picture without a read, and the job that fetches one finishes a
+  # moment later, so the image holds a 404 that no redraw of the page can change. This
+  # names the address that arrived, and `assets/js/cover.js` asks for it again.
+  #
+  # The event carries one address and not a redraw of the page, because a list of 25
+  # rows would otherwise ask the device for 25 pictures each time that one of them
+  # arrived.
+  defp artwork_ready(%Ash.Notifier.Notification{} = notification, socket) do
+    case Artwork.ready(notification) do
+      {:ok, path} -> {:halt, push_event(socket, "artwork-ready", %{path: path})}
+      :error -> {:halt, socket}
+    end
+  end
+
+  defp artwork_ready(_message, socket), do: {:cont, socket}
 
   # **A child LiveView cannot hold a `:handle_params` hook**, and an attach on one
   # raises. The params of a mount say which kind this is: LiveView gives

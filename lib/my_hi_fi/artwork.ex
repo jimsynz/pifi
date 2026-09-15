@@ -41,6 +41,10 @@ defmodule MyHiFi.Artwork do
 
   @namespace "artwork"
 
+  # The topic that `MyHiFi.Cache.Entry` publishes each new entry of this namespace on.
+  # See `subscribe/0`.
+  @ready_topic "cache_entry:ready:#{@namespace}"
+
   # This firmware stores one of these, and it serves what it stored. A type that is
   # absent here never reaches the disk.
   #
@@ -57,6 +61,38 @@ defmodule MyHiFi.Artwork do
   # A logo of a station is small, and a cover of a podcast is 1.2 MB. 4 MB takes
   # either one and refuses a photograph that a service named by mistake.
   @byte_limit 4 * 1024 * 1024
+
+  @doc """
+  Hear about each thumbnail that arrives.
+
+  A list draws the address of a picture that the cache may not hold, and the job that
+  reads that picture finishes a moment later. The browser keeps the 404 that it got, so
+  a caller that hears this asks for the address again and the picture appears with no
+  reload. See `MyHiFiWeb.Shell`.
+
+  `MyHiFi.Cache.Entry` publishes the notification, so this is one subscription for a
+  page and never one for a row.
+  """
+  @spec subscribe() :: :ok | {:error, term()}
+  def subscribe, do: Phoenix.PubSub.subscribe(MyHiFi.PubSub, @ready_topic)
+
+  @doc """
+  The address of the thumbnail that one notification names.
+
+  It answers `:error` for every other entry of this namespace, which is the picture
+  itself and nothing else today. A page draws the thumbnail and never the picture, so
+  the picture arrives with no address to ask for again.
+
+      iex> MyHiFi.Artwork.ready(%Ash.Notifier.Notification{data: %MyHiFi.Cache.Entry{}})
+      :error
+
+  """
+  @spec ready(Ash.Notifier.Notification.t()) :: {:ok, String.t()} | :error
+  def ready(%Ash.Notifier.Notification{data: %Entry{variant_name: "thumbnail"} = entry}) do
+    {:ok, "/artwork/#{String.replace_suffix(entry.entry_key, ".thumbnail", "")}/thumbnail"}
+  end
+
+  def ready(_notification), do: :error
 
   @doc """
   The name of the entry for one address, if the cache has it.

@@ -296,6 +296,13 @@ defmodule MyHiFi.Cache.Entry do
 
     publish_all :create, "written"
     publish_all :destroy, "written"
+
+    # **One topic for each namespace, and not one for each entry.** A page draws 25
+    # pictures, so a subscription for each key would cost 25 of them for each list and
+    # 25 more for each page that a person moves to. The namespace is what a part of the
+    # firmware owns, so `MyHiFi.Artwork` reads the one topic and decides which of its
+    # own entries arrived. See `MyHiFi.Artwork.subscribe/0`.
+    publish_all :create, ["ready", :namespace]
   end
 
   # A variant names its source, and the database enforces a foreign key on that column,

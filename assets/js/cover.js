@@ -11,11 +11,14 @@
 // nothing of its own.
 //
 // **A 404 is often a picture that has not arrived yet.** A page asks for the pictures of
-// the list that it draws, and the job that reads one needs a moment. The page draws no
-// picture in that moment, and the answer it holds does not change again, so the image
-// asks two more times before it goes. The address carries the count of the attempt,
-// because a browser holds the answer that it got for the address alone.
-const RETRY_DELAYS_MS = [2000, 5000]
+// the list that it draws, and the job that reads one needs a moment.
+// `MyHiFiWeb.Shell` sends `artwork-ready` for each thumbnail that arrives, so this waits
+// for the word of the device and asks for that address alone. Two timers asked three
+// times for every picture that a page missed, and a page of a library misses 25 of them.
+//
+// The address carries a mark of the moment, because a browser holds the answer that it
+// got for the address alone.
+const waiting = new Map()
 
 export function cover() {
   window.addEventListener(
@@ -24,28 +27,48 @@ export function cover() {
       const target = event.target
 
       if (target instanceof HTMLImageElement && target.dataset.cover !== undefined) {
-        retry(target)
+        hold(target)
       }
     },
     true
   )
+
+  window.addEventListener("phx:artwork-ready", (event) => {
+    show(event.detail.path)
+  })
 }
 
-function retry(image) {
-  const attempt = Number(image.dataset.coverAttempt || 0)
-  const delay = RETRY_DELAYS_MS[attempt]
+// The image goes, and this keeps the place that it came from. LiveView draws the row
+// again for each event of the player, and the image that it draws then asks once more,
+// so a picture that arrives while the page is closed to this event still appears.
+function hold(image) {
+  const path = address(image)
   const parent = image.parentNode
-  const address = image.src.split("?")[0]
 
   image.remove()
 
-  if (delay === undefined || !parent) return
+  if (!parent) return
 
-  setTimeout(() => {
-    if (!parent.isConnected) return
+  const places = waiting.get(path) || []
 
-    image.dataset.coverAttempt = attempt + 1
-    image.src = `${address}?attempt=${attempt + 1}`
+  waiting.set(path, places.concat([{ image, parent }]))
+}
+
+function show(path) {
+  const places = waiting.get(path)
+
+  waiting.delete(path)
+
+  if (!places) return
+
+  for (const { image, parent } of places) {
+    if (!parent.isConnected || parent.contains(image)) continue
+
+    image.src = `${path}?ready=${Date.now()}`
     parent.appendChild(image)
-  }, delay)
+  }
+}
+
+function address(image) {
+  return new URL(image.src, window.location.origin).pathname
 }

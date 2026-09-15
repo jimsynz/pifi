@@ -307,6 +307,35 @@ defmodule MyHiFi.ArtworkTest do
     end
   end
 
+  # A page draws the address of a picture that the cache may not hold, and the browser
+  # keeps the 404 that it gets. The word that the thumbnail arrived is what makes it ask
+  # again. See `MyHiFiWeb.Shell`.
+  describe "the word that a thumbnail arrived" do
+    test "a thumbnail that arrives names its own address" do
+      stub("image/jpeg", @jpeg)
+      {:ok, name} = Artwork.fetch("https://station.test/logo.jpg")
+      {:ok, entry} = Cache.fetch("artwork", name)
+
+      :ok = Artwork.subscribe()
+      put_thumbnail(entry, "a small picture")
+
+      assert_receive %Ash.Notifier.Notification{} = notification
+      assert Artwork.ready(notification) == {:ok, "/artwork/#{name}/thumbnail"}
+    end
+
+    # The picture itself is the other entry of this namespace, and no page asks for its
+    # address. A caller that took every entry for a thumbnail would ask for the address
+    # of a thumbnail that the device has not written yet.
+    test "the picture itself names no address" do
+      :ok = Artwork.subscribe()
+      stub("image/jpeg", @jpeg)
+      {:ok, _name} = Artwork.fetch("https://station.test/logo.jpg")
+
+      assert_receive %Ash.Notifier.Notification{} = notification
+      assert Artwork.ready(notification) == :error
+    end
+  end
+
   describe "the thumbnail of a picture" do
     test "a picture that libvips cannot write gives none" do
       stub("image/webp", @webp)
