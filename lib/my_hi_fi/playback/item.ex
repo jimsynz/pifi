@@ -149,6 +149,39 @@ defmodule MyHiFi.Playback.Item do
 
         down "DROP INDEX playback_items_source_favourite_title_nocase_index"
       end
+
+      # **An identifier is `Ash.Type.UUID`, so it takes a cast as `kind` does.** Ash
+      # writes `CAST(id AS TEXT) = CAST(? AS TEXT)`, and neither the primary key of the
+      # table nor the index of `parent_id` serves such a comparison. `MyHiFi.Playback`
+      # reads an item by its identifier for every press of this firmware, and
+      # `MyHiFiWeb.BrowseLive` reads the items of a container each time that a person
+      # opens one.
+      #
+      # A measurement on a board on 2026-09-15, over 137,557 items, gave
+      # `SCAN playback_items USING COVERING INDEX sqlite_autoindex_playback_items_1` for
+      # both: `MyHiFi.Playback.get_item/1` took 370 ms and the items of one container
+      # took 251 ms, where the same statement with no cast took 4 ms. A press on an
+      # album of a genre took 5390 ms while the page read 25 thumbnails beside it, and
+      # the person saw no answer at all.
+      statement :id_text do
+        up """
+        CREATE INDEX playback_items_id_text_index
+        ON playback_items (CAST(id AS TEXT))
+        """
+
+        down "DROP INDEX playback_items_id_text_index"
+      end
+
+      # The index of `parent_id` stays, because `child_count` counts the column and
+      # that statement holds no cast. See `custom_indexes` above.
+      statement :parent_id_text do
+        up """
+        CREATE INDEX playback_items_parent_id_text_index
+        ON playback_items (CAST(parent_id AS TEXT))
+        """
+
+        down "DROP INDEX playback_items_parent_id_text_index"
+      end
     end
   end
 

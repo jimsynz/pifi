@@ -41,6 +41,17 @@ defmodule MyHiFi.Cache.Entry do
     # writes. A column that arrives after the table therefore needs this, or the
     # migration stops the boot of every device that already has a database.
     migration_defaults weight: "0"
+
+    # **Every request for a thumbnail reads the variants of one entry.**
+    # `MyHiFi.Artwork.serve_thumbnail/1` loads `variants`, which reads
+    # `variant_of_blob_id`, and a page of a library asks for 25 thumbnails at one time.
+    # Without this index SQLite reads the whole table for each of them: a measurement on
+    # a board on 2026-09-15, over 10,538 entries, gave 691 ms for that one read and
+    # 776 ms for the request. Ten connections then held the database for seconds, and a
+    # press of a person waited behind them.
+    custom_indexes do
+      index [:variant_of_blob_id]
+    end
   end
 
   blob do
