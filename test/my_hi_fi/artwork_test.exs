@@ -61,14 +61,36 @@ defmodule MyHiFi.ArtworkTest do
   end
 
   describe "ensure/1" do
-    test "asks for each address that the cache does not hold" do
+    # **One job for the whole list.** A read of a library gives thousands of addresses,
+    # and a job for each of them costs the card a write, a read and a delete.
+    test "asks for each address that the cache does not hold, in one job" do
       assert Artwork.ensure([
                "https://station.test/one.png",
                "https://station.test/two.png"
              ]) == :ok
 
-      assert_enqueued(worker: Worker, args: %{"url" => "https://station.test/one.png"})
-      assert_enqueued(worker: Worker, args: %{"url" => "https://station.test/two.png"})
+      assert_enqueued(
+        worker: Worker,
+        args: %{
+          "urls" => ["https://station.test/one.png", "https://station.test/two.png"]
+        }
+      )
+    end
+
+    # A read of a library runs every day, and the queue of the day before may still hold
+    # what it asked for. The cache cannot say so, because the picture has not arrived.
+    test "asks for nothing that a job of the queue already names" do
+      assert Artwork.ensure(["https://station.test/one.png"]) == :ok
+
+      assert Artwork.ensure(["https://station.test/one.png", "https://station.test/two.png"]) ==
+               :ok
+
+      asked = Enum.flat_map(all_enqueued(worker: Worker), & &1.args["urls"])
+
+      assert Enum.sort(asked) == [
+               "https://station.test/one.png",
+               "https://station.test/two.png"
+             ]
     end
 
     test "asks for nothing that the cache holds" do
@@ -90,7 +112,8 @@ defmodule MyHiFi.ArtworkTest do
       assert Artwork.ensure(["https://station.test/one.png", "https://station.test/one.png"]) ==
                :ok
 
-      assert [_job] = all_enqueued(worker: Worker)
+      assert [job] = all_enqueued(worker: Worker)
+      assert job.args["urls"] == ["https://station.test/one.png"]
     end
   end
 

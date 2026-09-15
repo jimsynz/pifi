@@ -82,7 +82,7 @@ defmodule MyHiFi.Podcast.FillTest do
 
       assert_enqueued(
         worker: MyHiFi.Artwork.Worker,
-        args: %{"url" => "https://example.test/cover.jpg"}
+        args: %{"urls" => ["https://example.test/cover.jpg"]}
       )
     end
 

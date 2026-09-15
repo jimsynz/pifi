@@ -393,7 +393,7 @@ defmodule MyHiFi.Jellyfin.SyncTest do
 
       asked =
         all_enqueued(worker: MyHiFi.Artwork.Worker)
-        |> Enum.map(& &1.args["url"])
+        |> Enum.flat_map(& &1.args["urls"])
 
       refs = Enum.map(all_items(), &{&1.source_ref, &1.kind})
 

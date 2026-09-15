@@ -30,7 +30,7 @@ defmodule MyHiFi.Artwork.WorkerTest do
   end
 
   defp perform(url \\ @url, announce? \\ true) do
-    Worker.perform(%Oban.Job{args: %{"url" => url, "announce" => announce?}})
+    Worker.perform(%Oban.Job{args: %{"urls" => [url], "announce" => announce?}})
   end
 
   describe "a logo that arrives" do
@@ -72,31 +72,60 @@ defmodule MyHiFi.Artwork.WorkerTest do
     end
   end
 
+  # **A station that holds no image cannot start to hold one, so a retry is waste.** The
+  # job holds a list, and one address of that kind must leave the rest of the list read,
+  # so the job finishes and stores nothing for that address.
   describe "an answer that cannot become a logo" do
-    test "a page instead of an image stops the job for good" do
-      # A station that holds no image cannot start to hold one, so a retry is
-      # waste. `:cancel` tells Oban to stop.
+    test "a page instead of an image stores nothing, and the job finishes" do
       stub("text/html", "<html>not found</html>")
 
-      assert {:cancel, :not_an_image} = perform()
+      assert perform() == :ok
+      assert Artwork.name(@url) == nil
     end
 
-    test "an image that is too large stops the job for good" do
+    test "an image that is too large stores nothing" do
       stub("image/png", String.duplicate("x", 5 * 1024 * 1024))
 
-      assert {:cancel, :too_large} = perform()
+      assert perform() == :ok
+      assert Artwork.name(@url) == nil
     end
 
-    test "an answer of 404 stops the job for good" do
+    test "an answer of 404 stores nothing" do
       stub("image/png", "", 404)
 
-      assert {:cancel, {:status, 404}} = perform()
+      assert perform() == :ok
+      assert Artwork.name(@url) == nil
     end
 
-    test "an answer of 403 stops the job for good" do
+    test "an answer of 403 stores nothing" do
       stub("image/png", "", 403)
 
-      assert {:cancel, {:status, 403}} = perform()
+      assert perform() == :ok
+      assert Artwork.name(@url) == nil
+    end
+
+    # A list of a library holds a few addresses that can never hold a picture, and the
+    # rest of that list must still arrive.
+    test "one address that cannot become a logo leaves the rest of the list read" do
+      Req.Test.stub(Artwork, fn conn ->
+        if conn.request_path =~ "bad" do
+          conn
+          |> Plug.Conn.put_resp_content_type("text/html")
+          |> Plug.Conn.send_resp(200, "<html>not found</html>")
+        else
+          conn
+          |> Plug.Conn.put_resp_content_type("image/png")
+          |> Plug.Conn.send_resp(200, @png)
+        end
+      end)
+
+      good = "https://station.test/good.png"
+
+      assert Worker.perform(%Oban.Job{
+               args: %{"urls" => ["https://station.test/bad.png", good]}
+             }) == :ok
+
+      assert is_binary(Artwork.name(good))
     end
   end
 
@@ -118,12 +147,23 @@ defmodule MyHiFi.Artwork.WorkerTest do
   describe "enqueue/2" do
     test "asks for a logo that the cache does not hold, and announces nothing" do
       assert Worker.enqueue(@url) == :ok
-      assert_enqueued(worker: Worker, args: %{"url" => @url, "announce" => false})
+      assert_enqueued(worker: Worker, args: %{"urls" => [@url], "announce" => false})
     end
 
     test "the player asks for an answer, and it gets one" do
       assert Worker.enqueue(@url, true) == :ok
-      assert_enqueued(worker: Worker, args: %{"url" => @url, "announce" => true})
+      assert_enqueued(worker: Worker, args: %{"urls" => [@url], "announce" => true})
+    end
+
+    # A person is waiting for the logo of the track that starts, and a read of a library
+    # holds 80 minutes of jobs in front of it. Oban runs the lower number first.
+    test "the ask of the player goes before a read of a library" do
+      assert Worker.enqueue(@url, true) == :ok
+      assert Worker.enqueue_all(["https://station.test/one.png"]) == :ok
+
+      assert [asked, bulk] = Enum.sort_by(all_enqueued(worker: Worker), & &1.priority)
+      assert asked.args["announce"] == true
+      assert asked.priority < bulk.priority
     end
 
     test "asks for nothing when the cache holds the logo" do
@@ -131,13 +171,55 @@ defmodule MyHiFi.Artwork.WorkerTest do
       {:ok, _name} = Artwork.fetch(@url)
 
       assert Worker.enqueue(@url) == :ok
-      refute_enqueued(worker: Worker, args: %{"url" => @url})
+      refute_enqueued(worker: Worker)
     end
 
     test "asks for nothing without an address" do
       assert Worker.enqueue(nil) == :ok
       assert Worker.enqueue("", true) == :ok
       refute_enqueued(worker: Worker)
+    end
+  end
+
+  # **A read of a library asks for thousands of pictures at one time**, and a job for
+  # each of them costs the card a write, a read and a delete.
+  describe "enqueue_all/1" do
+    test "a list of addresses becomes one job" do
+      urls = for index <- 1..10, do: "https://station.test/#{index}.png"
+
+      assert Worker.enqueue_all(urls) == :ok
+
+      assert [job] = all_enqueued(worker: Worker)
+      assert job.args["urls"] == urls
+      assert job.args["announce"] == false
+    end
+
+    test "a list longer than one job holds becomes more of them" do
+      urls = for index <- 1..(Worker.batch_size() + 1), do: "https://station.test/#{index}.png"
+
+      assert Worker.enqueue_all(urls) == :ok
+
+      assert [first, second] =
+               Enum.sort_by(all_enqueued(worker: Worker), &length(&1.args["urls"]))
+
+      assert length(second.args["urls"]) == Worker.batch_size()
+      assert length(first.args["urls"]) == 1
+    end
+
+    test "an empty list writes no job" do
+      assert Worker.enqueue_all([]) == :ok
+      refute_enqueued(worker: Worker)
+    end
+  end
+
+  # A device that takes this firmware holds jobs of the one before it, and each of
+  # those names one address under another key.
+  describe "a job of an older firmware" do
+    test "one address under the old key still reads" do
+      stub("image/png", @png)
+
+      assert Worker.perform(%Oban.Job{args: %{"url" => @url, "announce" => false}}) == :ok
+      assert is_binary(Artwork.name(@url))
     end
   end
 end

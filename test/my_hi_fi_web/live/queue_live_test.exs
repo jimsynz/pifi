@@ -108,7 +108,7 @@ defmodule MyHiFiWeb.QueueLiveTest do
 
       assert_enqueued(
         worker: MyHiFi.Artwork.Worker,
-        args: %{"url" => "https://station.test/logo.png"}
+        args: %{"urls" => ["https://station.test/logo.png"]}
       )
     end
 

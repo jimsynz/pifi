@@ -34,6 +34,7 @@ defmodule MyHiFi.Artwork do
   alias MyHiFi.Cache.Entry
 
   require Ash.Query
+  require Ecto.Query
 
   # Sobelow reads `@sobelow_skip` from the source. This registration stops the
   # compiler warning that no Elixir code reads the attribute.
@@ -173,9 +174,18 @@ defmodule MyHiFi.Artwork do
   `thumbnail_path/1` builds an address and reads nothing, and the address of a
   picture that the cache does not hold answers 404.
 
-  **One read for the whole list.** `MyHiFi.Artwork.Worker.enqueue/1` reads the cache
+  **One read for the whole list.** `MyHiFi.Artwork.Worker.enqueue/2` reads the cache
   for the address that it gets, so a list of 100 rows would make 100 queries. This
-  makes one, and it calls the worker for the misses alone.
+  makes one, and it asks for the misses alone.
+
+  **One insert for the whole list as well.** A read of a library gives thousands of
+  addresses, and a job for each of them costs the card a write, a read and a delete.
+  `MyHiFi.Artwork.Worker.enqueue_all/1` writes one job for each 100 addresses.
+
+  **An address that a job already names is asked for no second time.** A read of a
+  library runs every day, and the queue of the day before may still hold what it asked
+  for. The cache cannot say so, because the picture has not arrived, so this reads the
+  jobs of the queue that wait. One query covers the whole list.
 
   **A caller must ask one time for one list.** A page of this firmware draws itself
   again for each event of the player, which is once a second while a track plays, and
@@ -188,10 +198,11 @@ defmodule MyHiFi.Artwork do
   @spec ensure([String.t() | nil]) :: :ok
   def ensure(urls) do
     urls
-    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.filter(&(is_binary(&1) and &1 != "" and readable?(&1)))
     |> Enum.uniq()
     |> absent()
-    |> Enum.each(&Worker.enqueue/1)
+    |> unasked()
+    |> Worker.enqueue_all()
   end
 
   @doc """
@@ -486,6 +497,23 @@ defmodule MyHiFi.Artwork do
       |> MapSet.new(& &1.entry_key)
 
     Enum.reject(urls, &MapSet.member?(held, hash(&1)))
+  end
+
+  defp unasked([]), do: []
+
+  # The jobs that wait, and not the ones that finished. A picture that an eviction took
+  # is therefore read again when something asks for it.
+  defp unasked(urls) do
+    asked =
+      Oban.Job
+      |> Ecto.Query.where(queue: "artwork")
+      |> Ecto.Query.where([job], job.state in ~w[available scheduled executing retryable])
+      |> Ecto.Query.select([job], job.args)
+      |> MyHiFi.Repo.all()
+      |> Enum.flat_map(&Worker.addresses/1)
+      |> MapSet.new()
+
+    Enum.reject(urls, &MapSet.member?(asked, &1))
   end
 
   # The row carries the colour as the database gives it back, which is a map of strings.
