@@ -340,6 +340,14 @@ defmodule MyHiFi.Playback.Player do
   A page draws this while the player is busy, and the next event of the player
   corrects it.
 
+  **This holds every field that the player holds, and a field that it misses breaks a
+  page.** `MyHiFiWeb.PlayerLive` reads each one by name, so a key that is absent here
+  raises `KeyError` and the whole page answers 500. That happened on a board on
+  2026-09-15: a resolve of a Plex track that the server converts took longer than the
+  second below, this answer took its place, and the web interface stopped for a person
+  who had done nothing but open it. `MyHiFi.Playback.PlayerTest` compares the two maps
+  now.
+
   **`standby?` comes from the settings, and every other field is the empty one.** The
   player publishes an event for each thing that changes, so a reader that took the
   empty answer for the truth is corrected within a second: a track that plays sends
@@ -365,7 +373,8 @@ defmodule MyHiFi.Playback.Player do
       playing?: false,
       paused?: false,
       standby?: MyHiFi.Player.stored_standby?(),
-      position_ms: 0
+      position_ms: 0,
+      live?: false
     }
   end
 

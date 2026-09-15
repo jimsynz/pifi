@@ -26,6 +26,17 @@ defmodule MyHiFi.Playback.PlayerStateTest do
 
       assert {:ok, %{playing?: false}} = Playback.state()
     end
+
+    # **A field that this answer misses breaks a page.** `MyHiFiWeb.PlayerLive` reads
+    # each one by name, so a key that is absent raises `KeyError` and the whole page
+    # answers 500. A board on 2026-09-15 did that: a resolve of a Plex track that the
+    # server converts took longer than the second that the read waits, this answer took
+    # the place of the real one, and it held no `live?`.
+    test "it holds every field that the player holds" do
+      real = MyHiFi.Player.state()
+
+      assert Map.keys(Playback.Player.idle()) |> Enum.sort() == Map.keys(real) |> Enum.sort()
+    end
   end
 
   # **A screen asks this question when it starts, and the player is busy at that
