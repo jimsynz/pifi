@@ -51,6 +51,17 @@ defmodule MyHiFi.Cache.Entry do
     # press of a person waited behind them.
     custom_indexes do
       index [:variant_of_blob_id]
+
+      # **The eviction reads the bytes of the whole cache, and a write asks for them.**
+      # `MyHiFi.Cache.bytes/0` sums this column over every row, and without an index
+      # SQLite reads each whole row to do it: a row carries a key, a file name, a
+      # checksum and a map, and the sum needs one integer of it.
+      #
+      # A read of a library writes a picture at a time, so the sum arrives with each of
+      # them. A measurement on a board on 2026-09-16 counted 90 of those sums in three
+      # minutes, and the slowest took 685 ms. The index makes the plan
+      # `SCAN cache_entries USING COVERING INDEX`, which reads the integers alone.
+      index [:byte_size]
     end
   end
 

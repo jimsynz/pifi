@@ -917,18 +917,32 @@ defmodule MyHiFiWeb.BrowseLive do
   # **The source names the order of these rows and the facts that they draw**, and this
   # page needs no knowledge of any source. `nil` is what a list under a facet is: no
   # container is above it. See `c:MyHiFi.Source.listing/1`.
-  defp step(source, %{listing: %{kind: :facet}}, segment) do
+  #
+  # **The row of the facet comes first, and the items follow from it.** The branch above
+  # holds the query of its own facets, so a value of the address names one row of that
+  # branch and this needs no knowledge of the key that the source chose. The identifier
+  # of that row then names the source as well, which is why the read below carries no
+  # filter on it. See the `:by_facet` action of `MyHiFi.Playback.Item`.
+  defp step(source, %{listing: %{kind: :facet, query: facets}}, segment) do
+    case Ash.read_one(Ash.Query.filter(facets, value == ^segment)) do
+      {:ok, %Facet{} = facet} -> under(source, facet, segment)
+      _other -> nil
+    end
+  end
+
+  defp step(source, %{listing: %{kind: :item}}, segment), do: container(source, segment)
+
+  # The items of one facet, in the order that the source names.
+  defp under(source, facet, segment) do
     inside = Source.inside(source, nil)
 
     query =
       Item
-      |> Ash.Query.filter(source == ^Source.slug(source) and exists(facets, value == ^segment))
+      |> Ash.Query.for_read(:by_facet, %{facet_id: facet.id})
       |> Ash.Query.sort(inside[:sort] || [])
 
     %{title: segment, listing: Map.merge(inside, %{query: query, kind: :item})}
   end
-
-  defp step(source, %{listing: %{kind: :item}}, segment), do: container(source, segment)
 
   # A container opens into the items whose `parent_id` names it. The source must match,
   # so an identifier of one source cannot open under another one.

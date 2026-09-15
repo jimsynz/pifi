@@ -34,6 +34,7 @@ defmodule MyHiFi.Playback do
       define :list_items, action: :read
       define :get_item, action: :read, get_by: [:id]
       define :items_of_parent, action: :by_parent, args: [:parent_id]
+      define :items_of_facet, action: :by_facet, args: [:facet_id]
       define :items_of_source, action: :by_source, args: [:source]
       define :favourite_items, action: :favourites
       define :items_marked_for_audio, action: :marked_for_audio, args: [:source]

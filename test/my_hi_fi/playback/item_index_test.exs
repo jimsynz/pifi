@@ -87,5 +87,21 @@ defmodule MyHiFi.Playback.ItemIndexTest do
     end
   end
 
+  # **A list of one genre is a read of the links of that facet**, and not a read of
+  # every item of the source. A measurement on a board on 2026-09-16, over 137,557
+  # items and a genre of 173 albums, gave 1360 ms for the filter that named the
+  # relationship and 128 ms for this one.
+  describe "the plan of the items of one facet" do
+    test "a read of one facet reads the links of it and no whole source" do
+      plan =
+        Item
+        |> Ash.Query.for_read(:by_facet, %{facet_id: Ash.UUID.generate()})
+        |> plan_of()
+
+      assert plan =~ "playback_item_facets_facet_id_index"
+      QueryPlan.refute_scan(plan)
+    end
+  end
+
   defp plan_of(query), do: QueryPlan.of(query, "playback_items")
 end

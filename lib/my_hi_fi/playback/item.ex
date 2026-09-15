@@ -229,6 +229,44 @@ defmodule MyHiFi.Playback.Item do
       pagination keyset?: true, required?: false
     end
 
+    read :by_facet do
+      description """
+      List the items that one facet holds.
+
+      **The identifier of the facet names the source**, because the key of a facet
+      carries it: a genre of Plex and a genre of Jellyfin are two rows. A caller
+      therefore needs no filter on `source`, and it must not add one. See
+      `MyHiFi.Plex.Fill.genre_key/0`.
+
+      ## Why a statement of SQL and not `exists`
+
+      A filter on the relationship reads every item of the source and asks the link
+      table about each of them, because SQLite drives such a plan from the outer
+      table. A measurement on a board on 2026-09-16, over 137,557 items and a genre of
+      173 albums, gave:
+
+          exists(facets, value == ^value) and source == ^slug   1360 ms
+          exists(item_facets, facet_id == ^id)                   980 ms
+          this statement                                          128 ms
+
+      The statement reads the links of the facet by index, and the item by its
+      identifier. **A filter on `source` beside it takes the gain away**: the planner
+      then drives from the index of the source again, and the same read took 1085 ms.
+      """
+
+      argument :facet_id, :uuid, allow_nil?: false
+
+      filter expr(
+               fragment(
+                 "? IN (SELECT item_id FROM playback_item_facets WHERE facet_id = ?)",
+                 id,
+                 ^arg(:facet_id)
+               )
+             )
+
+      pagination keyset?: true, required?: false
+    end
+
     read :by_source do
       description "List the items of one source."
 
