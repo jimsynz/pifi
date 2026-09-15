@@ -87,6 +87,14 @@ defmodule MyHiFiWeb.Telemetry do
         tag_values: &source_name/1,
         unit: {:native, :millisecond}
       ),
+      # **The silence between one track of an album and the next.**
+      # `MyHiFi.Output.APlayPort` measures it, because it is the one process that sees
+      # the last samples of a track and the first samples of the next. ALSA holds about
+      # half a second when the last samples arrive, so a number under 500 ms is a gap
+      # that no person hears.
+      summary("my_hi_fi.player.gap.duration",
+        unit: {:native, :millisecond}
+      ),
       summary("my_hi_fi.player.skip.stop.duration",
         tags: [:direction],
         unit: {:native, :millisecond}

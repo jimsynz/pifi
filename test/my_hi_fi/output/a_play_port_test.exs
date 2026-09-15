@@ -124,6 +124,62 @@ defmodule MyHiFi.Output.APlayPortTest do
     end
   end
 
+  # **The silence between one track of an album and the next is the number that #159 is
+  # about**, and nothing measured it. ALSA holds about half a second when the last
+  # samples of a track arrive, so a gap that is shorter than that queue is one that no
+  # person hears.
+  describe "the silence between two tracks" do
+    setup do
+      handler = "gap-#{:erlang.unique_integer([:positive])}"
+      probe = self()
+
+      :telemetry.attach(
+        handler,
+        [:my_hi_fi, :player, :gap],
+        fn _event, measurements, metadata, _config ->
+          send(probe, {:gap, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      :ok
+    end
+
+    test "the end of one track and the start of the next give the time between them" do
+      {:ok, _port} = APlayPort.hold("cat", [])
+
+      APlayPort.wrote_last()
+      APlayPort.wrote_first()
+
+      assert_receive {:gap, %{duration: duration}, %{device: {"cat", []}}}
+      assert duration >= 0
+    end
+
+    # A person who pressed play waited for a start, and
+    # `[:my_hi_fi, :player, :sound]` already holds that wait.
+    test "a start that follows no track says nothing" do
+      {:ok, _port} = APlayPort.hold("cat", [])
+
+      APlayPort.wrote_first()
+
+      refute_receive {:gap, _measurements, _metadata}, 100
+    end
+
+    # A stop is the silence that a person asked for.
+    test "a stop between the two says nothing" do
+      {:ok, _port} = APlayPort.hold("cat", [])
+
+      APlayPort.wrote_last()
+      :ok = APlayPort.close()
+      {:ok, _port} = APlayPort.hold("cat", [])
+      APlayPort.wrote_first()
+
+      refute_receive {:gap, _measurements, _metadata}, 100
+    end
+  end
+
   defp eventually(check, attempts \\ 100)
 
   defp eventually(_check, 0), do: false

@@ -93,13 +93,45 @@ defmodule MyHiFi.Output.APlayPort do
   @spec held() :: {String.t(), [String.t()]} | nil
   def held, do: GenServer.call(__MODULE__, :held)
 
+  @doc """
+  Note that a sink wrote the last samples of a track.
+
+  `MyHiFi.Output.APlaySink` calls this at the end of its stream, and `wrote_first/0` at
+  the start of the next one. **This process is the one that sees both**, because a
+  pipeline holds the sink of one track alone and the program outlives every pipeline.
+
+  It is a cast, so the sink writes samples and never waits for this.
+  """
+  @spec wrote_last() :: :ok
+  def wrote_last, do: GenServer.cast(__MODULE__, {:wrote_last, System.monotonic_time()})
+
+  @doc """
+  Note that a sink wrote the first samples of a track.
+
+  It publishes `[:my_hi_fi, :player, :gap]` with the time since the last samples of the
+  track before, which is the silence that a person hears between two tracks of an album.
+  ALSA still holds about half a second when those last samples arrive, so a gap that is
+  shorter than that queue is one that no person hears.
+
+  **A stop publishes nothing.** `close/0` ends the program, and the silence after it is
+  what a person asked for.
+  """
+  @spec wrote_first() :: :ok
+  def wrote_first, do: GenServer.cast(__MODULE__, {:wrote_first, System.monotonic_time()})
+
   @doc false
   @impl GenServer
   def init(opts) do
     # A firmware that stops must not leave `aplay` holding the card.
     Process.flag(:trap_exit, true)
 
-    {:ok, %{port: nil, key: nil, busy_limits: Keyword.get(opts, :busy_limits, @busy_limits)}}
+    {:ok,
+     %{
+       port: nil,
+       key: nil,
+       last_at: nil,
+       busy_limits: Keyword.get(opts, :busy_limits, @busy_limits)
+     }}
   end
 
   @doc false
@@ -117,6 +149,24 @@ defmodule MyHiFi.Output.APlayPort do
   def handle_call(:close, _from, state), do: {:reply, :ok, ended(state)}
 
   def handle_call(:held, _from, state), do: {:reply, state.key, state}
+
+  @doc false
+  @impl GenServer
+  def handle_cast({:wrote_last, at}, state), do: {:noreply, %{state | last_at: at}}
+
+  # A first write with no last one before it is a person who pressed play, and that
+  # wait is what `[:my_hi_fi, :player, :sound]` already holds.
+  def handle_cast({:wrote_first, _at}, %{last_at: nil} = state), do: {:noreply, state}
+
+  def handle_cast({:wrote_first, at}, %{last_at: last_at} = state) do
+    :telemetry.execute(
+      [:my_hi_fi, :player, :gap],
+      %{duration: at - last_at},
+      %{device: state.key}
+    )
+
+    {:noreply, %{state | last_at: nil}}
+  end
 
   @doc false
   @impl GenServer
@@ -154,13 +204,13 @@ defmodule MyHiFi.Output.APlayPort do
     end
   end
 
-  defp ended(%{port: nil} = state), do: state
+  defp ended(%{port: nil} = state), do: %{state | last_at: nil}
 
   defp ended(%{port: port} = state) do
     stop_program(port)
     close_port(port)
 
-    %{state | port: nil, key: nil}
+    %{state | port: nil, key: nil, last_at: nil}
   end
 
   # **A port that has already gone is the state that this wants.** `stop_program/1`

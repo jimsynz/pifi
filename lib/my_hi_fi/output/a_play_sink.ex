@@ -160,6 +160,14 @@ defmodule MyHiFi.Output.APlaySink do
   def handle_end_of_stream(:input, _ctx, %State{port: port, part: part} = state)
       when is_port(port) and part != <<>> do
     _result = write(port, pad(part, state.format))
+    APlayPort.wrote_last()
+
+    {[], %State{state | port: nil, part: <<>>}}
+  end
+
+  @impl true
+  def handle_end_of_stream(:input, _ctx, %State{port: port} = state) when is_port(port) do
+    APlayPort.wrote_last()
 
     {[], %State{state | port: nil, part: <<>>}}
   end
@@ -228,6 +236,10 @@ defmodule MyHiFi.Output.APlaySink do
   # The first write says that sound started, and a write of no bytes says nothing: a
   # buffer that holds less than one frame has made no sound yet.
   defp sounded(%State{sounded?: false} = state, whole) when whole != <<>> do
+    # The port measures the silence between one track and the next, and this is the
+    # moment that ends it. See `MyHiFi.Output.APlayPort.wrote_first/0`.
+    APlayPort.wrote_first()
+
     {[notify_parent: :playing], %State{state | sounded?: true}}
   end
 

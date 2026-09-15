@@ -8,10 +8,11 @@ defmodule MyHiFi.Player.Prefetch do
   them as a gap. This removes them, by reading the file while the track before it
   still plays.
 
-  **It does not make the change of track gapless.** `MyHiFi.Output.APlaySink` starts
-  `aplay` for each pipeline, and that start costs a silence of about one second. Only
-  a sink that lives longer than one pipeline can remove that, and this firmware
-  builds a pipeline for each playable. See `MyHiFi.Player.Pipeline`.
+  **It does not make the change of track gapless by itself.** `MyHiFi.Output.APlayPort`
+  holds `aplay` open across pipelines now, so the card no longer opens between two
+  tracks of one rate, and what is left is the time to stop one pipeline and start the
+  next. `MyHiFi.Output.APlayPort.wrote_first/0` measures that silence, and
+  `[:my_hi_fi, :player, :gap]` carries it.
 
   ## What it reads, and what it leaves
 

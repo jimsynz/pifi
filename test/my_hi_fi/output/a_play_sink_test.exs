@@ -265,6 +265,44 @@ defmodule MyHiFi.Output.APlaySinkTest do
       assert APlayPort.held() == {"cat", []}
     end
 
+    # **The silence between one track and the next is the number that #159 is about.**
+    # The sink of the track that ends and the sink of the track that follows are two
+    # elements of two pipelines, so the holder of the port is what measures it.
+    test "the end of a track and the first samples of the next are both noted" do
+      handler = "sink-gap-#{:erlang.unique_integer([:positive])}"
+      probe = self()
+
+      :telemetry.attach(
+        handler,
+        [:my_hi_fi, :player, :gap],
+        fn _event, measurements, _metadata, _config -> send(probe, {:gap, measurements}) end,
+        nil
+      )
+
+      on_exit(fn ->
+        :telemetry.detach(handler)
+        APlayPort.close()
+      end)
+
+      {:ok, port} = APlayPort.hold("cat", [])
+
+      {[], _ended} =
+        APlaySink.handle_end_of_stream(:input, nil, %State{
+          device: "null",
+          port: port,
+          sounded?: true
+        })
+
+      next = %State{device: "null", port: port, format: @format, sounded?: false}
+      buffer = %Membrane.Buffer{payload: <<0::size(6)-unit(8)>>}
+
+      assert {[notify_parent: :playing], _state} =
+               APlaySink.handle_buffer(:input, buffer, nil, next)
+
+      assert_receive {:gap, %{duration: duration}}
+      assert duration >= 0
+    end
+
     # A person who stopped already got their silence, so a pipeline that goes ends
     # nothing either.
     test "a pipeline that stops ends no program" do
