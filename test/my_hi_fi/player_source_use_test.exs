@@ -16,6 +16,7 @@ defmodule MyHiFi.PlayerSourceUseTest do
   alias MyHiFi.Settings
   alias MyHiFi.Source
   alias MyHiFi.Test.PlayingPipeline
+  alias MyHiFi.Test.SilentOutput
 
   defmodule Station do
     @moduledoc "One live track in the catalogue, and nothing else."
@@ -73,6 +74,7 @@ defmodule MyHiFi.PlayerSourceUseTest do
 
   setup do
     PlayingPipeline.use_it()
+    SilentOutput.use_it()
     Application.put_env(:my_hi_fi, :sources, [Station])
     Event.subscribe(:player)
 

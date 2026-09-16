@@ -15,6 +15,7 @@ defmodule MyHiFi.PlayerControlsTest do
   alias MyHiFi.Playback
   alias MyHiFi.Player
   alias MyHiFi.Test.PlayingPipeline
+  alias MyHiFi.Test.SilentOutput
 
   defmodule Episodes do
     @moduledoc """
@@ -95,6 +96,7 @@ defmodule MyHiFi.PlayerControlsTest do
 
   setup do
     PlayingPipeline.use_it()
+    SilentOutput.use_it()
     Application.put_env(:my_hi_fi, :sources, [Episodes])
     Episodes.forget()
     Playback.clear_queue!()

@@ -14,6 +14,7 @@ defmodule MyHiFi.PlayerTelemetryTest do
   alias MyHiFi.Player
   alias MyHiFi.Test.EndingPipeline
   alias MyHiFi.Test.PlayingPipeline
+  alias MyHiFi.Test.SilentOutput
 
   defmodule Counter do
     @moduledoc """
@@ -102,6 +103,7 @@ defmodule MyHiFi.PlayerTelemetryTest do
 
   setup do
     EndingPipeline.use_it()
+    SilentOutput.use_it()
     Playback.clear_queue!()
     Application.put_env(:my_hi_fi, :sources, [Counter])
     Event.subscribe(:player)

@@ -17,6 +17,7 @@ defmodule MyHiFi.PlayerReleaseTest do
   alias MyHiFi.Player
   alias MyHiFi.Player.Download
   alias MyHiFi.Test.PlayingPipeline
+  alias MyHiFi.Test.SilentOutput
 
   defmodule Library do
     @moduledoc """
@@ -85,6 +86,7 @@ defmodule MyHiFi.PlayerReleaseTest do
 
   setup do
     PlayingPipeline.use_it()
+    SilentOutput.use_it()
     Playback.clear_queue!()
     Application.put_env(:my_hi_fi, :sources, [Library])
     Application.put_env(:my_hi_fi, :cache_limit, 10_000)

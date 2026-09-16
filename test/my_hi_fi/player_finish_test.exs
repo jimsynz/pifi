@@ -13,6 +13,7 @@ defmodule MyHiFi.PlayerFinishTest do
   alias MyHiFi.Playback
   alias MyHiFi.Player
   alias MyHiFi.Test.EndingPipeline
+  alias MyHiFi.Test.SilentOutput
 
   defmodule Recorder do
     @moduledoc """
@@ -104,6 +105,7 @@ defmodule MyHiFi.PlayerFinishTest do
 
   setup do
     EndingPipeline.use_it()
+    SilentOutput.use_it()
     Playback.clear_queue!()
     Application.put_env(:my_hi_fi, :sources, [Recorder])
     Recorder.live!(false)

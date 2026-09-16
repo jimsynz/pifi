@@ -11,6 +11,8 @@ defmodule MyHiFi.Plex.CompanionTest do
   alias MyHiFi.Plex.Server
   alias MyHiFi.Settings
   alias MyHiFi.Source
+  alias MyHiFi.Test.PlayingPipeline
+  alias MyHiFi.Test.SilentOutput
 
   # **This calls the router and it opens no port.** `Plug.Test` builds the connection,
   # so a test reads the answers of a controller with no listener at all, and a suite
@@ -570,6 +572,13 @@ defmodule MyHiFi.Plex.CompanionTest do
   # `A Plex controller asked this player for GET /player/playback/createPlayQueue`.
   describe "a controller that asks this player to make a queue" do
     setup do
+      # **This block plays, so it needs a pipeline and an output that make no sound.**
+      # `MyHiFi.Output.Alsa` lists the cards of the machine, and a build agent holds
+      # none, so a play without these reads `:no_output_device` and the timeline below
+      # names no queue.
+      PlayingPipeline.use_it()
+      SilentOutput.use_it()
+
       Source.enable(Source.Plex, true)
       Application.put_env(:my_hi_fi, Server, plug: {Req.Test, Server}, retry: false)
       on_exit(fn -> Application.delete_env(:my_hi_fi, Server) end)

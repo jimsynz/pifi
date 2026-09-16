@@ -9,6 +9,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
   alias MyHiFi.Podcast
   alias MyHiFi.Podcast.Fill, as: PodcastFill
   alias MyHiFi.Test.PlayingPipeline
+  alias MyHiFi.Test.SilentOutput
   alias MyHiFi.Test.Stations
 
   # `render_async/1` waits `:assert_receive_timeout`, which is 100 ms, and `mix check`
@@ -507,6 +508,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
     # they add go after it.
     test "a track that a person adds goes after the one that plays", %{conn: conn} do
       PlayingPipeline.use_it()
+      SilentOutput.use_it()
       playing = Stations.create(%{country_code: "NZ", title: "Playing FM"})
       added = Stations.create(%{country_code: "NZ", title: "Added FM"})
 
@@ -537,6 +539,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
   describe "playing a track" do
     test "a track that plays marks its row", %{conn: conn} do
       PlayingPipeline.use_it()
+      SilentOutput.use_it()
       station = Stations.create(%{country_code: "NZ", title: "RNZ National"})
 
       {:ok, view, _html} = live(conn, @radio)
@@ -572,6 +575,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     test "a stop takes the marker off", %{conn: conn} do
       PlayingPipeline.use_it()
+      SilentOutput.use_it()
       station = Stations.create(%{country_code: "NZ"})
 
       {:ok, view, _html} = live(conn, @radio)
@@ -1742,6 +1746,7 @@ defmodule MyHiFiWeb.BrowseLiveTest do
 
     test "the play control queues every track of the collection", %{conn: conn} do
       PlayingPipeline.use_it()
+      SilentOutput.use_it()
       {_artist, album} = collection_tree()
       with_tracks(album, 3)
 

@@ -601,6 +601,8 @@ defmodule MyHiFiWeb.SettingsLiveTest do
   # sources of truth and publishes on the `:device` topic.
   describe "the reports that arrive" do
     test "a card that goes reaches the page", %{conn: conn} do
+      TwoCardOutput.use_it()
+
       {:ok, view, html} = live(conn, ~p"/settings")
 
       refute html =~ "No sound card is present"
