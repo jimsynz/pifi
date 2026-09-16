@@ -256,6 +256,20 @@ config :my_hi_fi, MyHiFi.Repo,
 # both files.
 config :my_hi_fi, Oban, queues: [default: 2, artwork: 1]
 
+# **`Oban.Met` polls the job table about once a second, and each poll reads the card.**
+# A trace of the database over three minutes on a board on 2026-09-16 counted 169 of
+# this gauge query, at 52 ms each:
+#
+#     SELECT state, queue, count(id) FROM oban_jobs WHERE state IN (...) GROUP BY state, queue
+#
+# That is about 5% of one core and a read of the card each second.
+#
+# **A production firmware shows those numbers to no person.** `MyHiFiWeb.Router`
+# mounts the `/oban` dashboard behind `dev_routes`, and `config/dev.exs` is the only
+# file that sets that key. A development firmware therefore keeps the poll, in the
+# same way that it keeps the SSH daemon above.
+config :oban_met, auto_start: development_firmware?
+
 config :my_hi_fi, MyHiFiWeb.Endpoint,
   http: [ip: {0, 0, 0, 0}, port: 80],
   server: true,
