@@ -34,23 +34,15 @@ defmodule MyHiFi.MixProject do
 
   @app :my_hi_fi
   @version "0.1.0"
-  @all_targets [
-    # `x86_64` is absent, and its Nerves system is gone with it. That system uses
-    # musl, and libvorbis does not build against musl, so `nbpr_vorbis_tools`
-    # cannot serve that target. This firmware runs on `myhifi_rpi0_2`, and no
-    # x86_64 build ever ran.
-    :bbb,
-    :mangopi_mq_pro,
-    :qemu_aarch64,
-    :rpi,
-    :rpi0,
-    :myhifi_rpi0_2,
-    :rpi2,
-    :rpi3,
-    :rpi4,
-    :rpi5,
-    :trellis
-  ]
+  # This product ships one board, and the list holds that board alone. The
+  # template names eleven stock targets, and no build of this firmware ever used
+  # one: the DAC needs a USB host stack and a USB audio driver that no stock
+  # system holds, and the screen needs the `libxkbcommon` that the custom system
+  # carries for the Emerge NIF. Each extra target also cost a dependency bump
+  # that no person read. `x86_64` is absent for a reason of its own: that system
+  # uses musl, and libvorbis does not build against musl, so `nbpr_vorbis_tools`
+  # cannot serve it.
+  @all_targets [:myhifi_rpi0_2]
 
   def project do
     [
@@ -223,11 +215,6 @@ defmodule MyHiFi.MixProject do
        github: "nerves-networking/vintage_net_wizard", ref: "c11eabea849e", targets: @all_targets},
 
       # Targets
-      {:nerves_system_bbb, "~> 2.19", runtime: false, targets: :bbb},
-      {:nerves_system_mangopi_mq_pro, "~> 0.6", runtime: false, targets: :mangopi_mq_pro},
-      {:nerves_system_qemu_aarch64, "~> 0.4", runtime: false, targets: :qemu_aarch64},
-      {:nerves_system_rpi, "~> 2.0", runtime: false, targets: :rpi},
-      {:nerves_system_rpi0, "~> 2.0", runtime: false, targets: :rpi0},
       # The stock rpi0_2 system holds no USB host stack and no USB audio driver,
       # so a USB DAC cannot work on it. It also gives 192 MB to the GPU and
       # reserves 128 MB of CMA, and this device drives no display over HDMI. See
@@ -238,11 +225,6 @@ defmodule MyHiFi.MixProject do
        runtime: false,
        targets: :myhifi_rpi0_2,
        nerves: [compile: true]},
-      {:nerves_system_rpi2, "~> 2.0", runtime: false, targets: :rpi2},
-      {:nerves_system_rpi3, "~> 2.0", runtime: false, targets: :rpi3},
-      {:nerves_system_rpi4, "~> 2.0", runtime: false, targets: :rpi4},
-      {:nerves_system_rpi5, "~> 2.0", runtime: false, targets: :rpi5},
-      {:nerves_system_trellis, "~> 0.4", runtime: false, targets: :trellis},
 
       # Dev/test deps.
       {:credo, "~> 1.7", runtime: false, only: [:dev, :test], target: :host},
