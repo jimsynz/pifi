@@ -377,6 +377,30 @@ defmodule MyHiFi.Plex.ServerTest do
       assert entry.added_at == DateTime.from_unix!(1_600_000_000)
     end
 
+    test "an album carries the record label that the server holds on studio" do
+      put_link()
+
+      stub(
+        container([
+          %{"ratingKey" => "1900", "title" => "Mezzanine", "studio" => "Circa"}
+        ])
+      )
+
+      assert {:ok, %{entries: [entry]}} = Server.page(:albums, "3", 0)
+
+      assert entry.record_labels == ["Circa"]
+    end
+
+    test "an album that names no record label carries none" do
+      put_link()
+
+      stub(container([%{"ratingKey" => "1900", "title" => "Mezzanine", "studio" => ""}]))
+
+      assert {:ok, %{entries: [entry]}} = Server.page(:albums, "3", 0)
+
+      assert entry.record_labels == []
+    end
+
     test "an artist carries its name and its picture" do
       put_link()
 

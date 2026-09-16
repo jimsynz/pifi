@@ -104,10 +104,17 @@ defmodule MyHiFi.Source.PlexTest do
       assert labels == ["Artists", "Albums", "Tracks"]
     end
 
-    test "it gives five branches at the top of the tree" do
+    test "it gives six branches at the top of the tree" do
       names = Source.Plex.roots() |> Enum.map(&elem(&1, 0))
 
-      assert names == ["Artists", "Albums", "Recently added", "Genres", "Favourites"]
+      assert names == [
+               "Artists",
+               "Albums",
+               "Recently added",
+               "Genres",
+               "Record labels",
+               "Favourites"
+             ]
     end
 
     test "an album reads its tracks by their place on the record" do

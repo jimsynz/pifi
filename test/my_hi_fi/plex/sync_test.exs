@@ -32,7 +32,7 @@ defmodule MyHiFi.Plex.SyncTest do
     }
   end
 
-  defp album(number, artist, genres \\ []) do
+  defp album(number, artist, genres \\ [], studio \\ nil) do
     %{
       "ratingKey" => "album-#{number}",
       "title" => "Album #{number}",
@@ -40,7 +40,8 @@ defmodule MyHiFi.Plex.SyncTest do
       "parentTitle" => "Artist #{artist}",
       "summary" => "A review of album #{number}.",
       "year" => 1998,
-      "Genre" => Enum.map(genres, &%{"tag" => &1})
+      "Genre" => Enum.map(genres, &%{"tag" => &1}),
+      "studio" => studio
     }
   end
 
@@ -181,6 +182,56 @@ defmodule MyHiFi.Plex.SyncTest do
       assert {:ok, _counts} = Plex.sync_library()
 
       assert length(Playback.facets_of_key!(Fill.genre_key())) == 1
+    end
+
+    # **The record label arrives with the album on `studio`, so a read asks the server
+    # for nothing more.** It becomes a facet in the way that a genre does, and the
+    # Record labels branch is then a plain read of the facets.
+    test "the record label of an album becomes a facet of it" do
+      stub_library(one_section([artist(1)], [album(1, 1, [], "4AD")], []))
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      [facet] = Playback.facets_of_key!(Fill.record_label_key())
+
+      assert to_string(facet.value.value) == "4AD"
+    end
+
+    test "the key of a record label names this source" do
+      assert Fill.record_label_key() == "plex-record-label"
+    end
+
+    test "an album that names no record label writes no facet" do
+      stub_library(one_section([artist(1)], [album(1, 1)], []))
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert Playback.facets_of_key!(Fill.record_label_key()) == []
+    end
+
+    test "a second read of one record label writes one facet" do
+      stub_library(one_section([artist(1)], [album(1, 1, [], "4AD"), album(2, 1, [], "4AD")], []))
+
+      assert {:ok, _counts} = Plex.sync_library()
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert length(Playback.facets_of_key!(Fill.record_label_key())) == 1
+    end
+
+    # **A genre and a record label of the same name are two rows, and they must be.**
+    # The key of each facet names what it is, so the links of one cannot reach the
+    # other.
+    test "a genre and a record label of one name stay apart" do
+      stub_library(one_section([artist(1)], [album(1, 1, ["4AD"], "4AD")], []))
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      [album] = Item |> Ash.Query.filter(source_ref == "album-1") |> Ash.read!(load: [:facets])
+
+      assert album.facets |> Enum.map(& &1.key) |> Enum.sort() ==
+               [Fill.genre_key(), Fill.record_label_key()]
+
+      assert album.facets |> Enum.map(&to_string(&1.value.value)) |> Enum.uniq() == ["4AD"]
     end
 
     test "an album names its artist, and a track names its album" do

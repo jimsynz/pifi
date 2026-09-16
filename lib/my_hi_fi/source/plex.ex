@@ -2,13 +2,17 @@ defmodule MyHiFi.Source.Plex do
   @moduledoc """
   The music library of one Plex Media Server, on the local network.
 
-  The tree has four branches under the root.
+  The tree has six branches under the root.
 
       Artists             every artist of the library
         an artist         the albums of that artist
           an album        the tracks of that album
       Albums              every album of the library
       Recently added      the albums that the server took in last
+      Genres              every genre of the library
+        a genre           the albums of that genre
+      Record labels       every record label of the library
+        a record label    the albums of that label
       Favourites          the artists, the albums and the tracks that a person marked
 
   An artist and an album are containers, and a track plays. See `MyHiFi.Plex.Fill` for
@@ -119,13 +123,15 @@ defmodule MyHiFi.Source.Plex do
       {"Recently added",
        %{query: recently_added_query(), kind: :item, facts: [:subtitle, :release_year]}},
       {"Genres", %{query: facet_query(Fill.genre_key()), kind: :facet}},
+      {"Record labels", %{query: facet_query(Fill.record_label_key()), kind: :facet}},
       {"Favourites", %{query: favourites_query(), kind: :item, facts: [:subtitle, :release_year]}}
     ]
   end
 
-  # A genre of this source is a facet, in the way that a country of a station is one, so
-  # the branch is a plain read of the facets and the page below it needs no rule of its
-  # own. See `MyHiFi.Plex.Fill.genre_key/0`.
+  # A genre and a record label of this source are both facets, in the way that a country
+  # of a station is one, so each branch is a plain read of the facets and the page below
+  # it needs no rule of its own. See `MyHiFi.Plex.Fill.genre_key/0` and
+  # `MyHiFi.Plex.Fill.record_label_key/0`.
   defp facet_query(key), do: Ash.Query.for_read(Facet, :by_key, %{key: key})
 
   @doc """

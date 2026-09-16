@@ -158,7 +158,8 @@ defmodule MyHiFi.Plex.Server do
           optional(:part_key) => String.t() | nil,
           optional(:format) => :aac | :flac | :mp3 | :vorbis | :unknown,
           optional(:container_format) => :none | :ogg,
-          optional(:genres) => [String.t()]
+          optional(:genres) => [String.t()],
+          optional(:record_labels) => [String.t()]
         }
 
   @typedoc """
@@ -620,6 +621,8 @@ defmodule MyHiFi.Plex.Server do
   `parent_ref` names the artist of the record. An album whose artist the server does
   not name gives `nil` there, and `MyHiFi.Plex.Fill` writes it under the artist that
   it keeps for those.
+
+  `record_labels` holds the record label, and it holds one name or none.
   """
   @spec album(map(), String.t(), String.t()) :: entry() | nil
   def album(item, address, token) do
@@ -633,7 +636,8 @@ defmodule MyHiFi.Plex.Server do
           subtitle: presence(item["parentTitle"]),
           release_year: whole(item["year"]),
           added_at: added_at(item["addedAt"]),
-          genres: genres(item)
+          genres: genres(item),
+          record_labels: record_labels(item)
         })
     end
   end
@@ -647,6 +651,22 @@ defmodule MyHiFi.Plex.Server do
     |> List.wrap()
     |> Enum.map(&presence(&1["tag"]))
     |> Enum.reject(&is_nil/1)
+  end
+
+  # **Plex holds the record label on `studio`, and it arrives with the album.** The
+  # answer that the sync already reads holds it, so a label costs no request of its own.
+  #
+  # **It is a list of one name, and not a name.** A genre of an album is a list, and
+  # `MyHiFi.Plex.Fill` writes the two of them through one path for that reason. A server
+  # that names no label gives an empty list, in the way that an album with no genre
+  # does.
+  #
+  # Jellyfin returns no such field, so a Jellyfin library holds no record label.
+  defp record_labels(item) do
+    case presence(item["studio"]) do
+      nil -> []
+      studio -> [studio]
+    end
   end
 
   @doc """

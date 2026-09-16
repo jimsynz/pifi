@@ -71,7 +71,14 @@ defmodule MyHiFi.Plex.Fill do
 
   @source "plex"
   @genre_key "plex-genre"
+  @record_label_key "plex-record-label"
   @unknown_artist_ref "plex-artist-unknown"
+
+  # The field of the entry that holds the names, and the key that those names take in
+  # `MyHiFi.Playback.Facet`. **The two are written in one pass**, because each one alone
+  # reads the items of the page and the links that they already hold, and those two
+  # reads are what this costs.
+  @facet_fields [genres: @genre_key, record_labels: @record_label_key]
 
   @doc """
   The name of this source in an address, and in the `source` column of an item.
@@ -107,7 +114,7 @@ defmodule MyHiFi.Plex.Fill do
       |> Enum.map(&%{&1 | parent_ref: &1.parent_ref || @unknown_artist_ref})
       |> write(:container)
 
-    link_genres(entries)
+    link_facets(entries)
 
     written
   end
@@ -123,6 +130,20 @@ defmodule MyHiFi.Plex.Fill do
   """
   @spec genre_key() :: String.t()
   def genre_key, do: @genre_key
+
+  @doc """
+  The key that the record labels of this source take in `MyHiFi.Playback.Facet`.
+
+  The key names the source for the reason that `genre_key/0` gives. It also keeps a
+  record label apart from a genre of the same name: `4AD` is a label, and a library that
+  held a genre of that name would otherwise put the two on one row.
+
+  **Plex is the one source that holds this.** The server returns `studio` on an album,
+  and Jellyfin returns no such field. A country of origin needs a service, and neither
+  server gives one.
+  """
+  @spec record_label_key() :: String.t()
+  def record_label_key, do: @record_label_key
 
   @doc "Write one page of tracks, and give the number that it wrote."
   @spec tracks([Server.entry()]) :: non_neg_integer()
@@ -215,27 +236,48 @@ defmodule MyHiFi.Plex.Fill do
     end
   end
 
-  # **The links go in one statement for each page, and not one for each genre.** A
+  # **The links go in one statement for each page, and not one for each name.** A
   # library of 4360 albums names about four genres each, so a write for each of those
   # 17,000 links would cost the card a great deal, and a read of the library runs every
   # day.
-  defp link_genres(entries) do
-    case Enum.reject(entries, &(Map.get(&1, :genres, []) == [])) do
+  defp link_facets(entries) do
+    case Enum.reject(entries, &(names_of(&1) == [])) do
       [] -> :ok
       named -> write_links(named, facet_ids(named), ids_of(named))
     end
+  end
+
+  # **Each name carries the key of its facet.** A genre called `4AD` and a record label
+  # called `4AD` are two rows of `MyHiFi.Playback.Facet`, so a map from a bare name to
+  # an identifier would give one of them the links of the other.
+  defp names_of(entry) do
+    Enum.flat_map(@facet_fields, fn {field, key} ->
+      entry
+      |> Map.get(field, [])
+      |> Enum.map(&{key, &1})
+    end)
   end
 
   defp write_links(named, facets, items) do
     wanted =
       for entry <- named,
           item_id = items[entry.ref],
-          name <- entry.genres,
-          facet_id = facets[name] do
+          keyed_name <- names_of(entry),
+          facet_id = facets[keyed_name] do
         {item_id, facet_id}
       end
 
-    case Enum.reject(wanted, &MapSet.member?(held(items), &1)) do
+    # **The read of the links that the page already holds happens once.** It was inside
+    # the test below, so the card answered one query for each of the thousands of links
+    # of a page instead of one query for the page.
+    case wanted do
+      [] -> :ok
+      wanted -> insert_new(wanted, held(items))
+    end
+  end
+
+  defp insert_new(wanted, held) do
+    case Enum.reject(wanted, &MapSet.member?(held, &1)) do
       [] -> :ok
       rows -> insert_links(rows)
     end
@@ -271,25 +313,28 @@ defmodule MyHiFi.Plex.Fill do
   end
 
   # **A facet that the table already holds costs no write.** A library names about a
-  # hundred genres, so after the first pages every name of a page is a row that this
-  # read finds. The read is of one key and it gives those hundred rows.
+  # hundred genres and about as many record labels, so after the first pages every name
+  # of a page is a row that this read finds. The read is one query for each key, and it
+  # gives those hundred rows.
   defp facet_ids(named) do
     held =
-      @genre_key
-      |> Playback.facets_of_key!()
-      |> Map.new(&{to_string(&1.value.value), &1.id})
+      Enum.reduce(@facet_fields, %{}, fn {_field, key}, acc ->
+        key
+        |> Playback.facets_of_key!()
+        |> Enum.into(acc, &{{key, to_string(&1.value.value)}, &1.id})
+      end)
 
     named
-    |> Enum.flat_map(& &1.genres)
+    |> Enum.flat_map(&names_of/1)
     |> Enum.uniq()
-    |> Enum.reduce(held, fn name, acc ->
-      Map.put_new_lazy(acc, name, fn -> written_facet(name) end)
+    |> Enum.reduce(held, fn {key, name}, acc ->
+      Map.put_new_lazy(acc, {key, name}, fn -> written_facet(key, name) end)
     end)
   end
 
-  defp written_facet(name) do
+  defp written_facet(key, name) do
     Playback.upsert_facet!(%{
-      key: @genre_key,
+      key: key,
       value: %Ash.Union{type: :string, value: name}
     }).id
   end
