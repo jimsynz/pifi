@@ -1,13 +1,13 @@
-defmodule MyHiFi.Repo.Migrations.DropPodcastEpisodes do
+defmodule PiFi.Repo.Migrations.DropPodcastEpisodes do
   @moduledoc """
-  Remove the table of `MyHiFi.Podcast.Episode`, and the columns of a show that the
+  Remove the table of `PiFi.Podcast.Episode`, and the columns of a show that the
   item holds.
 
-  Every playable thing is a `MyHiFi.Playback.Item` now. `MyHiFi.Podcast.Show` keeps the
+  Every playable thing is a `PiFi.Playback.Item` now. `PiFi.Podcast.Show` keeps the
   address of the feed, the identifier of the index and what the last read gave, and
   everything that a person reads or does is on the item.
 
-  `MyHiFi.Podcast.CarryPlaces` runs before this one, so the subscriptions and the
+  `PiFi.Podcast.CarryPlaces` runs before this one, so the subscriptions and the
   places of a person are already items.
 
   Ash writes no migration for a resource that a release removes, and it comments out

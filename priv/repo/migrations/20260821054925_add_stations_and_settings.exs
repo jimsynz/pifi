@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddStationsAndSettings do
+defmodule PiFi.Repo.Migrations.AddStationsAndSettings do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

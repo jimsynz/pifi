@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddItemReleaseYear do
+defmodule PiFi.Repo.Migrations.AddItemReleaseYear do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

@@ -28,13 +28,13 @@ config :nerves_runtime, startup_guard_enabled: true
 # The hardware that a person sees and touches, and that this firmware knows how to
 # drive. A name here does not start anything: the same image runs on a board with a
 # screen and on a board with none, so each peripheral is out of use until a person
-# names it on the settings page. See `MyHiFi.Peripheral`.
-config :my_hi_fi,
+# names it on the settings page. See `PiFi.Peripheral`.
+config :pifi,
   peripherals: [
-    {MyHiFi.Peripheral.PiTft, []},
-    {MyHiFi.Peripheral.PirateAudio, []},
-    {MyHiFi.Peripheral.Battery, []},
-    {MyHiFi.Peripheral.ActivityLed, []}
+    {PiFi.Peripheral.PiTft, []},
+    {PiFi.Peripheral.PirateAudio, []},
+    {PiFi.Peripheral.Battery, []},
+    {PiFi.Peripheral.ActivityLed, []}
   ]
 
 # Erlinit can be configured without a rootfs_overlay. See
@@ -43,20 +43,20 @@ config :my_hi_fi,
 
 # Advance the system clock on devices without a real-time clock.
 #
-# MyHiFi: two more settings, so a restart leaves evidence behind.
+# PiFi: two more settings, so a restart leaves evidence behind.
 #
 # ramoops keeps a reserved part of RAM through a reset. The `pstore` mount makes
 # the record of the last boot readable at /sys/fs/pstore.
-# `MyHiFi.PersistentLogger` writes the log of this firmware to /dev/pmsg0, which
+# `PiFi.PersistentLogger` writes the log of this firmware to /dev/pmsg0, which
 # lands in the same place and costs no write to the SD card.
 #
 # `shutdown_report` names a file that erlinit writes when the VM exits in an
 # orderly way. A hard reset gives no chance to write it, and a crash of the VM
 # does.
 # `rootfs_overlay/etc/asound.conf` holds the `rate48` definition, so a target build
-# can name it and a host build cannot. See `MyHiFi.Output.Alsa.sink_spec/1` for the
+# can name it and a host build cannot. See `PiFi.Output.Alsa.sink_spec/1` for the
 # fault of the USB controller that it works around.
-config :my_hi_fi, :alsa_rate48?, true
+config :pifi, :alsa_rate48?, true
 
 config :nerves, :erlinit,
   update_clock: true,
@@ -149,7 +149,7 @@ end
 # See https://github.com/nerves-networking/vintage_net for more information
 # The wizard makes the access point name from the hostname, and the hostname is
 # `nerves-<serial>`. A person looks for the name that they gave the device instead, so
-# `MyHiFi.Setup` writes `config :vintage_net_wizard, ssid: ...` at the moment that it
+# `PiFi.Setup` writes `config :vintage_net_wizard, ssid: ...` at the moment that it
 # starts the wizard. A name here would take the place of that one.
 
 config :vintage_net,
@@ -189,7 +189,7 @@ config :mdns_lite,
   # unpredictable behavior.
 
   #
-  # **`MyHiFi.Device.Identity.announce/0` replaces this list at each boot.** It names
+  # **`PiFi.Device.Identity.announce/0` replaces this list at each boot.** It names
   # the device first, so the advertisement of the web service carries the name that a
   # person gave, and `nerves.local` goes for the reason above.
   hosts: [:hostname, "nerves"],
@@ -223,15 +223,15 @@ config :mdns_lite,
 # gives it 2000 ms, and a device that plays a track, writes 28 MB of it to the card,
 # prunes the job table and serves a list of pictures crosses that. Two of those failures
 # were measured on a device on 2026-09-07: `Oban.Pruner` stopped, and
-# `MyHiFi.Cache.Entry.put_file` threw away a podcast episode that had already arrived.
+# `PiFi.Cache.Entry.put_file` threw away a podcast episode that had already arrived.
 #
 # 10 seconds, and not more, because an Ecto call gives up at 15 seconds by default. A
 # handler that waited longer than the caller would turn one error into another.
 #
-# **This does not take the place of writing less.** `MyHiFi.Cache.Touches` is what
+# **This does not take the place of writing less.** `PiFi.Cache.Touches` is what
 # removed 25 writes for each list that a person opens.
-config :my_hi_fi, MyHiFi.Repo,
-  database: "/root/my_hi_fi.db",
+config :pifi, PiFi.Repo,
+  database: "/root/pifi.db",
   busy_timeout: 10_000,
   cache_size: -4_000,
   pool_size: 10
@@ -247,14 +247,14 @@ config :my_hi_fi, MyHiFi.Repo,
 # 2026-09-14, during a read of a library of 63,010 tracks.
 #
 # **Lowering `default` instead would have starved the audio of a mark.**
-# `cache_audio` of `MyHiFi.Playback.Item` is in that queue, and so is a read of a
+# `cache_audio` of `PiFi.Playback.Item` is in that queue, and so is a read of a
 # library that runs for 80 minutes, so a person who marked an album would have waited
 # for the read before a note of it reached the card.
 #
 # **This list replaces the one of `config/config.exs`, and does not add to it**, so a
 # queue that is absent here does not run on a device. That is why `artwork` is named in
 # both files.
-config :my_hi_fi, Oban, queues: [default: 2, artwork: 1]
+config :pifi, Oban, queues: [default: 2, artwork: 1]
 
 # **`Oban.Met` polls the job table about once a second, and each poll reads the card.**
 # A trace of the database over three minutes on a board on 2026-09-16 counted 169 of
@@ -264,13 +264,13 @@ config :my_hi_fi, Oban, queues: [default: 2, artwork: 1]
 #
 # That is about 5% of one core and a read of the card each second.
 #
-# **A production firmware shows those numbers to no person.** `MyHiFiWeb.Router`
+# **A production firmware shows those numbers to no person.** `PiFiWeb.Router`
 # mounts the `/oban` dashboard behind `dev_routes`, and `config/dev.exs` is the only
 # file that sets that key. A development firmware therefore keeps the poll, in the
 # same way that it keeps the SSH daemon above.
 config :oban_met, auto_start: development_firmware?
 
-config :my_hi_fi, MyHiFiWeb.Endpoint,
+config :pifi, PiFiWeb.Endpoint,
   http: [ip: {0, 0, 0, 0}, port: 80],
   server: true,
   # A device answers on its IP address, on nerves.local, and on

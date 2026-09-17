@@ -12,7 +12,7 @@ jobs:
     uses: https://harton.dev/james/workflows/.forgejo/workflows/nerves-app.yml@main
     runs-on: 16gb
     with:
-      targets: "myhifi_rpi0_2"
+      targets: "pifi_rpi0_2"
       assets_deploy_enabled: true
       # `nbpr` holds the programs that decode Ogg Vorbis and FLAC. NBPR shares the
       # read key of that organization on purpose: it gates the download and it
@@ -21,7 +21,7 @@ jobs:
       hex_organization: "nbpr"
       hex_organization_key: "15da04a2330d881e1301a73c5d39f591"
       # NBPR publishes an artefact for each stock Nerves system, and
-      # `myhifi_rpi0_2` is a custom system, so no artefact for it exists and none
+      # `pifi_rpi0_2` is a custom system, so no artefact for it exists and none
       # ever will. The firmware job therefore builds each package from source
       # with Buildroot, and it needs 10 minutes for the 6 packages. The cache of
       # the job then holds the result, so only a new package version or a new

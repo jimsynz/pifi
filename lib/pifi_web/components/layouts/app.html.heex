@@ -1,0 +1,85 @@
+<div class="min-h-dvh">
+  <div class="faceplate brushed sheen sticky top-0 z-40">
+    <div class="mx-auto max-w-3xl px-3 sm:px-5">
+      <div class="flex items-center gap-2 border-b border-edge py-2">
+        <nav id="sources" aria-label="Sources" class="scroller flex grow items-center gap-1 overflow-x-auto">
+          <.faceplate_control
+            :for={source <- @sources}
+            id={"source-#{source.slug}"}
+            navigate={~p"/browse/#{source.slug}"}
+            label={source.title}
+            current?={source.slug == @current_source}
+            standby?={@standby?}
+            class="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm"
+          >
+            <.source_icon name={source.icon} />
+            <span class="hidden sm:inline">{source.title}</span>
+          </.faceplate_control>
+        </nav>
+
+        <.faceplate_control
+          id="search-link"
+          navigate={~p"/search"}
+          label="Search"
+          current?={false}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
+        >
+          <.icon name="hero-magnifying-glass" class="size-5" />
+        </.faceplate_control>
+
+        <.faceplate_control
+          id="playlists-link"
+          navigate={~p"/playlists"}
+          label="Playlists"
+          current?={false}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
+        >
+          <.icon name="hero-list-bullet" class="size-5" />
+        </.faceplate_control>
+
+        <.faceplate_control
+          id="queue-link"
+          navigate={~p"/queue"}
+          label="Play queue"
+          current?={false}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
+        >
+          <.icon name="hero-queue-list" class="size-5" />
+        </.faceplate_control>
+
+        <.faceplate_control
+          id="history-link"
+          navigate={~p"/history"}
+          label="History"
+          current?={false}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
+        >
+          <.icon name="hero-clock" class="size-5" />
+        </.faceplate_control>
+
+        <.faceplate_control
+          id="settings-link"
+          navigate={~p"/settings"}
+          label="Settings"
+          current?={is_nil(@current_source)}
+          standby?={@standby?}
+          class="flex shrink-0 items-center rounded-lg p-2"
+        >
+          <.icon name="hero-cog-6-tooth" class="size-5" />
+        </.faceplate_control>
+      </div>
+    </div>
+
+    {live_render(@socket, PiFiWeb.PlayerLive, id: "player", sticky: true)}
+  </div>
+
+  <main :if={not @standby?} class="mx-auto max-w-3xl px-3 py-6 sm:px-5">
+    {@inner_content}
+  </main>
+
+  <.flash_group flash={@flash} />
+</div>

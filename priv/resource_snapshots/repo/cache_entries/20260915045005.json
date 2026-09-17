@@ -249,7 +249,7 @@
   ],
   "table": "cache_entries",
   "hash": "8D2BA8436611C5E8E8596784F86A28E02170DA917D9B8A9F2B3AC52EF200C1D0",
-  "repo": "Elixir.MyHiFi.Repo",
+  "repo": "Elixir.PiFi.Repo",
   "multitenancy": {
     "global": null,
     "attribute": null,

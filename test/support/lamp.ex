@@ -1,24 +1,24 @@
-defmodule MyHiFi.Test.Lamp do
+defmodule PiFi.Test.Lamp do
   @moduledoc """
   A peripheral of no hardware.
 
   A test that needs a peripheral names this one, in the way that a test that needs a
-  source names `MyHiFi.Test.PlainSource`.
+  source names `PiFi.Test.PlainSource`.
 
-      Application.put_env(:my_hi_fi, :peripherals, [{MyHiFi.Test.Lamp, []}])
+      Application.put_env(:pifi, :peripherals, [{PiFi.Test.Lamp, []}])
 
-  Two options change what it does. `:fault` makes `c:MyHiFi.Peripheral.init/1` answer
+  Two options change what it does. `:fault` makes `c:PiFi.Peripheral.init/1` answer
   in the way that a screen with nothing wired to it does. `:report_to` names a process
-  that gets a message when `c:MyHiFi.Peripheral.terminate/2` runs, so a test can prove
+  that gets a message when `c:PiFi.Peripheral.terminate/2` runs, so a test can prove
   that a stop turns the hardware off.
   """
 
-  @behaviour MyHiFi.Peripheral
+  @behaviour PiFi.Peripheral
 
-  @impl MyHiFi.Peripheral
+  @impl PiFi.Peripheral
   def title, do: "Lamp"
 
-  @impl MyHiFi.Peripheral
+  @impl PiFi.Peripheral
   def init(options) do
     case Keyword.fetch(options, :fault) do
       {:ok, reason} -> {:error, reason}
@@ -26,13 +26,13 @@ defmodule MyHiFi.Test.Lamp do
     end
   end
 
-  @impl MyHiFi.Peripheral
+  @impl PiFi.Peripheral
   def subscriptions, do: [:player]
 
-  @impl MyHiFi.Peripheral
+  @impl PiFi.Peripheral
   def handle_event(_event, state), do: {:ok, state}
 
-  @impl MyHiFi.Peripheral
+  @impl PiFi.Peripheral
   def terminate(_reason, %{report_to: nil}), do: :ok
 
   def terminate(reason, state) do

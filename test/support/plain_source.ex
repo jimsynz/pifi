@@ -1,4 +1,4 @@
-defmodule MyHiFi.Test.PlainSource do
+defmodule PiFi.Test.PlainSource do
   @moduledoc """
   A source that holds nothing for a person to change.
 
@@ -9,23 +9,23 @@ defmodule MyHiFi.Test.PlainSource do
   This source browses nothing. A test that needs a tree uses one of its own.
   """
 
-  @behaviour MyHiFi.Source
+  @behaviour PiFi.Source
 
-  @impl MyHiFi.Source
+  @impl PiFi.Source
   def title, do: "Plain source"
 
-  @impl MyHiFi.Source
+  @impl PiFi.Source
   def icon, do: :library
 
-  @impl MyHiFi.Source
+  @impl PiFi.Source
   def capabilities, do: []
 
-  @impl MyHiFi.Source
+  @impl PiFi.Source
   def roots, do: []
 
-  @impl MyHiFi.Source
+  @impl PiFi.Source
   def kinds, do: [track: "Tracks"]
 
-  @impl MyHiFi.Source
+  @impl PiFi.Source
   def resolve(item), do: {:error, {:not_a_track, item.id}}
 end

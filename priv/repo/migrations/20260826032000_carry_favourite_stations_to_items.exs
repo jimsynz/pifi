@@ -1,6 +1,6 @@
-defmodule MyHiFi.Repo.Migrations.CarryFavouriteStationsToItems do
+defmodule PiFi.Repo.Migrations.CarryFavouriteStationsToItems do
   @moduledoc """
-  Keep the stations that a person marked. See `MyHiFi.Radio.CarryFavourites`.
+  Keep the stations that a person marked. See `PiFi.Radio.CarryFavourites`.
 
   **This must run after the migration that makes `playback_items`, and before the one
   that drops `stations`.** The number of this file puts it there. A number that comes
@@ -11,7 +11,7 @@ defmodule MyHiFi.Repo.Migrations.CarryFavouriteStationsToItems do
 
   use Ecto.Migration
 
-  def up, do: MyHiFi.Radio.CarryFavourites.run(repo())
+  def up, do: PiFi.Radio.CarryFavourites.run(repo())
 
   # A mark that came across stays on the item. The old table still holds it as well,
   # so nothing is lost by going back.

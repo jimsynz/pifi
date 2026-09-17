@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.IndexCacheSize do
+defmodule PiFi.Repo.Migrations.IndexCacheSize do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

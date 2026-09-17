@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.CaseInsensitiveTitleOrder do
+defmodule PiFi.Repo.Migrations.CaseInsensitiveTitleOrder do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

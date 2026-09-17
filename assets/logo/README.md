@@ -1,7 +1,7 @@
 # The originals of the product marks
 
 These are the pictures that the marks of the products come from. Nothing at run
-time reads them: `MyHiFi.Device.Identity.shipped_splash/1` reads
+time reads them: `PiFi.Device.Identity.shipped_splash/1` reads
 `priv/splash/<product>-<width>x<height>.png`, and each of those is already the
 size of the screen that draws it.
 

@@ -1,9 +1,9 @@
-defmodule MyHiFi.Repo.Migrations.DropStations do
+defmodule PiFi.Repo.Migrations.DropStations do
   @moduledoc """
-  Remove the table of `MyHiFi.Radio.Station`.
+  Remove the table of `PiFi.Radio.Station`.
 
-  Every playable thing is a `MyHiFi.Playback.Item` now, and internet radio reads the
-  catalogue. `MyHiFi.Radio.CarryFavourites` runs before this one, so the stations that
+  Every playable thing is a `PiFi.Playback.Item` now, and internet radio reads the
+  catalogue. `PiFi.Radio.CarryFavourites` runs before this one, so the stations that
   a person marked are already items.
 
   Ash writes no migration for a resource that a release removes, so this one is by

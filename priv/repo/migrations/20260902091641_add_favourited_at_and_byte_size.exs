@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddFavouritedAtAndByteSize do
+defmodule PiFi.Repo.Migrations.AddFavouritedAtAndByteSize do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

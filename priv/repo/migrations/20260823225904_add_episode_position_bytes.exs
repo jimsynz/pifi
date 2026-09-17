@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddEpisodePositionBytes do
+defmodule PiFi.Repo.Migrations.AddEpisodePositionBytes do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

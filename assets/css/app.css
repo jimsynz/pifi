@@ -5,12 +5,12 @@
 @plugin "../vendor/heroicons";
 @plugin "../vendor/brand";
 @source "../js";
-@source "../../lib/my_hi_fi_web";
+@source "../../lib/pifi_web";
 
 /* Cinder writes some utilities in its own templates, and `invisible` and `flex-1` are
    two of them. Tailwind gives no CSS for a class that it does not read, so the "0
    active" mark showed at zero and a filter input did not fill its panel. The themes of
-   Cinder are not read, because `MyHiFiWeb.CinderTheme` takes the place of each one. */
+   Cinder are not read, because `PiFiWeb.CinderTheme` takes the place of each one. */
 @source "../../deps/cinder/lib";
 @source not "../../deps/cinder/lib/cinder/themes";
 

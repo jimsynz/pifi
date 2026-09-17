@@ -1,6 +1,6 @@
-# MyHiFi
+# PiFi
 
-MyHiFi is Nerves firmware for a home audio player. It connects to a home stereo
+PiFi is Nerves firmware for a home audio player. It connects to a home stereo
 and behaves like a normal stereo component. The code is the specification: read
 the moduledoc of the part that you change before you make a design decision.
 
@@ -8,9 +8,9 @@ Licence: Apache-2.0.
 
 ## What you must know
 
-- **Target board.** Raspberry Pi Zero 2 W, Nerves target `myhifi_rpi0_2`. That
+- **Target board.** Raspberry Pi Zero 2 W, Nerves target `pifi_rpi0_2`. That
   target is a custom system, not the stock `rpi0_2`. See
-  <https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2>. The stock system
+  <https://harton.dev/mypihifiguy/nerves_system_pifi_rpi0_2>. The stock system
   holds no USB host stack and no USB audio driver, so a USB DAC cannot work on
   it, and it reserves 320 MB of the 512 MB for graphics. The board has 4
   cores and one USB data port. It holds 512 MB of RAM, and Linux sees 363.9 MB of
@@ -25,7 +25,7 @@ Licence: Apache-2.0.
   handles that badly. A 440 Hz tone straight to `aplay` on 2026-08-24 was rough at
   44100 Hz at two levels, and clean at 24000 Hz and at 48000 Hz. `rate48` of
   `rootfs_overlay/etc/asound.conf` therefore holds the card at 48000 Hz, and
-  `MyHiFi.Output.Alsa.sink_spec/1` names it in the place of `plughw`. **Do not tell
+  `PiFi.Output.Alsa.sink_spec/1` names it in the place of `plughw`. **Do not tell
   `aplay` to open the card at the rate of the decoder.** The DAC accepts 44100 Hz, so
   nothing below that layer will choose to convert. Almost every podcast holds 44100
   Hz MP3, and both RNZ streams hold 24000 Hz, which is why radio never showed this.
@@ -52,7 +52,7 @@ Licence: Apache-2.0.
   `ecto_sqlite3` needs version 3. See section 6.4 of the specification for why
   the override is safe.
 - **HLS is in scope for version 1**, and the playlist decides the pipeline, not
-  the station record. `MyHiFi.Player.Hls` reads the playlist and gives three
+  the station record. `PiFi.Player.Hls` reads the playlist and gives three
   facts: the transport, the container, and the codec. Four traps, and each one
   cost a build to find.
   - **Do not use `Membrane.HLS.SourceBin`.** It reads a variant stream as MPEG-TS
@@ -64,16 +64,16 @@ Licence: Apache-2.0.
   - **A packed audio segment starts with ID3v2 tags, and a segment can hold more
     than one.** The stations of one network send two: a timestamp and the title of
     the track. `Membrane.AAC.Parser` stops with `:invalid_adts_header` on any tag
-    that reaches it. `MyHiFi.Player.PackedAudio` removes them all.
+    that reaches it. `PiFi.Player.PackedAudio` removes them all.
   - **8 stations send MP3 inside MPEG-TS**, with the codec `mp4a.40.34`, so HLS is
     not only AAC. `membrane_mp3_mad_plugin` then stops at the first frame, because
     it asks for the time of a frame before it holds a format. A timestamp on the
-    buffer is what starts that, so `MyHiFi.Player.MpegAudio` removes the
-    timestamp. `MyHiFi.Player.HttpSource` sets none, which is why a Shoutcast MP3
+    buffer is what starts that, so `PiFi.Player.MpegAudio` removes the
+    timestamp. `PiFi.Player.HttpSource` sets none, which is why a Shoutcast MP3
     stream never showed this.
 - **`kim_hls` names `req` as a test dependency of its own**, so
   `HLS.Storage.Req` exists in a build or does not, and the answer depends on the
-  order that the dependencies compile in. `MyHiFi.Player.Hls.Storage` is ours, and
+  order that the dependencies compile in. `PiFi.Player.Hls.Storage` is ours, and
   it holds the timeouts of this firmware. Do not use the one from `kim_hls`.
 - **Two traps of SQLite, and each one cost a debugging cycle.** `ago/2` gives no
   answer on AshSqlite: a filter on it matches no row, and a calculation of it gives
@@ -88,7 +88,7 @@ Licence: Apache-2.0.
 - **NBPR publishes no artefact for this system, so every build makes one.** NBPR
   publishes for the stock Nerves systems, and the cache key of an artefact holds
   the name and the version of the system, so `mix nbpr.fetch` on
-  `myhifi_rpi0_2` always builds from source. A source build needs a Buildroot
+  `pifi_rpi0_2` always builds from source. A source build needs a Buildroot
   backend. A laptop with `docker` gets one by itself. The CI container holds no
   `docker` and no `podman`, so `ci.yml` names `nbpr_source_build: true`, and the
   shared workflow then sets `NBPR_BUILD_BACKEND=shell` and installs the four
@@ -121,18 +121,18 @@ Licence: Apache-2.0.
     socket upgrade answers 401 with no body and no reason. Read the length of the
     key on the device before you look anywhere else.
 - **A skip moves the reader, and it does not start a pipeline again.**
-  `MyHiFi.Output.APlaySink` starts `aplay` for each pipeline, `aplay` opens the sound
+  `PiFi.Output.APlaySink` starts `aplay` for each pipeline, `aplay` opens the sound
   card, and the card is the part of this board that fails. A start also holds a silence
   of about one second, and a skip is a control that a person presses again and again.
-  The player therefore calls the pipeline and `MyHiFi.Player.FileSource` moves the byte
-  that it reads. **A skip needs no bitrate either:** `MyHiFi.Player.Mp3Frame` walks the
-  frame headers and `MyHiFi.Player.Skip` measures the span that it lands on, because 11
+  The player therefore calls the pipeline and `PiFi.Player.FileSource` moves the byte
+  that it reads. **A skip needs no bitrate either:** `PiFi.Player.Mp3Frame` walks the
+  frame headers and `PiFi.Player.Skip` measures the span that it lands on, because 11
   of 46 real episodes hold more than one bitrate.
-  - **The shape of a frame gives two strategies, and `MyHiFi.Player.Skip.place/5`
+  - **The shape of a frame gives two strategies, and `PiFi.Player.Skip.place/5`
     chooses by the codec.** MP3 and AAC name the length of each frame, so this
     firmware walks the frames and sums the time. **A FLAC header names neither a
     length nor a bitrate**: it names the number of the frame, or of the first sample
-    of it, so `MyHiFi.Player.FlacFrame` bisects the file instead and reports a time
+    of it, so `PiFi.Player.FlacFrame` bisects the file instead and reports a time
     that is exact and not measured.
   - **A skip of FLAC that lands one byte inside a frame plays nothing at all.** A
     measurement on the host on 2026-09-11 gave
@@ -145,9 +145,9 @@ Licence: Apache-2.0.
     `flac --decode --stdout --silent -` gave every remaining sample. Each frame
     carries its own rate, channel count and width, so the program needs neither the
     `fLaC` marker nor the metadata again.
-  - `MyHiFi.Player.Skip.frames/1` is the one list of the codecs that this firmware
-    reads the frames of. `MyHiFi.Player.skippable?/1` and
-    `MyHiFi.Player.FileSource.rewound/3` both read it, so a new codec needs a reader
+  - `PiFi.Player.Skip.frames/1` is the one list of the codecs that this firmware
+    reads the frames of. `PiFi.Player.skippable?/1` and
+    `PiFi.Player.FileSource.rewound/3` both read it, so a new codec needs a reader
     and one line.
 - **A peripheral renders itself.** Do not build a central renderer and do not
   send pixels or frames to a screen. Send it typed events. A 128 by 64
@@ -156,16 +156,16 @@ Licence: Apache-2.0.
 - **A peripheral is out of use until a person says that the part is wired.** The
   same image runs on a board with a screen and on a board with none, and a bus
   with nothing on it gives an error at each start. `config/target.exs` names what
-  this firmware knows, and `MyHiFi.Peripheral.enabled?/1` reads the settings for
-  what the board holds. This is the opposite of `MyHiFi.Source.enabled?/1`, and
-  the hardware is the reason. `MyHiFi.Peripheral.Supervisor` starts with no child,
+  this firmware knows, and `PiFi.Peripheral.enabled?/1` reads the settings for
+  what the board holds. This is the opposite of `PiFi.Source.enabled?/1`, and
+  the hardware is the reason. `PiFi.Peripheral.Supervisor` starts with no child,
   because a child that fails to start stops the start of a whole supervisor and a
   screen must never keep the music from playing.
 - **Screens and controls share one behaviour.** Do not split them. On the PiTFT
   the ILI9341 screen and the STMPE610 touch controller share SPI0, so one process
-  must own the bus. `MyHiFi.Peripheral.PiTft` draws, and it publishes what a person
+  must own the bus. `PiFi.Peripheral.PiTft` draws, and it publishes what a person
   presses. A peripheral that reads hardware names
-  `c:MyHiFi.Peripheral.handle_info/2`, because a GPIO line speaks to the process
+  `c:PiFi.Peripheral.handle_info/2`, because a GPIO line speaks to the process
   that holds it and not to a topic.
 - **The backlight of the PiTFT is on GPIO 2 of the STMPE610, and the four buttons
   are on lines 18, 27, 22 and 23.** Pin 18 of the Raspberry Pi reaches the light on
@@ -175,13 +175,13 @@ Licence: Apache-2.0.
   therefore changed nothing, standby slept the panel under a light that stayed on,
   and a panel that sleeps shows white. **Line 18 is a button.** Read the order of the
   row one button at a time, and read it from
-  `MyHiFi.Event.Input.ButtonPressed`: four presses in one go give a list of events
+  `PiFi.Event.Input.ButtonPressed`: four presses in one go give a list of events
   that holds no order of place, and two builds named the wrong row from such a list.
-  `MyHiFi.DeviceUi` decides what a place in the row means, and the driver names the
+  `PiFi.DeviceUi` decides what a place in the row means, and the driver names the
   place alone.
 - **Emerge draws the device screen, through its raster part alone.**
-  `MyHiFi.Screen.Renderer` starts one headless renderer for each screen, and
-  `MyHiFi.Peripheral.PiTft` writes the pixels to the ILI9341 over SPI. Do not add a
+  `PiFi.Screen.Renderer` starts one headless renderer for each screen, and
+  `PiFi.Peripheral.PiTft` writes the pixels to the ILI9341 over SPI. Do not add a
   display server: this firmware drives no window and no DRM device. Five traps, and
   each one costs a build to find.
   - **`mix.exs` sets `TARGET_VENDOR` to `"unknown"`, and it must stay that way.**
@@ -208,47 +208,56 @@ Licence: Apache-2.0.
     `EmergeSkia.render_to_pixels/2` took a tree in 0.3 and reads the last frame of a
     running renderer now. `EmergeSkia.start/1` gives a renderer, each
     `EmergeSkia.upload_tree/2` sends one frame to the process that started it, and a
-    frame arrives for an unchanged tree as well. `MyHiFi.Screen.Renderer` holds that
-    exchange for a screen and `MyHiFi.Test.Drawing` holds it for a test.
+    frame arrives for an unchanged tree as well. `PiFi.Screen.Renderer` holds that
+    exchange for a screen and `PiFi.Test.Drawing` holds it for a test.
   - **Emerge refuses a runtime path by its extension, and it reads no byte to
     decide.** The list that it holds by default names `.png`, `.jpg` and five other
     types, and a name of the cache carries no type, so a thumbnail is
     `<hash>.thumbnail`. Emerge drew the mark that it draws for a picture that it
     cannot read, and the screen showed that in the place of the artwork.
-    `MyHiFi.Screen.Renderer.assets/0` names the two that this firmware gives it:
+    `PiFi.Screen.Renderer.assets/0` names the two that this firmware gives it:
     `.thumbnail` for the cache, and `.png` for the picture that the firmware ships
     for an idle screen.
   - **The idle screen of a device that a person gave no picture draws the mark of the
     product.** `priv/splash` holds one PNG for each screen, named
-    `<product>-<width>x<height>.png`, and `MyHiFi.Device.Identity.shipped_splash/1`
+    `<product>-<width>x<height>.png`, and `PiFi.Device.Identity.shipped_splash/1`
     reads it. **The file is the size of the screen**: another size costs a scale on each
     draw, and a screen that had to crop would lose the ends of the waveform of that
     artwork. A new screen therefore needs a file and no code.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
-  its IP address and on more than one mDNS name. `MyHiFi.Application` calls
-  `MyHiFi.DeviceSecrets.put/1` before it starts the endpoint, which reads the
+  its IP address and on more than one mDNS name. `PiFi.Application` calls
+  `PiFi.DeviceSecrets.put/1` before it starts the endpoint, which reads the
   endpoint secret and the LiveView signing salt from `/root` and writes each one
   on the first boot. That runs for a target build in any `MIX_ENV`, and never on
   the host. A signing salt is not a secret, and each place that uses one derives
   the key from the salt and the endpoint secret. The salt of a device is therefore
-  defence in depth, and the session cookie salt of `MyHiFiWeb.Endpoint` stays
+  defence in depth, and the session cookie salt of `PiFiWeb.Endpoint` stays
   fixed, because a module attribute cannot hold a value for each device. Do not restore `force_ssl`, and
   do not make a boot depend on an environment variable: a device has nothing to
   set one.
 - **Setup mode and normal operation cannot happen together.** The Wi-Fi wizard
   serves on port 80, and its captive portal needs port 80 as well.
-  `MyHiFiWeb.Endpoint` uses the same port. `MyHiFi.Application` therefore starts
-  the wizard or the web interface, and never both. See `MyHiFi.Setup` and section
+  `PiFiWeb.Endpoint` uses the same port. `PiFi.Application` therefore starts
+  the wizard or the web interface, and never both. See `PiFi.Setup` and section
   14 of the spec.
 - **Three keys of `Nerves.Runtime.KV` hold what this device is called and what it
-  looks like, and `fwup` provisions all three.** `myhifi_device_name` is what a person
-  called this device. `myhifi_product_name` is what the product is called, which every
-  unnamed device answers to, and `myhifi_splash_name` names the artwork in
+  looks like, and `fwup` provisions all three.** `pifi_device_name` is what a person
+  called this device. `pifi_product_name` is what the product is called, which every
+  unnamed device answers to, and `pifi_splash_name` names the artwork in
   `priv/splash`. **One firmware therefore serves several products**: a person who makes
   an SD card for another brand writes two keys, and neither the name nor the picture
   needs a build of its own. `provisioning.conf` of the Nerves system is where such a
   line goes, beside the serial number.
+- **A board that was made when the product was called MyHiFi holds the old keys, and
+  `PiFi.Device.Identity` reads both.** No upgrade task runs `uboot_clearenv`, so the
+  old block survives a new firmware. A read asks for the new key and uses
+  `myhifi_device_name` and its two neighbours when the new one is absent. **A write
+  always uses the new key**, so the old one stays in the block, unread, until a person
+  writes a card. `PiFi.Migrator.carry_over/0` does the same for the database: it moves
+  `/root/my_hi_fi.db` and its `-wal` and `-shm` files to `/root/pifi.db` before the
+  repo opens, because the adapter makes an empty database when it finds no file and a
+  person would meet an empty catalogue.
 - **The name of the device lives in `Nerves.Runtime.KV`, and not in the settings
   table.** The wizard above starts before the Repo does, and the access point carries
   that name, so a name in the database is unreadable in the one mode that needs it.
@@ -258,16 +267,16 @@ Licence: Apache-2.0.
   hostname at the boot, and nothing can change it after that, so
   `MdnsLite.set_hosts/1` puts the name of the person first and the device answers for
   both. The picture of the idle screen is not in that block: it is bytes, so
-  `MyHiFi.Artwork` holds it under the hash of those bytes and each screen reads the
-  thumbnail of it. See `MyHiFi.Device.Identity`.
+  `PiFi.Artwork` holds it under the hash of those bytes and each screen reads the
+  thumbnail of it. See `PiFi.Device.Identity`.
 - **A target-only module must hold no reference on the host.** `vintage_net` and
   `vintage_net_wizard` are target dependencies, so the host build breaks the
   compiler check. Wrap the module in `if Mix.target() != :host do`, as
-  `MyHiFi.Setup.Monitor` does, or branch the function bodies, as `MyHiFi.Setup`
+  `PiFi.Setup.Monitor` does, or branch the function bodies, as `PiFi.Setup`
   does. `config/target.exs` cannot solve this, and neither can an empty list in
   `Config`.
-- **The firmware migrates itself.** `MyHiFi.Application` calls
-  `MyHiFi.Migrator.migrate/0` before it starts the supervision tree, and not as a
+- **The firmware migrates itself.** `PiFi.Application` calls
+  `PiFi.Migrator.migrate/0` before it starts the supervision tree, and not as a
   child of it, because Oban queries its own tables as soon as it starts. Like the
   secret, this runs for a target build in any `MIX_ENV` and never on the host, so
   development and test keep using `mix ash.setup`.
@@ -280,14 +289,14 @@ Licence: Apache-2.0.
   file, so this device writes it one time and then reads it. That is what makes the
   audio correct and the resume exact: an episode arrives faster than its own audio,
   and the demand of Membrane cannot pace a socket that Finch owns. See
-  `MyHiFi.Player.Download` and section 13 of the specification.
+  `PiFi.Player.Download` and section 13 of the specification.
 
 ## Structure
 
 The software has four layers. They talk through Phoenix PubSub.
 
 1. **Sources** find audio and give a playable stream. A source implements
-   `MyHiFi.Source`. The first source is internet radio. **A source names its own
+   `PiFi.Source`. The first source is internet radio. **A source names its own
    settings**, with `settings/0` and `settings_actions/0`, and it checks its own
    values in `put_settings/1`. The settings page draws that list and holds no
    knowledge of any source. **A source also names how its items read and in what
@@ -295,19 +304,19 @@ The software has four layers. They talk through Phoenix PubSub.
    episodes by date with the newest first, and a page that held either rule listed
    every album alphabetically. It names typed facts and never text, because one fact
    reads as "44m left" in a browser and as "44 min" on a screen of 240 pixels. A person can also take a source out of use, and
-   `MyHiFi.Playback.enable_source/2` is the one command for that.
+   `PiFi.Playback.enable_source/2` is the one command for that.
 2. **The player** runs the Membrane pipeline and holds the playback state.
-3. **Outputs** send samples to hardware. An output implements `MyHiFi.Output`.
+3. **Outputs** send samples to hardware. An output implements `PiFi.Output`.
 4. **Peripherals** own a piece of hardware. A peripheral implements
-   `MyHiFi.Peripheral`. A screen, a knob, and a touch panel are all peripherals,
+   `PiFi.Peripheral`. A screen, a knob, and a touch panel are all peripherals,
    and they share one behaviour. A peripheral gets typed events, it owns its
    layout, fonts, and scroll window, and it publishes what the person does.
-5. **`MyHiFi.DeviceUi`** holds the navigation state for the device screen. It
+5. **`PiFi.DeviceUi`** holds the navigation state for the device screen. It
    receives the input events, and it publishes the view events and the hints. It
    owns the selected index and the list, because the knob needs a detent count
-   and only `MyHiFi.DeviceUi` knows the length of the list.
+   and only `PiFi.DeviceUi` knows the length of the list.
 
-Every message is a struct from `MyHiFi.Event`, on one of five topics: `:player`,
+Every message is a struct from `PiFi.Event`, on one of five topics: `:player`,
 `:source`, `:view`, `:input`, and `:hint`. Never send a bare tuple or a map. A part
 never calls another part directly. A peripheral declares its topics with
 `subscriptions/0`, so a knob does not wake once a second for a progress event.
@@ -332,7 +341,7 @@ background work.
   of the behaviour is that the rest of the firmware never changes. A person must
   be able to add an SSD1306 screen, or a different DAC, or a new music service,
   without a change to the player or to the user interface.
-- A Hex package does not always work on `myhifi_rpi0_2`. Check the Nerves
+- A Hex package does not always work on `pifi_rpi0_2`. Check the Nerves
   system, and
   look for native code, before you add the package.
 - **The code is the specification, and this repository holds no `docs/`.** A

@@ -1,4 +1,4 @@
-defmodule MyHiFi.MixProject do
+defmodule PiFi.MixProject do
   use Mix.Project
 
   # Bundlex reads the build target from these four variables when `CROSSCOMPILE`
@@ -12,7 +12,7 @@ defmodule MyHiFi.MixProject do
   # value before the dependencies compile. `mix.exs` runs first in each mix task.
   # Add an entry for each new target.
   @bundlex_targets %{
-    myhifi_rpi0_2: %{
+    pifi_rpi0_2: %{
       "TARGET_ARCH" => "aarch64",
       # `rustler_precompiled` reads these four as well, and it then looks for a NIF
       # whose name holds the vendor. `emerge` publishes
@@ -32,7 +32,7 @@ defmodule MyHiFi.MixProject do
     :error -> :ok
   end
 
-  @app :my_hi_fi
+  @app :pifi
   @version "0.1.0"
   # This product ships one board, and the list holds that board alone. The
   # template names eleven stock targets, and no build of this firmware ever used
@@ -42,7 +42,7 @@ defmodule MyHiFi.MixProject do
   # that no person read. `x86_64` is absent for a reason of its own: that system
   # uses musl, and libvorbis does not build against musl, so `nbpr_vorbis_tools`
   # cannot serve it.
-  @all_targets [:myhifi_rpi0_2]
+  @all_targets [:pifi_rpi0_2]
 
   def project do
     [
@@ -65,7 +65,7 @@ defmodule MyHiFi.MixProject do
   def application do
     [
       extra_applications: [:logger, :runtime_tools, :os_mon],
-      mod: {MyHiFi.Application, []}
+      mod: {PiFi.Application, []}
     ]
   end
 
@@ -81,7 +81,7 @@ defmodule MyHiFi.MixProject do
       # build.
       {:nbpr, "~> 0.3"},
       # Membrane holds no decoder for Vorbis or for FLAC, so
-      # `MyHiFi.Player.PortDecoder` drives a program instead. NBPR gives the
+      # `PiFi.Player.PortDecoder` drives a program instead. NBPR gives the
       # program for the target, and it ships a binary and no header file, which is
       # all that a port needs. See section 6.1 of the specification.
       #
@@ -98,7 +98,7 @@ defmodule MyHiFi.MixProject do
       {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.8"},
       {:ash_sqlite, "~> 0.2"},
-      # `MyHiFi.Cache` models the cache on disk with this. It is not on Hex, and its
+      # `PiFi.Cache` models the cache on disk with this. It is not on Hex, and its
       # author says that the API iterates, so this names a reference and pins it in
       # the way that `vintage_net_wizard` is pinned. A new reference therefore needs a
       # read of what changed.
@@ -112,8 +112,8 @@ defmodule MyHiFi.MixProject do
       # sort, the page controls and the URL state. It is pure Elixir, and so is
       # `ash_phoenix`, which it needs.
       {:cinder, "~> 0.16"},
-      # `MyHiFi.Peripheral.PiTft` owns the SPI bus of the screen and the data line
-      # that goes with it. `MyHiFi.Peripheral.Battery` owns the I2C bus of the fuel
+      # `PiFi.Peripheral.PiTft` owns the SPI bus of the screen and the data line
+      # that goes with it. `PiFi.Peripheral.Battery` owns the I2C bus of the fuel
       # gauge, and `max1704x` and `wafer` both name `circuits_i2c` as optional, so this
       # is the project that must ask for it.
       {:circuits_gpio, "~> 2.1"},
@@ -131,7 +131,7 @@ defmodule MyHiFi.MixProject do
       #
       # Remove it when a `ratio` release accepts version 3.
       {:decimal, "~> 3.0", override: true},
-      # `MyHiFi.Peripheral.PiTft` draws the device screen with this. It holds a
+      # `PiFi.Peripheral.PiTft` draws the device screen with this. It holds a
       # Rust NIF that lays a tree out and draws it with Skia, and the firmware
       # calls the raster part of it. That part opens no window and it drives no
       # display: it gives the pixels back, and the peripheral writes them to the
@@ -143,7 +143,7 @@ defmodule MyHiFi.MixProject do
       {:emerge, "~> 0.4.0-beta.1"},
       # The fuel gauge of the UPS-Lite pHAT. It reads the charge of the cell over I2C,
       # and it holds no native code of its own: `wafer` is the layer that talks to
-      # `circuits_i2c`. See `MyHiFi.Peripheral.Battery`.
+      # `circuits_i2c`. See `PiFi.Peripheral.Battery`.
       {:max1704x, "~> 0.1.1"},
       {:membrane_aac_fdk_plugin, "~> 0.18"},
       {:membrane_aac_plugin, "~> 0.19"},
@@ -173,7 +173,7 @@ defmodule MyHiFi.MixProject do
       # change there cannot take it away.
       {:req, "~> 0.5"},
       {:ring_logger, "~> 0.11.0"},
-      # `MyHiFi.Podcast.Feed.Parser` reads a podcast feed with this. It is pure
+      # `PiFi.Podcast.Feed.Parser` reads a podcast feed with this. It is pure
       # Elixir and it holds no dependency of its own, so it needs nothing from the
       # Nerves system. `Saxy.Partial` takes one chunk at a time, so a 13 MB feed
       # never arrives in memory as one binary.
@@ -201,10 +201,10 @@ defmodule MyHiFi.MixProject do
       # itself, so naming them here means that a change there cannot take them
       # away. `req` is named for the same reason.
       #
-      # `MyHiFi.Podcast.Index` asks `nerves_time` whether the clock is right,
+      # `PiFi.Podcast.Index` asks `nerves_time` whether the clock is right,
       # because the Podcast Index holds a window of 3 minutes and a board with no
-      # battery starts in 1970. `MyHiFi.Device.Network.Report` and
-      # `MyHiFi.Setup.Monitor` read `vintage_net`.
+      # battery starts in 1970. `PiFi.Device.Network.Report` and
+      # `PiFi.Setup.Monitor` read `vintage_net`.
       {:nerves_time, "~> 0.4", targets: @all_targets},
       {:vintage_net, "~> 0.13", targets: @all_targets},
       # Release 0.4.17 is from 2024-06-05, and it needs plug_cowboy. Each cowlib
@@ -219,11 +219,11 @@ defmodule MyHiFi.MixProject do
       # so a USB DAC cannot work on it. It also gives 192 MB to the GPU and
       # reserves 128 MB of CMA, and this device drives no display over HDMI. See
       # the README of the system.
-      {:nerves_system_myhifi_rpi0_2,
-       git: "https://harton.dev/mypihifiguy/nerves_system_myhifi_rpi0_2.git",
-       tag: "v0.1.2",
+      {:nerves_system_pifi_rpi0_2,
+       git: "https://harton.dev/mypihifiguy/nerves_system_pifi_rpi0_2.git",
+       tag: "v0.1.3",
        runtime: false,
-       targets: :myhifi_rpi0_2,
+       targets: :pifi_rpi0_2,
        nerves: [compile: true]},
 
       # Dev/test deps.
@@ -263,8 +263,8 @@ defmodule MyHiFi.MixProject do
   defp aliases() do
     [
       "assets.setup": ["esbuild.install --if-missing", "tailwind.install --if-missing"],
-      "assets.build": ["compile", "esbuild my_hi_fi", "tailwind my_hi_fi"],
-      "assets.deploy": ["esbuild my_hi_fi --minify", "tailwind my_hi_fi --minify", "phx.digest"],
+      "assets.build": ["compile", "esbuild pifi", "tailwind pifi"],
+      "assets.deploy": ["esbuild pifi --minify", "tailwind pifi --minify", "phx.digest"],
       setup: ["deps.get", "assets.setup", "assets.build"],
       test: ["ash.setup --quiet", "test"],
       credo: ["credo --strict"],

@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddItemBrowseIndex do
+defmodule PiFi.Repo.Migrations.AddItemBrowseIndex do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

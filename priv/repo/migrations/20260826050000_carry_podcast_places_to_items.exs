@@ -1,12 +1,12 @@
-defmodule MyHiFi.Repo.Migrations.CarryPodcastPlacesToItems do
+defmodule PiFi.Repo.Migrations.CarryPodcastPlacesToItems do
   @moduledoc """
-  Keep the subscriptions and the places of a person. See `MyHiFi.Podcast.CarryPlaces`.
+  Keep the subscriptions and the places of a person. See `PiFi.Podcast.CarryPlaces`.
   """
 
   use Ecto.Migration
 
   def up do
-    _counts = MyHiFi.Podcast.CarryPlaces.run(repo())
+    _counts = PiFi.Podcast.CarryPlaces.run(repo())
     :ok
   end
 

@@ -1,21 +1,21 @@
-defmodule MyHiFi.Test.PlayingPipeline do
+defmodule PiFi.Test.PlayingPipeline do
   @moduledoc """
   A pipeline that says that the audio began, and then keeps playing.
 
-  `MyHiFi.Player.Pipeline` holds a sink, the sink holds `aplay`, and `aplay` holds a
+  `PiFi.Player.Pipeline` holds a sink, the sink holds `aplay`, and `aplay` holds a
   sound card, so a test of the controls of the player cannot use it. This holds no
-  element at all, and it sends the messages of the protocol that `MyHiFi.Player`
+  element at all, and it sends the messages of the protocol that `PiFi.Player`
   reads.
 
-  `MyHiFi.Test.EndingPipeline` ends the track at once. This one does not, so a test
+  `PiFi.Test.EndingPipeline` ends the track at once. This one does not, so a test
   can pause it, move inside it, and stop it.
 
-  A skip answers in the way that `MyHiFi.Player.FileSource` does: it reports the place
+  A skip answers in the way that `PiFi.Player.FileSource` does: it reports the place
   that it reached. It reports the time that the caller asked for, and `moves/1` gives
   it another answer, because a real skip reports the time that it measured and not the
   time of the request.
 
-  Use it with `MyHiFi.Test.PlayingPipeline.use_it/0`.
+  Use it with `PiFi.Test.PlayingPipeline.use_it/0`.
   """
 
   use Membrane.Pipeline
@@ -23,12 +23,12 @@ defmodule MyHiFi.Test.PlayingPipeline do
   @doc "Make this the pipeline of the player for one test."
   @spec use_it() :: :ok
   def use_it do
-    Application.put_env(:my_hi_fi, :pipeline, __MODULE__)
+    Application.put_env(:pifi, :pipeline, __MODULE__)
 
     ExUnit.Callbacks.on_exit(fn ->
-      Application.delete_env(:my_hi_fi, :pipeline)
-      Application.delete_env(:my_hi_fi, :playing_pipeline_moves)
-      Application.delete_env(:my_hi_fi, :playing_pipeline_fails)
+      Application.delete_env(:pifi, :pipeline)
+      Application.delete_env(:pifi, :playing_pipeline_moves)
+      Application.delete_env(:pifi, :playing_pipeline_fails)
     end)
   end
 
@@ -39,15 +39,15 @@ defmodule MyHiFi.Test.PlayingPipeline do
   short wait. `fails(false)` gives a pipeline that plays.
   """
   @spec fails(boolean()) :: :ok
-  def fails(fails?), do: Application.put_env(:my_hi_fi, :playing_pipeline_fails, fails?)
+  def fails(fails?), do: Application.put_env(:pifi, :playing_pipeline_fails, fails?)
 
   @doc "The time that the next skip reports, whatever the caller asks for."
   @spec moves(integer()) :: :ok
-  def moves(ms), do: Application.put_env(:my_hi_fi, :playing_pipeline_moves, ms)
+  def moves(ms), do: Application.put_env(:pifi, :playing_pipeline_moves, ms)
 
   @impl Membrane.Pipeline
   def handle_init(_ctx, options) do
-    if Application.get_env(:my_hi_fi, :playing_pipeline_fails, false) do
+    if Application.get_env(:pifi, :playing_pipeline_fails, false) do
       # A pipeline that dies inside `handle_init/2` never starts at all, and the player
       # then reads a start that failed. A lost stream is not that: the pipeline plays,
       # and it dies after. This one therefore dies from its own message.
@@ -75,7 +75,7 @@ defmodule MyHiFi.Test.PlayingPipeline do
 
   @impl Membrane.Pipeline
   def handle_call({:skip, ms}, _ctx, state) do
-    moved = Application.get_env(:my_hi_fi, :playing_pipeline_moves, ms)
+    moved = Application.get_env(:pifi, :playing_pipeline_moves, ms)
     byte = state.byte + moved
 
     send(state.parent, {:pipeline_skipped, self(), %{byte: byte, ms: moved}})

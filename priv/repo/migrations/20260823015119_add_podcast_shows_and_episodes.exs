@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddPodcastShowsAndEpisodes do
+defmodule PiFi.Repo.Migrations.AddPodcastShowsAndEpisodes do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

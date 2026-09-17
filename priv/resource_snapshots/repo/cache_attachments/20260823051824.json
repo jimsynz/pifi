@@ -78,7 +78,7 @@
   ],
   "table": "cache_attachments",
   "hash": "A700D855EE4958E5B3321AF0CDA9647ABCD31ECB39FC72F8C0E60DA3CF5E269B",
-  "repo": "Elixir.MyHiFi.Repo",
+  "repo": "Elixir.PiFi.Repo",
   "multitenancy": {
     "global": null,
     "attribute": null,

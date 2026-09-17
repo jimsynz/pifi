@@ -123,7 +123,7 @@
   ],
   "table": "podcast_shows",
   "hash": "49EADCE50812AB92FA45BF6AAA08FE39088F2BBE5E3C781029A5B7BB33249F4A",
-  "repo": "Elixir.MyHiFi.Repo",
+  "repo": "Elixir.PiFi.Repo",
   "multitenancy": {
     "global": null,
     "attribute": null,

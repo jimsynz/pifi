@@ -6,7 +6,7 @@
 // on a panel in a colour of its own.
 //
 // Each file of `brand/` gives one class. `brand/jellyfin.svg` gives `brand-jellyfin`,
-// and `MyHiFiWeb.CoreComponents` names that class for the `:jellyfin` icon.
+// and `PiFiWeb.CoreComponents` names that class for the `:jellyfin` icon.
 //
 // **The marks belong to the projects that made them, and each one carries its licence
 // in a comment of its own file.** The Jellyfin icon is CC-BY-SA-4.0, which is not the

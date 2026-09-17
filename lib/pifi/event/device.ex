@@ -1,0 +1,136 @@
+defmodule PiFi.Event.Device do
+  @moduledoc """
+  What the hardware is doing, on the `:device` topic.
+
+  A DAC arrives, Wi-Fi connects, a download fills the card, and a battery runs down. No
+  person changes any of those. `IdentityChanged` is the one event here that a person
+  starts, and it sits with them because the name of a device is what the hardware
+  answers to on the network. `PiFiWeb.SettingsLive` drew three of these reports on
+  an interval before,
+  and an interval reads the same answer again and again. `PiFi.Device.Monitor` owns
+  the three sources of truth instead, and it publishes one of these when the answer
+  changes.
+
+  Each event carries the whole report, and not a mark that says to read it again.
+  `PiFi.Playback.output!/0` costs several reads of the settings, and the web page and
+  the screen of the device both want the answer, so one process reads it one time.
+  """
+
+  defmodule BatteryChanged do
+    @moduledoc """
+    The charge of the cell moved.
+
+    `percent` is what the fuel gauge reports, from 0 to 100. `volts` is the voltage of
+    the cell, which a person rarely wants and which says what a percentage cannot: a
+    gauge that never saw this cell reports a percentage that is wrong until it learns,
+    and the voltage is right from the first read.
+
+    `low?` says that the cell reached the point where a person must charge it. **The
+    threshold is here and not in each reader**, because three parts answer it: the device
+    enters standby, the activity light flashes, and the screen says to charge it. Three
+    copies of one number would drift. `PiFi.Peripheral.Battery.low_percent/0` holds it,
+    and a person sets it.
+
+    **A device on the mains publishes none of these**, because it holds no gauge. A
+    reader must therefore draw nothing until one arrives, and never a battery at 0.
+    See `PiFi.Peripheral.Battery`.
+    """
+
+    @type t :: %__MODULE__{percent: 0..100, volts: float(), low?: boolean()}
+
+    defstruct [:percent, :volts, low?: false]
+  end
+
+  defmodule SafeToSwitchOff do
+    @moduledoc """
+    The device stopped writing to the card, so a hand can reach the switch.
+
+    A device that runs on a battery holds no way to turn its own power off, so a person
+    turns it off. This says that the moment is now: the background work is paused, what
+    the database held is on the card, and the journal of the file system is committed.
+
+    `safe?` is false while the device still writes, and it is false again the moment
+    that a person wakes it.
+
+    **A device that never prepares publishes none of these**, so a reader draws nothing
+    and never says that a device is safe when no part of it checked. See
+    `PiFi.SwitchOff`.
+    """
+
+    @type t :: %__MODULE__{safe?: boolean()}
+
+    defstruct safe?: false
+  end
+
+  defmodule IdentityChanged do
+    @moduledoc """
+    A person named the device, or gave it a picture.
+
+    `name` is what each screen shows when the player plays nothing, and what each page
+    of the web interface carries in its title.
+
+    `splash_path` is the address of the picture that a screen draws at that moment, and
+    it is `nil` for a device that holds none. It is an address of the web interface and
+    not a path of the disk, because the page and the screen both read it: a page asks
+    for it, and a screen turns it into the path of a thumbnail. See
+    `PiFi.Device.Identity`.
+    """
+
+    @type t :: %__MODULE__{name: String.t(), splash_path: String.t() | nil}
+
+    defstruct [:name, :splash_path]
+  end
+
+  defmodule NetworkChanged do
+    @moduledoc """
+    An interface came up, went down, or took an address.
+
+    `interfaces` is what `PiFi.Device.network!/0` gives.
+    """
+
+    @type t :: %__MODULE__{interfaces: [map()]}
+
+    defstruct interfaces: []
+  end
+
+  defmodule OutputChanged do
+    @moduledoc """
+    A sound card arrived or went, or a person chose another one.
+
+    The fields are what `PiFi.Playback.output!/0` gives. `selected` is the choice of
+    a person, and `in_use` is the card that the player plays through. The two are
+    different when the chosen card is absent.
+    """
+
+    @type t :: %__MODULE__{devices: [map()], selected: String.t() | nil, in_use: String.t() | nil}
+
+    defstruct devices: [], selected: nil, in_use: nil
+  end
+
+  defmodule StorageChanged do
+    @moduledoc """
+    The free space of the writable partition moved.
+
+    The fields are what `PiFi.Device.storage!/0` gives. `full?` says that `os_mon`
+    raised its alarm for this partition, so a person can be told before a write fails.
+    """
+
+    @type t :: %__MODULE__{
+            path: String.t(),
+            total_bytes: non_neg_integer(),
+            free_bytes: non_neg_integer(),
+            used_bytes: non_neg_integer(),
+            database_bytes: non_neg_integer(),
+            full?: boolean()
+          }
+
+    defstruct [
+      :path,
+      :total_bytes,
+      :free_bytes,
+      :used_bytes,
+      :database_bytes,
+      full?: false
+    ]
+  end
+end

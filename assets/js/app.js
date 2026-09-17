@@ -27,7 +27,7 @@ import {DragToReorder} from "./drag_to_reorder"
 import {Flash} from "./flash"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
-// **No fallback transport, because `MyHiFiWeb.Endpoint` serves none.** A window here
+// **No fallback transport, because `PiFiWeb.Endpoint` serves none.** A window here
 // would send the client to a transport that answers 404, and a socket that misses that
 // window is one that Phoenix remembers: it writes `phx:fallback:LongPoll` to
 // `sessionStorage` and skips the websocket for the rest of the session. A device that

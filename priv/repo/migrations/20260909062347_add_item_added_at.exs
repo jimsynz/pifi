@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddItemAddedAt do
+defmodule PiFi.Repo.Migrations.AddItemAddedAt do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

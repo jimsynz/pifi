@@ -1,18 +1,18 @@
-defmodule MyHiFi.Test.Stations do
+defmodule PiFi.Test.Stations do
   @moduledoc """
   Seed a station the way that the sync job does.
 
-  `MyHiFi.Source.InternetRadio` reads `MyHiFi.Playback.Item`, so a test that wants a
-  station must write one through `MyHiFi.Radio.Fill`. A test that writes a
-  `MyHiFi.Radio.Station` row seeds a table that the source no longer reads.
+  `PiFi.Source.InternetRadio` reads `PiFi.Playback.Item`, so a test that wants a
+  station must write one through `PiFi.Radio.Fill`. A test that writes a
+  `PiFi.Radio.Station` row seeds a table that the source no longer reads.
 
   It gives the item, so a caller names it with `{:station, item.id}`.
   """
 
   require Ash.Query
 
-  alias MyHiFi.Playback.Item
-  alias MyHiFi.Radio.Fill
+  alias PiFi.Playback.Item
+  alias PiFi.Radio.Fill
 
   @doc "Write one station into the catalogue, and give its item."
   @spec create(map()) :: Item.t()
@@ -26,7 +26,7 @@ defmodule MyHiFi.Test.Stations do
     |> Ash.read_one!()
   end
 
-  @doc "What `MyHiFi.Radio.RadioBrowser.to_station/1` gives, with nothing unusual in it."
+  @doc "What `PiFi.Radio.RadioBrowser.to_station/1` gives, with nothing unusual in it."
   @spec defaults() :: map()
   def defaults do
     %{

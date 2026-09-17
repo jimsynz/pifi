@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddPlaybackCatalogue do
+defmodule PiFi.Repo.Migrations.AddPlaybackCatalogue do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

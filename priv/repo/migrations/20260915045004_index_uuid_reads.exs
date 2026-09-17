@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.IndexUuidReads do
+defmodule PiFi.Repo.Migrations.IndexUuidReads do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

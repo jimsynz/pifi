@@ -4,7 +4,7 @@
 //
 // The client holds the time, because a notice is a piece of the interface and the
 // server keeps no timer for one. The hook runs the command that the notice already
-// holds, so `MyHiFiWeb.CoreComponents.flash/1` says one time how to remove a notice.
+// holds, so `PiFiWeb.CoreComponents.flash/1` says one time how to remove a notice.
 // `updated` starts the time again, so a second notice in the same place gets the full
 // period.
 const REMOVE_AFTER_MS = 5000

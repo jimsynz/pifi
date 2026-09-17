@@ -8,12 +8,12 @@ import Config
 config :ash_oban, pro?: false
 config :ash, default_string_length_count: :codepoints
 
-config :my_hi_fi, Oban,
+config :pifi, Oban,
   engine: Oban.Engines.Lite,
   notifier: Oban.Notifiers.PG,
-  # `artwork` is one at a time on purpose, and `MyHiFi.Artwork.Worker` says why.
+  # `artwork` is one at a time on purpose, and `PiFi.Artwork.Worker` says why.
   queues: [default: 10, artwork: 1],
-  repo: MyHiFi.Repo,
+  repo: PiFi.Repo,
   # A job that finished stays in the table until something removes it, and this device
   # runs for years on an SD card. A week is long enough to read what happened and short
   # enough that the table never grows.
@@ -31,17 +31,24 @@ config :my_hi_fi, Oban,
   # runs, and the device would read the whole library twice and write the card twice.
   lifeline: [rescue_after: {2, :hours}]
 
-config :my_hi_fi,
-  ecto_repos: [MyHiFi.Repo],
+# **Ecto builds this prefix from the name of the repo module**, which underscores to
+# `:pi_fi`, and every other event of this firmware carries `:pifi`. A second spelling of
+# the name of the product costs a reader a search, and it costs a handler that listens
+# for the wrong one its measurement. `AshSqlite.Repo` gives `Ecto.Repo` the OTP
+# application and the adapter and no other option, so this cannot sit beside `use`.
+config :pifi, PiFi.Repo, telemetry_prefix: [:pifi, :repo]
+
+config :pifi,
+  ecto_repos: [PiFi.Repo],
   ash_domains: [
-    MyHiFi.Cache,
-    MyHiFi.Device,
-    MyHiFi.Jellyfin,
-    MyHiFi.Playback,
-    MyHiFi.Plex,
-    MyHiFi.Podcast,
-    MyHiFi.Radio,
-    MyHiFi.Settings
+    PiFi.Cache,
+    PiFi.Device,
+    PiFi.Jellyfin,
+    PiFi.Playback,
+    PiFi.Plex,
+    PiFi.Podcast,
+    PiFi.Radio,
+    PiFi.Settings
   ]
 
 # These enable behaviors that will become the default in the next major
@@ -89,7 +96,7 @@ config :spark,
 
 config :tailwind,
   version: "4.1.12",
-  my_hi_fi: [
+  pifi: [
     args: ~w(
     --input=assets/css/app.css
     --output=priv/static/assets/css/app.css
@@ -99,7 +106,7 @@ config :tailwind,
 
 config :esbuild,
   version: "0.25.4",
-  my_hi_fi: [
+  pifi: [
     args:
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/*),
     cd: Path.expand("../assets", __DIR__),
@@ -109,25 +116,25 @@ config :esbuild,
 config :phoenix, json_library: Jason
 
 # Every collection of the web interface draws with the faceplate style. See
-# `MyHiFiWeb.CinderTheme`.
-config :cinder, default_theme: MyHiFiWeb.CinderTheme
+# `PiFiWeb.CinderTheme`.
+config :cinder, default_theme: PiFiWeb.CinderTheme
 
 config :logger,
   default_formatter: [format: "$time $metadata[$level] $message\n", metadata: [:request_id]]
 
-config :my_hi_fi,
-       MyHiFiWeb.Endpoint,
+config :pifi,
+       PiFiWeb.Endpoint,
        url: [host: "localhost"],
        adapter: Bandit.PhoenixAdapter,
        render_errors: [
-         formats: [json: MyHiFiWeb.ErrorJSON],
+         formats: [json: PiFiWeb.ErrorJSON],
          layout: false
        ],
-       pubsub_server: MyHiFi.PubSub
+       pubsub_server: PiFi.PubSub
 
 # The LiveView signing salt is absent here on purpose. A target makes one for
 # itself and keeps it under `/root`, so two devices hold two salts. See
-# `MyHiFi.DeviceSecrets`. `config/host.exs` holds a fixed one, so a session in
+# `PiFi.DeviceSecrets`. `config/host.exs` holds a fixed one, so a session in
 # local development continues after a restart.
 
 # Enable the Nerves integration with Mix
@@ -144,7 +151,7 @@ config :nerves, :firmware, rootfs_overlay: "rootfs_overlay"
 config :nerves, source_date_epoch: "1787022821"
 
 # A screen of this device opens no window and drives no display: it renders to
-# pixels and writes them to a panel over SPI. See `MyHiFi.Screen.Renderer`.
+# pixels and writes them to a panel over SPI. See `PiFi.Screen.Renderer`.
 #
 # **An empty list is the raster NIF, and Emerge 0.4 publishes one.** 0.3 published a
 # NIF for each of three backends and none for no backend, so this project took

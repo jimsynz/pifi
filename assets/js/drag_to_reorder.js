@@ -7,7 +7,7 @@
 //
 // The hook moves the row in the page while the person drags it, so they read the new
 // order as they make it. The server holds the order, so the drop sends one `move` and
-// `MyHiFiWeb.QueueLive` draws the list again from `MyHiFi.Playback.Queue`.
+// `PiFiWeb.QueueLive` draws the list again from `PiFi.Playback.Queue`.
 //
 // **The handle takes the pointer, and the list keeps the listener.** A capture sends
 // every later event of that pointer to the handle, so a fast drag that leaves the row

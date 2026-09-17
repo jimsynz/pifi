@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddPlaylists do
+defmodule PiFi.Repo.Migrations.AddPlaylists do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

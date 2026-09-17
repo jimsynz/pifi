@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddItemNumberAndDisc do
+defmodule PiFi.Repo.Migrations.AddItemNumberAndDisc do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

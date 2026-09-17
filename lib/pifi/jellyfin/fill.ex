@@ -1,0 +1,340 @@
+defmodule PiFi.Jellyfin.Fill do
+  @moduledoc """
+  Write the library of a Jellyfin server into the catalogue.
+
+  An artist and an album each become a `PiFi.Playback.Item` of the kind
+  `:container`, and a track becomes one of the kind `:track`. Every source fills the
+  catalogue this way, and the browse tree then needs no knowledge of Jellyfin.
+
+  ## What identifies an item
+
+  The identifier of the server identifies the item here as well. Jellyfin gives one
+  identifier to each thing that it serves, so an artist, an album and a track never
+  collide and `source_ref` needs no name in front of it.
+
+  ## What the tree looks like
+
+  An album names its artist with `parent_id`, and a track names its album. **An
+  artist is the one container with no parent**, so the Artists branch is one filter
+  and it needs no facet and no column of its own. An album whose artist the server
+  does not name goes under one container that this module keeps for those, or it
+  would stand beside the artists in that branch.
+
+  ## What a track carries, and what it does not
+
+  `transport` is `:download` and `format` is the codec that the server sends. Both
+  are columns, because `PiFi.Playback.Item` decides which favourites this device
+  reads on to the card, and that read must ask no service. `byte_size` is a column
+  for the same reason: the read asks whether the card has room before it begins.
+  See `PiFi.Playback.FavouriteAudio`.
+
+  **A track carries no `url`.** The address of the audio carries the access token, and
+  a token changes when a person links the device again.
+  `PiFi.Source.Jellyfin.resolve/1` builds the address at the time of play, from
+  the token that the device keeps then.
+
+  **A track keeps no place.** A song is not an episode: a person who stops half way
+  through one does not want the second half of it tomorrow. See `keeps_place?` of
+  `PiFi.Playback.Item`.
+
+  ## Why it writes in bulk
+
+  A library has tens of thousands of tracks, and section 17 of the specification
+  measures an Ash write at 11.8 ms against 2.21 ms for the same insert in plain SQL.
+  A write for each row would take an hour of the card. `Ash.bulk_create/4` writes one
+  statement for each batch, and the sync gives it one page at a time.
+  """
+
+  require Ash.Query
+
+  alias PiFi.Artwork
+  alias PiFi.Jellyfin.Server
+  alias PiFi.Playback
+  alias PiFi.Playback.Item
+  alias PiFi.Playback.ItemFacet
+
+  @source "jellyfin"
+  @genre_key "jellyfin-genre"
+  @unknown_artist_ref "jellyfin-artist-unknown"
+
+  @doc """
+  The name of this source in an address, and in the `source` column of an item.
+
+      iex> PiFi.Jellyfin.Fill.source()
+      "jellyfin"
+  """
+  @spec source() :: String.t()
+  def source, do: @source
+
+  @doc "The `source_ref` of the container for an album with no artist."
+  @spec unknown_artist_ref() :: String.t()
+  def unknown_artist_ref, do: @unknown_artist_ref
+
+  @doc "Write one page of artists, and give the number that it wrote."
+  @spec artists([Server.entry()]) :: non_neg_integer()
+  def artists(entries), do: write(entries, :container)
+
+  @doc """
+  Write one page of albums, and give the number that it wrote.
+
+  An album whose artist the server does not name goes under one container that this
+  module keeps for those.
+  """
+  @spec albums([Server.entry()]) :: non_neg_integer()
+  def albums([]), do: 0
+
+  def albums(entries) do
+    if Enum.any?(entries, &is_nil(&1.parent_ref)), do: unknown_artist()
+
+    written =
+      entries
+      |> Enum.map(&%{&1 | parent_ref: &1.parent_ref || @unknown_artist_ref})
+      |> write(:container)
+
+    link_genres(entries)
+
+    written
+  end
+
+  @doc """
+  The key that the genres of this source take in `PiFi.Playback.Facet`.
+
+  **The key names the source, and it must.** Two library sources both hold a genre
+  called `Rock`, and one shared key would give one facet row for the two of them. The
+  lists would still be right, because `PiFiWeb.BrowseLive` reads the items of a facet
+  by the source as well, and the count on the row of the facet would be the albums of
+  both libraries.
+  """
+  @spec genre_key() :: String.t()
+  def genre_key, do: @genre_key
+
+  @doc "Write one page of tracks, and give the number that it wrote."
+  @spec tracks([Server.entry()]) :: non_neg_integer()
+  def tracks(entries), do: write(entries, :track)
+
+  defp write([], _kind), do: 0
+
+  # **The stamp goes on here, and not in `to_item/3`.** That function has a clause
+  # for a container and a clause for a track, and a stamp on one of them alone made
+  # each artist and each album look like a row that the server no longer has. The
+  # read then removed them, and it took every track with them. One place cannot be
+  # missed by a clause that a later version adds.
+  defp write(entries, kind) do
+    parents = parents(entries)
+    seen_at = DateTime.utc_now()
+
+    ask_for_pictures(entries, kind)
+
+    entries
+    |> Enum.map(&to_item(&1, kind, parents))
+    |> Enum.map(&Map.put(&1, :last_seen_at, seen_at))
+    |> Ash.bulk_create!(Item, :upsert,
+      upsert?: true,
+      upsert_identity: :source_ref,
+      # The list is the guarantee: a second read of the server writes what the
+      # server owns, and it touches nothing of the person. `favourite?`,
+      # `position_ms`, `position_bytes`, `played?` and `last_played_at` are absent
+      # on purpose.
+      upsert_fields: [
+        :title,
+        :subtitle,
+        :artwork_url,
+        :duration_ms,
+        :byte_size,
+        :last_seen_at,
+        :published_at,
+        :release_year,
+        :added_at,
+        :number,
+        :disc,
+        :parent_id,
+        :transport,
+        :container_format,
+        :format,
+        :keeps_place?
+      ],
+      return_errors?: true
+    )
+
+    length(entries)
+  end
+
+  # **A row of a container draws its picture, so the picture must be on the card before
+  # a person browses.** A list draws the address of a picture without reading anything,
+  # and nothing on that path asks for one, so the read of the library is what asks. See
+  # `PiFi.Artwork.thumbnail_path/1`.
+  #
+  # A track asks for none of its own. A list of tracks draws no picture, and the picture
+  # of a track is the cover of its album far more often than not.
+  #
+  # **One query for a whole page, and not one read for each entry.**
+  # `PiFi.Artwork.Worker.enqueue/1` reads the cache for the address that it gets, so
+  # a page of 50 albums made 50 queries. `PiFi.Artwork.ensure/1` makes one.
+  defp ask_for_pictures(entries, :container) do
+    entries
+    |> Enum.map(& &1.artwork_url)
+    |> Artwork.ensure()
+  end
+
+  defp ask_for_pictures(_entries, :track), do: :ok
+
+  # One read for a whole page, and not one read for each row. A page of 200 tracks
+  # has far fewer albums than that, so the read is small and the map that it builds
+  # goes away with the page.
+  defp parents(entries) do
+    refs =
+      entries
+      |> Enum.map(& &1.parent_ref)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    case refs do
+      [] ->
+        %{}
+
+      refs ->
+        Item
+        |> Ash.Query.filter(source == ^@source and source_ref in ^refs)
+        |> Ash.read!()
+        |> Map.new(&{&1.source_ref, &1.id})
+    end
+  end
+
+  # **The links go in one statement for each page, and not one for each genre.** A
+  # library of 5205 records names several genres each, so a write for each of those
+  # links would cost the card a great deal, and a read of the library runs every day.
+  defp link_genres(entries) do
+    case Enum.reject(entries, &(Map.get(&1, :genres, []) == [])) do
+      [] -> :ok
+      named -> write_links(named, facet_ids(named), ids_of(named))
+    end
+  end
+
+  defp write_links(named, facets, items) do
+    wanted =
+      for entry <- named,
+          item_id = items[entry.ref],
+          name <- entry.genres,
+          facet_id = facets[name] do
+        {item_id, facet_id}
+      end
+
+    case Enum.reject(wanted, &MapSet.member?(held(items), &1)) do
+      [] -> :ok
+      rows -> insert_links(rows)
+    end
+  end
+
+  # **A link that the table already holds costs no write.** An upsert of every link
+  # would set the same values again, and that is a write of the card for each of the
+  # thousands of links of a library, on every read of it. A read that changed nothing
+  # therefore writes nothing at all now.
+  #
+  # `upsert?` stays for the rows that this does write, because a link is the identity of
+  # itself and a second writer must not raise.
+  defp held(items) do
+    ids = Map.values(items)
+
+    ItemFacet
+    |> Ash.Query.filter(item_id in ^ids)
+    |> Ash.read!()
+    |> MapSet.new(&{&1.item_id, &1.facet_id})
+  end
+
+  defp insert_links(rows) do
+    rows
+    |> Enum.map(fn {item_id, facet_id} -> %{item_id: item_id, facet_id: facet_id} end)
+    |> Ash.bulk_create!(ItemFacet, :upsert,
+      upsert?: true,
+      upsert_identity: :item_facet,
+      upsert_fields: [:item_id],
+      return_errors?: true
+    )
+
+    :ok
+  end
+
+  # **A facet that the table already holds costs no write.** A library names about a
+  # hundred genres, so after the first pages every name of a page is a row that this
+  # read finds.
+  defp facet_ids(named) do
+    held =
+      @genre_key
+      |> Playback.facets_of_key!()
+      |> Map.new(&{to_string(&1.value.value), &1.id})
+
+    named
+    |> Enum.flat_map(& &1.genres)
+    |> Enum.uniq()
+    |> Enum.reduce(held, fn name, acc ->
+      Map.put_new_lazy(acc, name, fn -> written_facet(name) end)
+    end)
+  end
+
+  defp written_facet(name) do
+    Playback.upsert_facet!(%{
+      key: @genre_key,
+      value: %Ash.Union{type: :string, value: name}
+    }).id
+  end
+
+  defp ids_of(entries) do
+    refs = Enum.map(entries, & &1.ref)
+
+    Item
+    |> Ash.Query.filter(source == ^@source and source_ref in ^refs)
+    |> Ash.read!()
+    |> Map.new(&{&1.source_ref, &1.id})
+  end
+
+  defp to_item(entry, :container, parents) do
+    %{
+      source: @source,
+      source_ref: entry.ref,
+      kind: :container,
+      parent_id: parents[entry.parent_ref],
+      title: entry.title,
+      subtitle: entry[:subtitle],
+      artwork_url: entry.artwork_url,
+      published_at: entry[:published_at],
+      release_year: entry[:release_year],
+      added_at: entry[:added_at]
+    }
+  end
+
+  defp to_item(entry, :track, parents) do
+    %{
+      source: @source,
+      source_ref: entry.ref,
+      kind: :track,
+      parent_id: parents[entry.parent_ref],
+      title: entry.title,
+      subtitle: entry[:subtitle],
+      artwork_url: entry.artwork_url,
+      duration_ms: entry[:duration_ms],
+      byte_size: entry[:byte_size],
+      published_at: entry[:published_at],
+      number: entry[:number],
+      disc: entry[:disc],
+      transport: :download,
+      container_format: :none,
+      format: entry[:format] || :mp3,
+      live?: false,
+      keeps_place?: false
+    }
+  end
+
+  # **The stamp is not optional here.** `PiFi.Jellyfin.Sync.Library` removes each row
+  # of this source that a whole read did not see, and `PiFi.Playback.Item` removes
+  # what a container contains when that container goes. A row of this one with no stamp
+  # would therefore take every album with no artist away with it.
+  defp unknown_artist do
+    Playback.upsert_item!(%{
+      source: @source,
+      source_ref: @unknown_artist_ref,
+      kind: :container,
+      title: "Unknown artist",
+      last_seen_at: DateTime.utc_now()
+    })
+  end
+end

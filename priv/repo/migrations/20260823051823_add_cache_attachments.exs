@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddCacheAttachments do
+defmodule PiFi.Repo.Migrations.AddCacheAttachments do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

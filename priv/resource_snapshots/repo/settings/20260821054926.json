@@ -53,7 +53,7 @@
   ],
   "table": "settings",
   "hash": "051924E1ECF43EBA2DDB76DA5E7F0FF7B816AEAA6C9E68CEDB5D664EB3372A59",
-  "repo": "Elixir.MyHiFi.Repo",
+  "repo": "Elixir.PiFi.Repo",
   "multitenancy": {
     "global": null,
     "attribute": null,

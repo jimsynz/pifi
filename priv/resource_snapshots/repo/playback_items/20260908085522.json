@@ -329,7 +329,7 @@
   ],
   "table": "playback_items",
   "hash": "D0BEF959EC95863D4D9E154B266B9583ECA0B77746FEE091FDE5AEF878250FAC",
-  "repo": "Elixir.MyHiFi.Repo",
+  "repo": "Elixir.PiFi.Repo",
   "multitenancy": {
     "global": null,
     "attribute": null,

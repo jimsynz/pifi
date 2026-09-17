@@ -1,4 +1,4 @@
-defmodule MyHiFi.DataCase do
+defmodule PiFi.DataCase do
   @moduledoc """
   This module defines the setup for tests requiring
   access to the application's data layer.
@@ -10,32 +10,32 @@ defmodule MyHiFi.DataCase do
   we enable the SQL sandbox, so changes done to the database
   are reverted at the end of every test. If you are using
   PostgreSQL, you can even run database tests asynchronously
-  by setting `use MyHiFi.DataCase, async: true`, although
+  by setting `use PiFi.DataCase, async: true`, although
   this option is not recommended for other databases.
   """
 
   use ExUnit.CaseTemplate
 
   alias Ecto.Adapters.SQL.Sandbox
-  alias MyHiFi.Settings.Cache
+  alias PiFi.Settings.Cache
 
   using do
     quote do
-      alias MyHiFi.Repo
+      alias PiFi.Repo
 
       import Ecto
       import Ecto.Changeset
       import Ecto.Query
-      import MyHiFi.DataCase
+      import PiFi.DataCase
     end
   end
 
   setup tags do
-    pid = Sandbox.start_owner!(MyHiFi.Repo, shared: not tags[:async])
+    pid = Sandbox.start_owner!(PiFi.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
 
     # A rollback takes a row away, and the memory of the settings cannot see that.
-    # See `MyHiFi.Settings.Cache`.
+    # See `PiFi.Settings.Cache`.
     Cache.clear()
 
     :ok

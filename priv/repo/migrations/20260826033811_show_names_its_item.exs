@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.ShowNamesItsItem do
+defmodule PiFi.Repo.Migrations.ShowNamesItsItem do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

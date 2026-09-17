@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddTheHistoryOfWhatAPersonHeard do
+defmodule PiFi.Repo.Migrations.AddTheHistoryOfWhatAPersonHeard do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

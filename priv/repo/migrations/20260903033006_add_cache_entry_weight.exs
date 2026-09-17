@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddCacheEntryWeight do
+defmodule PiFi.Repo.Migrations.AddCacheEntryWeight do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

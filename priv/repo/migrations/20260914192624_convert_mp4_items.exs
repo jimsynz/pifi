@@ -1,10 +1,10 @@
-defmodule MyHiFi.Repo.Migrations.ConvertMp4Items do
+defmodule PiFi.Repo.Migrations.ConvertMp4Items do
   @moduledoc """
   Give each m4a track of an earlier read the shape that a conversion has.
 
   **A device that read a Plex library before this firmware cannot read its own
   catalogue after it.** Such a read wrote `mp4` into `container_format`, and
-  `MyHiFi.Playback.Item` no longer names that value, so Ash refuses to load the row:
+  `PiFi.Playback.Item` no longer names that value, so Ash refuses to load the row:
 
       cannot load `"mp4"` as type ... one_of: [:none, :mpeg_ts, :ogg]
 
@@ -12,7 +12,7 @@ defmodule MyHiFi.Repo.Migrations.ConvertMp4Items do
   track listing and the play queue would all fail on a library that held one. A real
   library held 8,800 of them.
 
-  The three columns become what `MyHiFi.Plex.Fill` writes for such a track now: the
+  The three columns become what `PiFi.Plex.Fill` writes for such a track now: the
   server converts it, so the codec is unknown, the transport is a playlist, and the
   container is none. The next read of the library writes the same values again, so
   this is a repair and not a rule.

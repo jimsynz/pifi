@@ -1,8 +1,8 @@
-defmodule MyHiFi.Test.RecordingScreen do
+defmodule PiFi.Test.RecordingScreen do
   @moduledoc """
   A Circuits SPI bus and a Circuits GPIO line that write down what they get.
 
-  `MyHiFi.Peripheral.PiTft.Ili9341` drives a screen over SPI, and the host of a
+  `PiFi.Peripheral.PiTft.Ili9341` drives a screen over SPI, and the host of a
   developer holds no such screen. `Circuits.SPI.NilBackend` is what a host gets, and
   its `open/2` gives `{:error, :unimplemented}`, so it drives no test.
 
@@ -10,9 +10,9 @@ defmodule MyHiFi.Test.RecordingScreen do
   that they were called, so a test proves the thing that matters: the data or
   command line holds the correct level for each byte that follows it.
 
-      MyHiFi.Test.RecordingScreen.use_it()
+      PiFi.Test.RecordingScreen.use_it()
       {:ok, screen} = Ili9341.open()
-      assert {:command, 0x2C, _} = ...MyHiFi.Test.RecordingScreen.commands()
+      assert {:command, 0x2C, _} = ...PiFi.Test.RecordingScreen.commands()
 
   The recorder is a named process, so a test that uses it is not `async`.
   """
@@ -20,7 +20,7 @@ defmodule MyHiFi.Test.RecordingScreen do
   use Agent
 
   # The PiTFT screen is on one bus of SPI0 and its touch controller is on the other, and
-  # the backlight is GPIO 2 of that controller. See `MyHiFi.Peripheral.PiTft.Stmpe610`.
+  # the backlight is GPIO 2 of that controller. See `PiFi.Peripheral.PiTft.Stmpe610`.
   # The Pirate Audio puts its screen on the other bus, its data and command line on GPIO
   # 9, and its backlight on a line of the Raspberry Pi, so `use_it/1` takes all three.
   @pi_tft [screen_bus: "spidev0.0", data_command: 25, backlight_line: nil]
@@ -79,7 +79,7 @@ defmodule MyHiFi.Test.RecordingScreen do
 
   1 is on and 0 is off. The backlight is GPIO 2 of the STMPE610, so each level here
   is a write of `GPIO_SET_PIN` or `GPIO_CLR_PIN` on the bus of that chip. See
-  `MyHiFi.Peripheral.PiTft.Stmpe610`.
+  `PiFi.Peripheral.PiTft.Stmpe610`.
   """
   @spec backlight() :: [0 | 1]
   def backlight do
@@ -95,7 +95,7 @@ defmodule MyHiFi.Test.RecordingScreen do
 
   1 is on and 0 is off. This is the Pirate Audio, where the light is GPIO 13 of the
   board. The PiTFT holds its light on the touch controller, so it uses `backlight/0`
-  instead. See `MyHiFi.Peripheral.PirateAudio.St7789`.
+  instead. See `PiFi.Peripheral.PirateAudio.St7789`.
   """
   @spec backlight_line() :: [0 | 1]
   def backlight_line, do: for({:backlight, level} <- entries(), do: level)
@@ -167,7 +167,7 @@ defmodule MyHiFi.Test.RecordingScreen do
   defp flush({_nothing_open, commands}), do: commands
 
   defmodule Spi do
-    @moduledoc "The SPI backend of `MyHiFi.Test.RecordingScreen`."
+    @moduledoc "The SPI backend of `PiFi.Test.RecordingScreen`."
 
     @behaviour Circuits.SPI.Backend
 
@@ -189,7 +189,7 @@ defmodule MyHiFi.Test.RecordingScreen do
     def info, do: %{name: __MODULE__}
 
     defimpl Circuits.SPI.Bus do
-      alias MyHiFi.Test.RecordingScreen
+      alias PiFi.Test.RecordingScreen
 
       def config(_bus), do: {:ok, %{mode: 0, bits_per_word: 8, speed_hz: 32_000_000, delay_us: 0}}
 
@@ -220,7 +220,7 @@ defmodule MyHiFi.Test.RecordingScreen do
   end
 
   defmodule Gpio do
-    @moduledoc "The GPIO backend of `MyHiFi.Test.RecordingScreen`."
+    @moduledoc "The GPIO backend of `PiFi.Test.RecordingScreen`."
 
     @behaviour Circuits.GPIO.Backend
 
@@ -247,11 +247,11 @@ defmodule MyHiFi.Test.RecordingScreen do
     def backend_info, do: %{name: __MODULE__}
 
     defimpl Circuits.GPIO.Handle do
-      alias MyHiFi.Test.RecordingScreen
+      alias PiFi.Test.RecordingScreen
 
       # Which line says command or data, and which one carries the backlight, depends on
       # the board. The PiTFT holds its light on the touch controller and names no line
-      # here. See `MyHiFi.Test.RecordingScreen.use_it/1`.
+      # here. See `PiFi.Test.RecordingScreen.use_it/1`.
       def write(%{spec: spec}, value) do
         config = RecordingScreen.config()
 

@@ -1,21 +1,21 @@
-defmodule MyHiFi.Test.Podcasts do
+defmodule PiFi.Test.Podcasts do
   @moduledoc """
   Subscribe to a show the way that a person does.
 
   A subscription is a mark on the item of the show, so a test must write the item and
-  mark it. `MyHiFi.Podcast.Show` holds the address of the feed and nothing that a
+  mark it. `PiFi.Podcast.Show` holds the address of the feed and nothing that a
   person did.
   """
 
   require Ash.Query
 
-  alias MyHiFi.Playback
-  alias MyHiFi.Playback.Item
-  alias MyHiFi.Podcast
-  alias MyHiFi.Podcast.Fill
+  alias PiFi.Playback
+  alias PiFi.Playback.Item
+  alias PiFi.Podcast
+  alias PiFi.Podcast.Fill
 
   @doc "Mark the show, and link it to its item. It gives the show."
-  @spec subscribe(MyHiFi.Podcast.Show.t()) :: MyHiFi.Podcast.Show.t()
+  @spec subscribe(PiFi.Podcast.Show.t()) :: PiFi.Podcast.Show.t()
   def subscribe(show) do
     item = item_of(show)
     {:ok, _item} = Playback.set_favourite(item)
@@ -24,7 +24,7 @@ defmodule MyHiFi.Test.Podcasts do
   end
 
   @doc "Take the mark off the show. It gives the show."
-  @spec unsubscribe(MyHiFi.Podcast.Show.t()) :: MyHiFi.Podcast.Show.t()
+  @spec unsubscribe(PiFi.Podcast.Show.t()) :: PiFi.Podcast.Show.t()
   def unsubscribe(show) do
     item = item_of(show)
     {:ok, _item} = Playback.clear_favourite(item)

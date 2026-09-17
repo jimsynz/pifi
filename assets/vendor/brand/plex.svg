@@ -4,7 +4,7 @@
      sides carries no copyright. **The mark is a trademark of Plex Inc. even
      so**, and this firmware draws it to name the service that a person linked,
      which is what a trademark is for. See the note in
-     `MyHiFiWeb.CoreComponents`.
+     `PiFiWeb.CoreComponents`.
 
      The six points come from a measurement of that file, at a threshold of the
      red channel: the stroke is 31 wide at every row, the top runs from x=47 to

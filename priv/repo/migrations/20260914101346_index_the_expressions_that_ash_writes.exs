@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.IndexTheExpressionsThatAshWrites do
+defmodule PiFi.Repo.Migrations.IndexTheExpressionsThatAshWrites do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

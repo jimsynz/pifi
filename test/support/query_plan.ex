@@ -1,4 +1,4 @@
-defmodule MyHiFi.Test.QueryPlan do
+defmodule PiFi.Test.QueryPlan do
   @moduledoc """
   What SQLite says that it will do with the statement that Ash writes.
 
@@ -8,8 +8,8 @@ defmodule MyHiFi.Test.QueryPlan do
   row. A statement by hand holds no cast, it uses the index, and it says nothing about
   what the firmware does, so these helpers read the statement that Ash writes.
 
-  See the `custom_statements` of `MyHiFi.Playback.Item` and the `custom_indexes` of
-  `MyHiFi.Cache.Entry`.
+  See the `custom_statements` of `PiFi.Playback.Item` and the `custom_indexes` of
+  `PiFi.Cache.Entry`.
   """
 
   import ExUnit.Assertions
@@ -38,7 +38,7 @@ defmodule MyHiFi.Test.QueryPlan do
 
     :telemetry.attach(
       handler,
-      [:my_hi_fi, :repo, :query],
+      [:pifi, :repo, :query],
       fn _event, _measurements, metadata, _config ->
         if metadata[:source] == table and wanted?.(metadata[:query]) do
           send(probe, {:sql, metadata[:query], metadata[:params]})
@@ -79,7 +79,7 @@ defmodule MyHiFi.Test.QueryPlan do
   defp plan_of(table) do
     receive do
       {:sql, sql, params} ->
-        {:ok, %{rows: rows}} = MyHiFi.Repo.query("EXPLAIN QUERY PLAN " <> sql, params)
+        {:ok, %{rows: rows}} = PiFi.Repo.query("EXPLAIN QUERY PLAN " <> sql, params)
 
         Enum.map_join(rows, " | ", &List.last/1)
     after

@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddPlexSource do
+defmodule PiFi.Repo.Migrations.AddPlexSource do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

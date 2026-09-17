@@ -2,7 +2,7 @@
 //
 // The device reads the picture, because the device screen needs the same colour
 // and no browser is open when a person is in the room alone. The server sends
-// the answer with the track, and this sets it. See `MyHiFi.Artwork.Accent`.
+// the answer with the track, and this sets it. See `PiFi.Artwork.Accent`.
 
 const DEFAULT_ACCENT = "oklch(0.78 0.15 74)"
 

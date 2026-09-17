@@ -1,4 +1,4 @@
-defmodule MyHiFi.Repo.Migrations.AddCounts do
+defmodule PiFi.Repo.Migrations.AddCounts do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 

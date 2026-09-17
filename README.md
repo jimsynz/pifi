@@ -1,6 +1,6 @@
-# MyHiFi
+# PiFi
 
-MyHiFi is Nerves firmware for a home audio player.
+PiFi is Nerves firmware for a home audio player.
 
 The device connects to a home stereo. It behaves like a normal stereo component.
 A person can operate it without a computer and without a phone.
@@ -24,14 +24,14 @@ The device keeps the audio of what a person marked on the card, so a favourite
 album and the newest episodes of a show play with no network.
 
 The code is the specification. Each module says what it does and why, and
-`MyHiFi.Source`, `MyHiFi.Output` and `MyHiFi.Peripheral` name the rules that a new
+`PiFi.Source`, `PiFi.Output` and `PiFi.Peripheral` name the rules that a new
 source, a new output and a new piece of hardware follow.
 
 ## Design
 
 | Item | Choice |
 |---|---|
-| Board | Raspberry Pi Zero 2 W, with a custom Nerves system (`myhifi_rpi0_2`) |
+| Board | Raspberry Pi Zero 2 W, with a custom Nerves system (`pifi_rpi0_2`) |
 | Audio output | USB DAC or a DAC on the pins of the board, through `aplay` |
 | Audio pipeline | Membrane, with precompiled libmad and fdk-aac decoders |
 | Stream types | Shoutcast and HLS |
@@ -39,8 +39,8 @@ source, a new output and a new piece of hardware follow.
 | Data | Ash with SQLite, on the application data partition at `/root` |
 | Background work | Oban |
 | Web interface | Phoenix LiveView |
-| Device screen | Emerge, behind a `MyHiFi.Peripheral` behaviour. `MyHiFi.Screen` holds the parts that each screen draws with. |
-| Knob | SimpleFOC motor, RP2040-Zero, I2C link, also a `MyHiFi.Peripheral`, in a later version |
+| Device screen | Emerge, behind a `PiFi.Peripheral` behaviour. `PiFi.Screen` holds the parts that each screen draws with. |
+| Knob | SimpleFOC motor, RP2040-Zero, I2C link, also a `PiFi.Peripheral`, in a later version |
 
 Sources, outputs and peripherals are behaviours. A peripheral owns one piece of
 hardware: it receives typed events about the player and the navigation state, it
@@ -52,7 +52,7 @@ without a change to the rest of the firmware.
 The first audio source is internet radio, and the station list comes from the
 public Radio Browser service. Podcasts come from the Podcast Index and from the
 feed of a publisher, and a Jellyfin server gives a music library. A source
-implements the `MyHiFi.Source` behaviour, so a new source needs no change to the
+implements the `PiFi.Source` behaviour, so a new source needs no change to the
 player or to the user interface.
 
 ## Targets
@@ -75,10 +75,10 @@ Build for the host, and run the tests:
     mix setup
     mix check
 
-Build the firmware. **The target is `myhifi_rpi0_2` and not the stock `rpi0_2`**,
+Build the firmware. **The target is `pifi_rpi0_2` and not the stock `rpi0_2`**,
 which ships no USB host stack and no USB audio driver. See `AGENTS.md`.
 
-    export MIX_TARGET=myhifi_rpi0_2
+    export MIX_TARGET=pifi_rpi0_2
     mix deps.get
     mix firmware
     mix burn
