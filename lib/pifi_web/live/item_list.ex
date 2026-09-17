@@ -101,15 +101,25 @@ defmodule PiFiWeb.ItemList do
   of the text filter of a column. Both read the same expression, so a person who finds
   a station on the search page finds it under a filter as well.
 
+  ## It matches the start of a word, and not a text in the middle of one
+
+  The match reads `playback_items_fts`, which is the FTS5 index of the titles that
+  `PiFi.Repo.Migrations.SearchTheWordsOfATitle` makes. **A person who types `cell`
+  therefore finds `Celldweller` and does not find `Excellent`.** That is the trade, and
+  it is deliberate: the start of a word is what a person means almost every time, and
+  the expression before this one read every row of the table. A search for a common
+  word over 137,557 items took 4.74 s on a board on 2026-09-16.
+
+  **Each word of the text matches separately, and a row must carry all of them.** A
+  person who types `rnz nat` finds `RNZ National`. The last word takes no `*` of its
+  own beyond the one that `fts_match/1` adds, so a search narrows as a person types.
+
   ## Why the matching is ours and not the one that Cinder gives
 
   Cinder wraps the text in an `Ash.CiString` and asks for `contains`. On AshSqlite that
   compiles to `instr(title, ? COLLATE NOCASE)`, and `instr` of SQLite reads no
   collation, so it matches the case. A person who types `rnz` would find no
-  `RNZ National`. This puts both sides in lower case instead.
-
-  `instr` is right and `like` is wrong here. `like` reads `%` and `_` in the text of
-  the person as wildcards.
+  `RNZ National`. FTS5 folds the case itself, with the `unicode61` tokenizer.
   """
   @spec search_title(Ash.Query.t(), [term()], String.t()) :: Ash.Query.t()
   def search_title(query, _columns, text), do: matching(query, text)
@@ -126,9 +136,68 @@ defmodule PiFiWeb.ItemList do
   @spec filter_title(Ash.Query.t(), map()) :: Ash.Query.t()
   def filter_title(query, %{operator: :contains, value: text}), do: matching(query, text)
 
+  # **A text that holds no word matches every row.** A person who clears the box reads
+  # the whole list again, and `MATCH` of FTS5 raises on an empty query, so the filter
+  # goes away instead.
   defp matching(query, text) do
-    Ash.Query.filter(query, fragment("instr(lower(?), lower(?)) > 0", title, ^text))
+    case fts_match(text) do
+      nil ->
+        query
+
+      match ->
+        # **The index takes no alias, and the identifier takes the cast that Ash gives
+        # it.** `MATCH` reads the name of the table on its left, and an alias there is
+        # a column that does not exist. Ash writes `CAST(id AS TEXT)` on the outer
+        # side, so the inner side casts as well or the two never match.
+        Ash.Query.filter(
+          query,
+          fragment(
+            """
+            ? IN (SELECT CAST(i.id AS TEXT) FROM playback_items AS i
+                  JOIN playback_items_fts ON i.rowid = playback_items_fts.rowid
+                  WHERE playback_items_fts MATCH ?)
+            """,
+            id,
+            ^match
+          )
+        )
+    end
   end
+
+  @doc """
+  The text of a person as a query of FTS5, or `nil` when it holds no word.
+
+  **Every word is quoted, and every word takes a `*`.** A quote makes each word a
+  string that FTS5 reads as it is, so `AND`, `OR`, `NOT` and `-` are words and not
+  operators, and a person who searches for `rock and roll` is not asking a question of
+  the parser. The `*` sits outside the quotes, where FTS5 reads it as "the start of a
+  word", so `cell` finds `Celldweller`.
+
+  A quote inside a word is doubled, which is how FTS5 escapes one.
+
+      iex> PiFiWeb.ItemList.fts_match("rnz nat")
+      "\\"rnz\\"* \\"nat\\"*"
+
+      iex> PiFiWeb.ItemList.fts_match("  ")
+      nil
+
+      iex> PiFiWeb.ItemList.fts_match(nil)
+      nil
+
+      iex> PiFiWeb.ItemList.fts_match("say \\"hello\\"")
+      "\\"say\\"* \\"\\"\\"hello\\"\\"\\"*"
+  """
+  @spec fts_match(String.t() | nil) :: String.t() | nil
+  def fts_match(nil), do: nil
+
+  def fts_match(text) do
+    case String.split(text, ~r/\s+/u, trim: true) do
+      [] -> nil
+      words -> Enum.map_join(words, " ", &prefix_phrase/1)
+    end
+  end
+
+  defp prefix_phrase(word), do: ~s("#{String.replace(word, ~s("), ~s(""))}"*)
 
   attr :path, :string, default: nil
   attr :class, :string, default: "size-8"

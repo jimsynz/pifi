@@ -42,8 +42,9 @@ defmodule PiFiWeb.SearchLiveTest do
     end
 
     # Cinder asks for `contains` with an `Ash.CiString`, and that compiles to
-    # `instr(title, ? COLLATE NOCASE)`. `instr` of SQLite reads no collation, so the
-    # matching of this page puts both sides in lower case instead.
+    # `instr(title, ? COLLATE NOCASE)`, which reads no collation and matches the case.
+    # The matching of this page reads the FTS5 index instead, and `unicode61` folds the
+    # case itself.
     test "the case of the text does not matter", %{conn: conn} do
       Stations.create(%{title: "RNZ National"})
 
@@ -52,6 +53,39 @@ defmodule PiFiWeb.SearchLiveTest do
 
         assert html =~ "RNZ National", "#{text} found nothing"
       end
+    end
+
+    # **The match reads an index of the words, so it finds the start of one.** That is
+    # the trade that the FTS5 index buys, and it is written down here so that a person
+    # who changes it reads what they are changing. See `PiFiWeb.ItemList.search_title/3`.
+    test "it finds the start of a word and not a text inside one", %{conn: conn} do
+      Stations.create(%{title: "Celldweller Radio"})
+
+      {:ok, view, _html} = live(conn, ~p"/search/#{@radio}?search=cell")
+      assert list(view) =~ "Celldweller Radio"
+
+      {:ok, view, _html} = live(conn, ~p"/search/#{@radio}?search=dweller")
+      refute list(view) =~ "Celldweller Radio"
+    end
+
+    # Two words narrow the list, and a row must carry both of them.
+    test "every word of the text must match", %{conn: conn} do
+      Stations.create(%{title: "RNZ National"})
+      Stations.create(%{title: "RNZ Concert"})
+
+      {:ok, view, _html} = live(conn, ~p"/search/#{@radio}?search=rnz nat")
+
+      assert list(view) =~ "RNZ National"
+      refute list(view) =~ "RNZ Concert"
+    end
+
+    # A word of the query language of FTS5 is a word, and not an operator.
+    test "a word that FTS5 reads as an operator is text", %{conn: conn} do
+      Stations.create(%{title: "Rock and Roll Radio"})
+
+      {:ok, view, _html} = live(conn, ~p"/search/#{@radio}?search=rock and roll")
+
+      assert list(view) =~ "Rock and Roll Radio"
     end
 
     # `like` reads these as wildcards, and a person means them as text.
