@@ -33,14 +33,14 @@ defmodule PiFiWeb.CoreComponents do
   # the Plex logo of 2022 is the word `plex`, and 20 pixels of it is a smudge beside a
   # label that already says Plex. `brand/plex.svg` is therefore the chevron.
   @source_icons %{
-    cloud: "hero-cloud",
+    cloud: "ph-cloud",
     jellyfin: "brand-jellyfin",
-    library: "hero-rectangle-stack",
+    library: "ph-stack",
     plex: "brand-plex",
-    podcast: "hero-microphone",
-    radio: "hero-signal",
-    refresh: "hero-arrow-path",
-    remove: "hero-trash"
+    podcast: "ph-microphone",
+    radio: "ph-broadcast",
+    refresh: "ph-arrows-clockwise",
+    remove: "ph-trash"
   }
 
   @doc """
@@ -121,12 +121,21 @@ defmodule PiFiWeb.CoreComponents do
 
   ## Examples
 
-      <.icon name="hero-x-mark" />
-      <.icon name="hero-arrow-path" class="ml-1 size-3 motion-safe:animate-spin" />
+      <.icon name="ph-x" />
+      <.icon name="ph-arrows-clockwise" class="ml-1 size-3 motion-safe:animate-spin" />
   """
   attr(:name, :string, required: true)
   attr(:class, :any, default: "size-4")
 
+  def icon(%{name: "ph-" <> _} = assigns) do
+    ~H"""
+    <span class={[@name, @class]} />
+    """
+  end
+
+  # Cinder writes four of these, and this project owns none of those templates.
+  # `assets/vendor/phosphor.js` draws them in the weight that the rest of the
+  # interface holds.
   def icon(%{name: "hero-" <> _} = assigns) do
     ~H"""
     <span class={[@name, @class]} />
@@ -204,7 +213,7 @@ defmodule PiFiWeb.CoreComponents do
   attr(:class, :any, default: "size-5")
 
   def source_icon(assigns) do
-    assigns = assign(assigns, :hero, Map.get(@source_icons, assigns.name, "hero-musical-note"))
+    assigns = assign(assigns, :hero, Map.get(@source_icons, assigns.name, "ph-music-note"))
 
     ~H"""
     <.icon name={@hero} class={@class} />

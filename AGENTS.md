@@ -442,6 +442,12 @@ must sound like one product.
 
 Use New Zealand English spelling: "licence" for the noun, "colour", "behaviour".
 
+**Text from a generator is not ours to rewrite.** The comments that Nerves wrote
+into `config/target.exs` and `config/host.exs`, and the "Targets" and "Learn more"
+sections of `README.md`, stay as they are. Rewriting them gains nothing and hides
+the difference from the template, which is the thing a person wants to see when
+the template moves.
+
 **The existing moduledocs are still in the old voice, and that is fine.** They are
 accurate, and rewriting several thousand lines of them buys nothing. Fix the voice
 of a docstring when you are already changing that code, and leave the rest alone.

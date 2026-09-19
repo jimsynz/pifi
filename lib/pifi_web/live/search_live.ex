@@ -151,7 +151,7 @@ defmodule PiFiWeb.SearchLive do
         >
           {@source.title()}
         </.link>
-        <.icon name="hero-chevron-right-micro" class="size-3 text-ink-faint" />
+        <.icon name="ph-caret-right" class="size-3 text-ink-faint" />
         <span class="rounded px-1 py-0.5 text-ink">Search</span>
       </nav>
 

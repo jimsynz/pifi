@@ -187,7 +187,7 @@ defmodule PiFiWeb.SearchAllLive do
           class="control flex shrink-0 items-center rounded-lg p-2"
           aria-label="Search"
         >
-          <.icon name="hero-magnifying-glass" class="size-5" />
+          <.icon name="ph-magnifying-glass" class="size-5" />
         </button>
       </form>
 

@@ -303,28 +303,28 @@ defmodule PiFiWeb.SettingsLive do
   def render(%{live_action: :menu} = assigns) do
     ~H"""
     <div id="settings" class="glass sheen divide-y divide-edge rounded-xl">
-      <.row id="device-row" to={~p"/settings/device"} icon="hero-identification" title="Device">
+      <.row id="device-row" to={~p"/settings/device"} icon="ph-identification-card" title="Device">
         {@device_name}
       </.row>
 
-      <.row id="output-row" to={~p"/settings/output"} icon="hero-speaker-wave" title="Output device">
+      <.row id="output-row" to={~p"/settings/output"} icon="ph-speaker-high" title="Output device">
         {output_summary(@output)}
       </.row>
 
-      <.row id="sources-row" to={~p"/settings/sources"} icon="hero-queue-list" title="Sources">
+      <.row id="sources-row" to={~p"/settings/sources"} icon="ph-queue" title="Sources">
         {sources_summary(@source_list)}
       </.row>
 
       <.row
         id="peripherals-row"
         to={~p"/settings/peripherals"}
-        icon="hero-cpu-chip"
+        icon="ph-cpu"
         title="Peripherals"
       >
         {peripherals_summary(@peripheral_list)}
       </.row>
 
-      <.row id="standby-row" to={~p"/settings/standby"} icon="hero-moon" title="Standby">
+      <.row id="standby-row" to={~p"/settings/standby"} icon="ph-moon" title="Standby">
         {standby_summary(@standby_minutes)}
       </.row>
 
@@ -332,21 +332,21 @@ defmodule PiFiWeb.SettingsLive do
         :if={@screen?}
         id="screen-row"
         to={~p"/settings/screen"}
-        icon="hero-light-bulb"
+        icon="ph-lightbulb"
         title="Screen"
       >
         {screen_summary(@screen_blank_seconds)}
       </.row>
 
 
-      <.row id="network-row" to={~p"/settings/network"} icon="hero-wifi" title="Network">
+      <.row id="network-row" to={~p"/settings/network"} icon="ph-wifi-high" title="Network">
         {network_summary(@interfaces)}
       </.row>
 
       <.row
         id="storage-row"
         to={~p"/settings/storage"}
-        icon="hero-circle-stack"
+        icon="ph-database"
         title="Storage"
       >
         {size(@storage.free_bytes)} free of {size(@storage.total_bytes)}
@@ -497,7 +497,7 @@ defmodule PiFiWeb.SettingsLive do
         id="hardware-link"
         class="mt-4 flex items-center gap-2 border-t border-edge pt-4 text-sm text-ink-dim hover:text-accent"
       >
-        <.icon name="hero-question-mark-circle" class="size-4 shrink-0" />
+        <.icon name="ph-question" class="size-4 shrink-0" />
         Can't see your audio device?
       </.link>
     </.section>
@@ -527,7 +527,7 @@ defmodule PiFiWeb.SettingsLive do
             class="group flex w-full items-center gap-3 text-left"
           >
             <.icon
-              name={if profile.id == @profile.id, do: "hero-check-circle-solid", else: "hero-circle-stack"}
+              name={if profile.id == @profile.id, do: "ph-check-circle", else: "ph-database"}
               class={[
                 "size-5 shrink-0",
                 if(profile.id == @profile.id, do: "text-accent", else: "text-ink-faint")
@@ -575,7 +575,7 @@ defmodule PiFiWeb.SettingsLive do
 
           <.use_control source={source} />
 
-          <.icon name="hero-chevron-right" class="size-4 shrink-0 text-ink-faint" />
+          <.icon name="ph-caret-right" class="size-5 shrink-0 text-ink" />
         </li>
       </ul>
     </.section>
@@ -695,7 +695,7 @@ defmodule PiFiWeb.SettingsLive do
           class="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
         >
           <.icon
-            name="hero-cpu-chip"
+            name="ph-cpu"
             class={[
               "size-5 shrink-0",
               if(peripheral.running?, do: "text-accent", else: "text-ink-faint")
@@ -990,9 +990,9 @@ defmodule PiFiWeb.SettingsLive do
     <div id={@id} class="glass sheen rounded-xl p-4">
       <div class="mb-3 flex items-center gap-2">
         <.link navigate={@back} id="back" aria-label="Back" class="control rounded-lg p-1.5">
-          <.icon name="hero-chevron-left" class="size-4" />
+          <.icon name="ph-caret-left" class="size-4" />
         </.link>
-        <h2 class="text-xs uppercase tracking-[0.18em] text-ink-faint">{@title}</h2>
+        <h2 class="label text-ink">{@title}</h2>
       </div>
 
       {render_slot(@inner_block)}
@@ -1009,14 +1009,14 @@ defmodule PiFiWeb.SettingsLive do
   defp row(assigns) do
     ~H"""
     <.link navigate={@to} id={@id} class="flex items-center gap-3 p-4">
-      <.icon name={@icon} class="size-5 shrink-0 text-ink-faint" />
+      <.icon name={@icon} class="size-6 shrink-0 text-ink" />
 
       <span class="min-w-0 grow">
-        <span class="block truncate text-ink">{@title}</span>
+        <span class="display block truncate text-ink">{@title}</span>
         <span class="block truncate text-sm text-ink-dim">{render_slot(@inner_block)}</span>
       </span>
 
-      <.icon name="hero-chevron-right" class="size-4 shrink-0 text-ink-faint" />
+      <.icon name="ph-caret-right" class="size-5 shrink-0 text-ink" />
     </.link>
     """
   end
@@ -1064,7 +1064,7 @@ defmodule PiFiWeb.SettingsLive do
         <span :if={@by_default?} class="text-xs uppercase tracking-widest text-ink-faint">
           By default
         </span>
-        <.icon name="hero-speaker-wave" class="size-5 text-accent" />
+        <.icon name="ph-speaker-high" class="size-5 text-accent" />
         <span class="sr-only">Enabled</span>
       </span>
     </button>

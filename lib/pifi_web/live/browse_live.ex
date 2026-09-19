@@ -381,6 +381,7 @@ defmodule PiFiWeb.BrowseLive do
         disabled={@path == []}
         class={[
           "rounded px-1 py-0.5",
+          "display",
           if(@path == [], do: "text-ink", else: "text-ink-dim hover:text-accent")
         ]}
       >
@@ -388,7 +389,7 @@ defmodule PiFiWeb.BrowseLive do
       </button>
 
       <span :for={{crumb, index} <- Enum.with_index(@path)} class="flex items-center gap-1">
-        <.icon name="hero-chevron-right-micro" class="size-3 text-ink-faint" />
+        <.icon name="ph-caret-right" class="size-3 text-ink-faint" />
         <button
           type="button"
           id={"crumb-#{index + 1}"}
@@ -416,7 +417,7 @@ defmodule PiFiWeb.BrowseLive do
           aria-label="Refresh this list"
           class="control flex size-8 shrink-0 items-center justify-center rounded-lg"
         >
-          <.icon name="hero-arrow-path" class="size-4" />
+          <.icon name="ph-arrows-clockwise" class="size-4" />
         </button>
 
         <button
@@ -431,7 +432,7 @@ defmodule PiFiWeb.BrowseLive do
             if(@finding?, do: "control-on")
           ]}
         >
-          <.icon name="hero-adjustments-horizontal" class="size-4" />
+          <.icon name="ph-faders-horizontal" class="size-4" />
         </button>
       </span>
     </nav>
@@ -467,7 +468,7 @@ defmodule PiFiWeb.BrowseLive do
         aria-label="Search"
         class="control flex size-9 shrink-0 items-center justify-center rounded-lg"
       >
-        <.icon name="hero-magnifying-glass" class="size-4" />
+        <.icon name="ph-magnifying-glass" class="size-4" />
       </button>
     </form>
     """
@@ -568,7 +569,7 @@ defmodule PiFiWeb.BrowseLive do
           aria-label={"Add #{@item.title} to the queue"}
           class="control flex size-9 shrink-0 items-center justify-center rounded-full hover:text-accent"
         >
-          <.icon name="hero-plus-mini" class="size-4" />
+          <.icon name="ph-plus" class="size-4" />
         </button>
 
         <button
@@ -579,7 +580,7 @@ defmodule PiFiWeb.BrowseLive do
           aria-label={"Play #{@item.title}"}
           class="control flex size-9 shrink-0 items-center justify-center rounded-full hover:text-accent"
         >
-          <.icon name="hero-play-mini" class="size-4" />
+          <.icon name="ph-play" class="size-4" />
         </button>
       </div>
     </div>
@@ -614,8 +615,8 @@ defmodule PiFiWeb.BrowseLive do
 
   defp layouts do
     [
-      {:table, "rows", "hero-bars-3", "Show this as rows"},
-      {:grid, "cards", "hero-squares-2x2", "Show this as cards"}
+      {:table, "rows", "ph-list", "Show this as rows"},
+      {:grid, "cards", "ph-squares-four", "Show this as cards"}
     ]
   end
 
@@ -636,11 +637,11 @@ defmodule PiFiWeb.BrowseLive do
           phx-value-index={index}
           class="group flex min-w-0 grow items-center gap-3 py-3 text-left"
         >
-          <.icon name="hero-folder" class="size-4 shrink-0 text-ink-faint" />
+          <.icon name="ph-folder" class="size-4 shrink-0 text-ink-faint" />
           <span class="min-w-0 grow truncate text-ink group-hover:text-accent">{name}</span>
           <.count of={Map.get(@counts, name, 0)} />
           <.icon
-            name="hero-chevron-right-mini"
+            name="ph-caret-right"
             class="size-4 shrink-0 text-ink-faint group-hover:text-accent"
           />
         </button>

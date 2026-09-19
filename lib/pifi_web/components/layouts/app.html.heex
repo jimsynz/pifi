@@ -2,7 +2,11 @@
   <div class="faceplate brushed sheen sticky top-0 z-40">
     <div class="mx-auto max-w-3xl px-3 sm:px-5">
       <div class="flex items-center gap-2 border-b border-edge py-2">
-        <nav id="sources" aria-label="Sources" class="scroller flex grow items-center gap-1 overflow-x-auto">
+        <nav
+          id="sources"
+          aria-label="Sources"
+          class="scroller flex grow items-center gap-1 overflow-x-auto"
+        >
           <.faceplate_control
             :for={source <- @sources}
             id={"source-#{source.slug}"}
@@ -25,7 +29,7 @@
           standby?={@standby?}
           class="flex shrink-0 items-center rounded-lg p-2"
         >
-          <.icon name="hero-magnifying-glass" class="size-5" />
+          <.icon name="ph-magnifying-glass" class="size-5" />
         </.faceplate_control>
 
         <.faceplate_control
@@ -36,7 +40,7 @@
           standby?={@standby?}
           class="flex shrink-0 items-center rounded-lg p-2"
         >
-          <.icon name="hero-list-bullet" class="size-5" />
+          <.icon name="ph-list-bullets" class="size-5" />
         </.faceplate_control>
 
         <.faceplate_control
@@ -47,7 +51,7 @@
           standby?={@standby?}
           class="flex shrink-0 items-center rounded-lg p-2"
         >
-          <.icon name="hero-queue-list" class="size-5" />
+          <.icon name="ph-queue" class="size-5" />
         </.faceplate_control>
 
         <.faceplate_control
@@ -58,7 +62,7 @@
           standby?={@standby?}
           class="flex shrink-0 items-center rounded-lg p-2"
         >
-          <.icon name="hero-clock" class="size-5" />
+          <.icon name="ph-clock" class="size-5" />
         </.faceplate_control>
 
         <.faceplate_control
@@ -69,7 +73,7 @@
           standby?={@standby?}
           class="flex shrink-0 items-center rounded-lg p-2"
         >
-          <.icon name="hero-cog-6-tooth" class="size-5" />
+          <.icon name="ph-gear" class="size-5" />
         </.faceplate_control>
       </div>
     </div>

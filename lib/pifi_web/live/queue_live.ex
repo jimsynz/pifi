@@ -116,7 +116,7 @@ defmodule PiFiWeb.QueueLive do
     <div id="queue" class="glass sheen rounded-xl p-4">
       <div class="mb-3 flex items-center gap-2">
         <.link navigate={~p"/"} id="back" aria-label="Back" class="control rounded-lg p-1.5">
-          <.icon name="hero-chevron-left" class="size-4" />
+          <.icon name="ph-caret-left" class="size-4" />
         </.link>
         <h2 class="grow text-xs uppercase tracking-[0.18em] text-ink-faint">Play queue</h2>
 
@@ -181,7 +181,7 @@ defmodule PiFiWeb.QueueLive do
       </button>
 
       <span :if={@row.playing?} class="shrink-0 text-accent" aria-label="Playing now">
-        <.icon name="hero-speaker-wave" class="size-4" />
+        <.icon name="ph-speaker-high" class="size-4" />
       </span>
 
       <span
@@ -190,7 +190,7 @@ defmodule PiFiWeb.QueueLive do
         aria-label="Drag to reorder"
         class="control shrink-0 cursor-grab touch-none rounded-lg p-1 active:cursor-grabbing"
       >
-        <.icon name="hero-bars-2-mini" class="size-4" />
+        <.icon name="ph-rows" class="size-4" />
       </span>
 
       <button
@@ -201,7 +201,7 @@ defmodule PiFiWeb.QueueLive do
         aria-label="Remove from the queue"
         class="control rounded-lg p-1"
       >
-        <.icon name="hero-x-mark-mini" class="size-4" />
+        <.icon name="ph-x" class="size-4" />
       </button>
     </div>
     """

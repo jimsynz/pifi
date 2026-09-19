@@ -70,6 +70,10 @@ defmodule PiFi.Screen.Renderer do
   screen then names the family with `Emerge.UI.Font.family/1`.
   `PiFi.Screen.Style.display_face/0` is the one place that names it.
 
+  **The file lives under `priv/static`, where the web interface also serves it.**
+  Everything under `priv` goes into the firmware, so a second copy for the renderer
+  would put 91 kB of the same bytes on a card that holds the music.
+
   **A renderer that cannot read the file still starts.** A screen that draws in
   another face is a screen that a person can read, and a screen that will not start
   is a black panel. See `load_display_face/1`.
@@ -179,7 +183,7 @@ defmodule PiFi.Screen.Renderer do
   # on the glass and only the shape of them changes. A renderer that refused to start
   # for a missing font would give a person a black panel instead.
   defp load_display_face(renderer) do
-    path = Application.app_dir(:pifi, ["priv", "fonts", "ArchivoBlack-Regular.ttf"])
+    path = Application.app_dir(:pifi, ["priv", "static", "fonts", "ArchivoBlack-Regular.ttf"])
 
     case EmergeSkia.load_font_file(renderer, Style.display_face(), 400, false, path) do
       :ok ->

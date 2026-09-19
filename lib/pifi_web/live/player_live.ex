@@ -284,7 +284,7 @@ defmodule PiFiWeb.PlayerLive do
         <.round_control
           id="standby"
           click="standby"
-          icon="hero-power"
+          icon="ph-power"
           label={if @standby?, do: "Leave standby", else: "Standby"}
           pressed={@standby?}
           on?={not @standby?}
@@ -311,7 +311,7 @@ defmodule PiFiWeb.PlayerLive do
             />
             <.icon
               :if={is_nil(@artwork_path)}
-              name="hero-musical-note"
+              name="ph-music-note"
               class="size-5 text-ink-faint"
             />
           </button>
@@ -328,7 +328,7 @@ defmodule PiFiWeb.PlayerLive do
             </p>
 
             <div class="flex items-center gap-2">
-              <p id="title" class="truncate text-[0.95rem] font-medium text-ink">
+              <p id="title" class="display truncate text-[0.95rem] text-ink">
                 {@stream_title || title(@track) || "Nothing selected"}
               </p>
               <.live_badge :if={@live?} id="live" />
@@ -355,7 +355,7 @@ defmodule PiFiWeb.PlayerLive do
         <.round_control
           id="stop"
           click="stop"
-          icon="hero-stop"
+          icon="ph-stop"
           label="Stop"
           disabled={@status == :idle or @standby?}
         />
@@ -370,13 +370,13 @@ defmodule PiFiWeb.PlayerLive do
       >
         <div
           class="pointer-events-none absolute inset-x-0 top-0 h-2/3 opacity-25"
-          style="background: radial-gradient(80% 70% at 50% 0%, var(--color-accent), transparent 72%)"
+          style="background: var(--color-cyan)"
         />
 
         <.round_control
           id="collapse"
           click="collapse"
-          icon="hero-x-mark"
+          icon="ph-x"
           label="Close the full player"
           class="absolute right-5 top-5 size-10"
         />
@@ -391,7 +391,7 @@ defmodule PiFiWeb.PlayerLive do
           />
           <.icon
             :if={is_nil(@artwork_path)}
-            name="hero-musical-note"
+            name="ph-music-note"
             class="size-16 text-ink-faint"
           />
         </div>
@@ -425,7 +425,7 @@ defmodule PiFiWeb.PlayerLive do
             <.round_control
               id="previous"
               click="previous"
-              icon="hero-backward"
+              icon="ph-rewind"
               label="Previous track"
               disabled={is_nil(@track)}
             />
@@ -433,7 +433,7 @@ defmodule PiFiWeb.PlayerLive do
               id="back"
               click="skip"
               phx-value-ms="-15000"
-              icon="hero-arrow-uturn-left"
+              icon="ph-arrow-u-up-left"
               label="Back 15 seconds"
               disabled={:skip not in @capabilities or @status != :playing}
             />
@@ -442,14 +442,14 @@ defmodule PiFiWeb.PlayerLive do
               id="forward"
               click="skip"
               phx-value-ms="30000"
-              icon="hero-arrow-uturn-right"
+              icon="ph-arrow-u-up-right"
               label="Forward 30 seconds"
               disabled={:skip not in @capabilities or @status != :playing}
             />
             <.round_control
               id="next"
               click="next"
-              icon="hero-forward"
+              icon="ph-fast-forward"
               label="Next track"
               disabled={is_nil(@track)}
             />
@@ -460,7 +460,7 @@ defmodule PiFiWeb.PlayerLive do
             id="volume"
             class="mt-6 flex items-center gap-3"
           >
-            <.icon name="hero-speaker-x-mark" class="size-4 shrink-0 text-ink-faint" />
+            <.icon name="ph-speaker-x" class="size-4 shrink-0 text-ink-faint" />
             <form phx-change="set_volume" class="grow">
               <input
                 type="range"
@@ -474,7 +474,7 @@ defmodule PiFiWeb.PlayerLive do
                 class="w-full accent-[var(--color-accent)]"
               />
             </form>
-            <.icon name="hero-speaker-wave" class="size-4 shrink-0 text-ink-faint" />
+            <.icon name="ph-speaker-high" class="size-4 shrink-0 text-ink-faint" />
             <span class="numerals w-10 shrink-0 text-right text-sm text-ink-dim">
               {@volume.percent}
             </span>
@@ -484,7 +484,7 @@ defmodule PiFiWeb.PlayerLive do
             <.round_control
               id="expanded-standby"
               click="standby"
-              icon="hero-power"
+              icon="ph-power"
               label={if @standby?, do: "Leave standby", else: "Standby"}
               pressed={@standby?}
               on?={not @standby?}
@@ -492,7 +492,7 @@ defmodule PiFiWeb.PlayerLive do
             <.round_control
               id="expanded-stop"
               click="stop"
-              icon="hero-stop"
+              icon="ph-stop"
               label="Stop"
               disabled={@status == :idle}
             />
@@ -534,7 +534,7 @@ defmodule PiFiWeb.PlayerLive do
     <.round_control
       id={@id}
       click="play_pause"
-      icon={if sounding?(assigns), do: "hero-pause", else: "hero-play"}
+      icon={if sounding?(assigns), do: "ph-pause", else: "ph-play"}
       label={if sounding?(assigns), do: "Pause", else: "Play"}
       disabled={is_nil(@track) or @standby?}
       class={@class}
@@ -604,7 +604,7 @@ defmodule PiFiWeb.PlayerLive do
         <div
           class={[
             "absolute inset-y-[2px] left-[2px] rounded-[1px]",
-            if(@battery.low?, do: "bg-rose-400", else: "bg-ink-dim")
+            if(@battery.low?, do: "bg-coral", else: "bg-ink-dim")
           ]}
           style={"width: #{bar_width(@battery.percent)}"}
         >
@@ -613,7 +613,7 @@ defmodule PiFiWeb.PlayerLive do
 
       <div class={[
         "h-1.5 w-[2px] rounded-[1px]",
-        if(@battery.low?, do: "bg-rose-400", else: "bg-ink-dim")
+        if(@battery.low?, do: "bg-coral", else: "bg-ink-dim")
       ]}>
       </div>
     </div>

@@ -13,6 +13,15 @@ another size stops the suite as well.
 
 A new screen needs a file in `priv/splash` of the size of that screen.
 
+## The lockup
+
+`pifi-logo.svg` is the lockup from the website, copied here so this repository
+can draw its own mark without the website being up. `pifi-logo.png` is that file
+at 360 by 252, which is what `README.md` shows. Two reasons for a PNG at that
+size: Forgejo and the GitHub mirror both render a PNG from a relative path and
+neither is reliable with an SVG, and a markdown image carries no width, so the
+file has to be the size that it draws at.
+
 ## The PiFi mark
 
 `pifi-320x240.svg` and `pifi-240x240.svg` hold the lockup of the website, at the

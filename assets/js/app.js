@@ -41,8 +41,26 @@ const liveSocket = new LiveSocket("/live", Socket, {
 accent()
 cover()
 
-// Show progress bar on live navigation and form submits
-topbar.config({barColors: {0: "#e2a854"}, shadowColor: "rgba(0, 0, 0, .3)"})
+// The bar that runs across the top of the page while it loads.
+//
+// A flat block of one colour, and no blur under it, which is the rule that the rest
+// of this interface follows. topbar draws a gradient of five colours with a shadow
+// blurred by 10 pixels when nothing says otherwise, and that is the language this
+// design replaced.
+//
+// **`barColors` names a stop of a gradient, so one stop is a flat fill.** The colour
+// is the coral of the palette, which reads on the paper ground and on the dark one,
+// and it is the one colour that this interface gives to nothing else at rest.
+//
+// `shadowBlur` is 0 because a blur is what a hard shadow is not. topbar offsets its
+// shadow by nothing, so a shadow of 0 blur would sit exactly behind the bar and show
+// no edge at all: the colour is therefore transparent, and the bar is the whole mark.
+topbar.config({
+  barThickness: 6,
+  barColors: {0: "#ff6b6b"},
+  shadowBlur: 0,
+  shadowColor: "rgba(0, 0, 0, 0)"
+})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 

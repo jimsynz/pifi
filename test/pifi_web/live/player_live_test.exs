@@ -338,7 +338,7 @@ defmodule PiFiWeb.PlayerLiveTest do
       Event.publish(:player, %Events.Started{track: track(), source: nil, artwork_path: nil})
 
       html = player |> element("#play-pause") |> render()
-      assert html =~ "hero-pause"
+      assert html =~ "ph-pause"
       assert html =~ "Pause"
     end
 
@@ -354,7 +354,7 @@ defmodule PiFiWeb.PlayerLiveTest do
       assert html =~ "RNZ National"
       assert html =~ "01:30"
 
-      assert player |> element("#play-pause") |> render() =~ "hero-play"
+      assert player |> element("#play-pause") |> render() =~ "ph-play"
     end
 
     test "a pause asks the player to pause", %{conn: conn} do

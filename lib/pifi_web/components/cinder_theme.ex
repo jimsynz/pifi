@@ -68,6 +68,16 @@ defmodule PiFiWeb.CinderTheme do
 
   set :search_icon_class, "size-4 text-ink-faint"
 
+  # **Cinder names three of its marks through the theme, and this one names them in the
+  # weight that the rest of the interface holds.** See `assets/vendor/phosphor.js`.
+  #
+  # `Cinder.Controls` writes `hero-chevron-down` and `hero-chevron-right` into the
+  # filter toggle itself, and no theme reaches those two, so they stay in the thin
+  # weight until that template changes upstream.
+  set :sort_asc_icon_name, "ph-caret-up"
+  set :sort_desc_icon_name, "ph-caret-down"
+  set :sort_none_icon_name, "ph-caret-up-down"
+
   set :filter_clear_button_class,
       "ml-1 flex size-8 shrink-0 items-center justify-center rounded-full text-ink-faint hover:text-accent"
 
@@ -85,7 +95,7 @@ defmodule PiFiWeb.CinderTheme do
   set :filter_select_dropdown_class,
       "glass absolute z-20 mt-1 w-full overflow-hidden rounded-lg p-1"
 
-  set :filter_select_option_class, "rounded px-2 py-1.5 hover:bg-edge"
+  set :filter_select_option_class, "px-2 py-1.5 hover:bg-yellow"
   set :filter_select_label_class, "text-sm text-ink"
   set :filter_select_empty_class, "px-2 py-1.5 text-sm text-ink-faint"
 
@@ -135,7 +145,7 @@ defmodule PiFiWeb.CinderTheme do
   # else.
   set :list_container_class, "divide-y divide-edge"
   set :list_item_class, "px-1 py-1.5 text-ink"
-  set :list_item_clickable_class, "cursor-pointer rounded-lg transition-colors hover:bg-edge"
+  set :list_item_clickable_class, "cursor-pointer transition-colors hover:bg-yellow"
 
   # Pagination. The count reads as a meter, in the numerals of the fascia.
   set :pagination_wrapper_class, "mt-4 border-t border-edge pt-3"

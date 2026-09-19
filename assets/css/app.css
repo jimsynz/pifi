@@ -3,6 +3,7 @@
 
 @import "tailwindcss";
 @plugin "../vendor/heroicons";
+@plugin "../vendor/phosphor";
 @plugin "../vendor/brand";
 @source "../js";
 @source "../../lib/pifi_web";
@@ -22,109 +23,199 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+
+/* ---------------------------------------------------------------------------
+   Neubrutalism.
+
+   The web interface follows the style of the PiFi website and of the screens of
+   the device: flat colour, a hard border, an offset shadow with no blur, and no
+   round corner anywhere. See <https://neubrutalism.com/#anatomy> for the rules,
+   `sass/main.scss` of the website for the palette, and `PiFi.Screen.Style` for
+   the same decisions made for a 240 pixel panel.
+
+   **The utilities keep the names that they had.** A template names `faceplate`,
+   `glass`, `recess` and `control`, and this file changes what each one means, so
+   the whole interface moves and no template of a page has to.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Archivo Black";
+  src: url("/fonts/ArchivoBlack-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
-  --color-shell: oklch(0.14 0.006 264);
-  --color-fascia: oklch(0.21 0.008 264);
-  --color-fascia-top: oklch(0.27 0.009 264);
-  --color-panel: oklch(0.19 0.007 264);
-  --color-recess: oklch(0.16 0.006 264);
+  /* Cyan and amber are the colours of the mark. The rest come from the canonical
+     neubrutalist palette. */
+  --color-cyan: #2fc6e8;
+  --color-amber: #ffb020;
+  --color-coral: #ff6b6b;
+  --color-lavender: #b8a9fa;
+  --color-green: #88d498;
+  --color-yellow: #ffd23f;
 
-  --color-edge: oklch(1 0 0 / 0.09);
-  --color-edge-bright: oklch(1 0 0 / 0.16);
+  --color-shell: #f7f2e7;
+  --color-fascia: #fffdf5;
+  --color-fascia-top: #fffdf5;
+  --color-panel: #fffdf5;
+  --color-recess: #f7f2e7;
 
-  --color-ink: oklch(0.95 0.004 264);
-  --color-ink-dim: oklch(0.72 0.006 264);
-  --color-ink-faint: oklch(0.55 0.008 264);
+  --color-edge: #101010;
+  --color-edge-bright: #101010;
 
-  --color-accent: oklch(0.78 0.15 74);
+  --color-ink: #101010;
+  --color-ink-dim: #4a4a4a;
+  --color-ink-faint: #6b6b6b;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+  --color-accent: #2fc6e8;
+
+  /* The shadow is a colour of its own, because a black shadow on a dark ground is
+     nothing at all. The dark scheme below borrows the cyan of the mark for it. */
+  --color-shadow: #101010;
+
+  --border-weight: 3px;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Archivo Black", "Arial Black", Impact, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 }
 
-/* The accent follows the artwork, so it needs a type before it can transition. */
-@property --color-accent {
-  syntax: "<color>";
-  inherits: true;
-  initial-value: rgb(226 168 84);
+/* A black shadow on a dark ground is invisible, and the offset shadow is the whole
+   point of the style, so the dark scheme borrows the glow of the mark. This is the
+   choice that `sass/main.scss` of the website makes, for the same reason.
+
+   **These are plain custom properties and not a second `@theme`.** Tailwind merges
+   every `@theme` block into one set of values, so a `@theme` inside a media query
+   does not scope to that query: it replaces the light value, and the light scheme
+   then never draws at all. An override on `:root` is what a media query can hold. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-shell: #131313;
+    --color-fascia: #1d1d1d;
+    --color-fascia-top: #1d1d1d;
+    --color-panel: #1d1d1d;
+    --color-recess: #131313;
+
+    --color-edge: #f7f2e7;
+    --color-edge-bright: #f7f2e7;
+
+    --color-ink: #f7f2e7;
+    --color-ink-dim: #9a968d;
+    --color-ink-faint: #7a766e;
+
+    --color-shadow: #2fc6e8;
+  }
+}
+
+/* **Square corners are mandatory, and this rule is how a dependency gets them.**
+   Cinder writes 115 `rounded-*` classes into templates that this project does not
+   own, and `PiFiWeb.CinderTheme` reaches only the class slots that Cinder exposes.
+   A reset of lower specificity loses to `.rounded-lg`, so this one carries
+   `!important`.
+
+   It covers the classes in our own templates as well, and those could be swept
+   instead. That sweep touches 104 places, changes not one pixel while this rule
+   stands, and would have to be redone the moment Cinder moves. It is not worth the
+   diff until the dependency stops needing the rule. */
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
 }
 
 html {
-  transition: --color-accent 700ms ease;
+  background: var(--color-shell);
 }
 
+/* The faint grid of the website, which reads as a drawing board under the panels. */
 body {
   background:
-    radial-gradient(
-      120% 42% at 50% 0%,
-      color-mix(in oklab, var(--color-accent) 12%, transparent) 0%,
-      transparent 70%
+    repeating-linear-gradient(
+      0deg,
+      color-mix(in srgb, var(--color-ink) 6%, transparent) 0 1px,
+      transparent 1px 34px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-ink) 6%, transparent) 0 1px,
+      transparent 1px 34px
     ),
     var(--color-shell);
-  background-attachment: fixed;
+  color: var(--color-ink);
 }
 
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+}
+
+/* **The focus ring must clear the shadow.** A decorative offset shadow can hide a
+   ring that sits on the edge of the element, so this one stands off it. */
+:focus-visible {
+  outline: 3px solid var(--color-cyan);
+  outline-offset: 3px;
+}
+
+/* **A rule between two rows carries the weight of a border and not of a hairline.**
+   The templates name `divide-y`, which Tailwind draws at one pixel, and a hairline is
+   the grammar of the style that this one replaces. */
+.divide-y > :not([hidden]) ~ :not([hidden]) {
+  border-top-width: var(--border-weight);
+  border-color: var(--color-ink);
+}
+
+/* The bar at the head of the page. A heavy rule under it, and no gradient. */
 @utility faceplate {
-  background:
-    linear-gradient(
-      180deg,
-      var(--color-fascia-top) 0%,
-      var(--color-fascia) 58%,
-      color-mix(in oklab, var(--color-fascia) 88%, black) 100%
-    );
-  box-shadow:
-    inset 0 1px 0 var(--color-edge-bright),
-    inset 0 -1px 0 oklch(0 0 0 / 0.5),
-    0 18px 40px -20px oklch(0 0 0 / 0.9);
+  background: var(--color-fascia);
+  border-bottom: var(--border-weight) solid var(--color-ink);
 }
 
+/* The brushed metal and the curved glass of the old fascia have no place in a style
+   whose grammar is the flat fill. They stay as names so that no template changes. */
 @utility brushed {
-  background-image: repeating-linear-gradient(
-    90deg,
-    oklch(1 0 0 / 0.022) 0px,
-    oklch(1 0 0 / 0.022) 1px,
-    transparent 1px,
-    transparent 3px
-  );
+  background-image: none;
 }
 
-@utility glass {
-  background: color-mix(in oklab, var(--color-panel) 72%, transparent);
-  backdrop-filter: blur(18px) saturate(1.4);
-  border: 1px solid var(--color-edge);
-  box-shadow:
-    inset 0 1px 0 var(--color-edge-bright),
-    0 10px 30px -18px oklch(0 0 0 / 0.8);
-}
-
-@utility recess {
-  background: var(--color-recess);
-  box-shadow:
-    inset 0 2px 6px oklch(0 0 0 / 0.55),
-    inset 0 -1px 0 var(--color-edge);
-}
-
-/* A curved glass fascia catches the light along its top edge. */
 @utility sheen {
   position: relative;
-  isolation: isolate;
+}
 
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    pointer-events: none;
-    border-radius: inherit;
-    background: linear-gradient(
-      168deg,
-      oklch(1 0 0 / 0.07) 0%,
-      oklch(1 0 0 / 0.02) 34%,
-      transparent 52%
-    );
-  }
+/* A card: flat fill, heavy outline, hard offset shadow. */
+@utility glass {
+  background: var(--color-panel);
+  border: var(--border-weight) solid var(--color-ink);
+  box-shadow: 5px 5px 0 0 var(--color-shadow);
+}
+
+/* A well that something sits in. Flat, and the border does the work that the inner
+   shadow used to do. */
+@utility recess {
+  background: var(--color-recess);
+  border: var(--border-weight) solid var(--color-ink);
+}
+
+/* The display face of the mark, for a heading and for the name of a thing in a list.
+   **The body stays in the utility face.** The contrast between a loud display and a
+   calm body is the whole typographic trick, and a list of 13 pixel rows set in a black
+   weight is a list that no person reads. */
+@utility display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+/* A label: short, in capitals, and spaced out. `VOLUME` and `VIEWING` are labels, and
+   the screens of the device write theirs the same way. See `PiFi.Screen.Style`. */
+@utility label {
+  font-family: var(--font-display);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 
 @utility numerals {
@@ -133,26 +224,24 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* A light on the faceplate. It is a block of colour and it does not glow: a glow is
+   a blur, and the blur of a hard shadow is always zero. */
 @utility led {
-  background: var(--color-accent);
-  box-shadow:
-    0 0 6px color-mix(in oklab, var(--color-accent) 80%, transparent),
-    0 0 16px color-mix(in oklab, var(--color-accent) 45%, transparent);
+  background: var(--color-cyan);
+  border: 2px solid var(--color-ink);
 }
 
-/* The row of the item that plays holds a level meter, and each bar of it moves. */
 @utility meter {
   display: flex;
   align-items: flex-end;
   gap: 2px;
 
   & span {
-    width: 2px;
+    width: 3px;
     height: 0.7rem;
-    border-radius: 1px;
-    background: var(--color-accent);
+    background: var(--color-cyan);
     transform-origin: bottom;
-    animation: meter-bar 900ms ease-in-out infinite;
+    animation: meter-bar 900ms steps(3, end) infinite;
   }
 
   & span:nth-child(2) {
@@ -182,26 +271,26 @@ body {
   }
 }
 
+/* A control lifts towards a person who points at it, and it presses down when they
+   press it. **The lift is a move and a larger shadow, and never a blur.** */
 @utility control {
-  color: var(--color-ink-dim);
-  background: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--color-fascia-top) 92%, transparent) 0%,
-    var(--color-panel) 100%
-  );
-  border: 1px solid var(--color-edge);
-  box-shadow:
-    inset 0 1px 0 var(--color-edge-bright),
-    0 2px 4px -2px oklch(0 0 0 / 0.7);
-  transition: color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  color: var(--color-ink);
+  background: var(--color-panel);
+  border: var(--border-weight) solid var(--color-ink);
+  box-shadow: 3px 3px 0 0 var(--color-shadow);
+  font-weight: 700;
+  transition: transform 90ms steps(2, end), box-shadow 90ms steps(2, end),
+    background 90ms steps(2, end);
 
   &:hover:not(:disabled) {
-    color: var(--color-ink);
-    border-color: var(--color-edge-bright);
+    background: var(--color-yellow);
+    transform: translate(-2px, -2px);
+    box-shadow: 5px 5px 0 0 var(--color-shadow);
   }
 
   &:active:not(:disabled) {
-    box-shadow: inset 0 2px 5px oklch(0 0 0 / 0.6);
+    transform: translate(3px, 3px);
+    box-shadow: none;
   }
 
   &:disabled {
@@ -211,16 +300,52 @@ body {
   }
 }
 
+/* The control of the page that a person is on. A block of colour says it, and the
+   colour is the first one of the mark. */
 @utility control-on {
-  color: var(--color-accent);
-  border-color: color-mix(in oklab, var(--color-accent) 45%, transparent);
-  box-shadow:
-    inset 0 1px 0 var(--color-edge-bright),
-    0 0 0 1px color-mix(in oklab, var(--color-accent) 22%, transparent),
-    0 0 18px -4px color-mix(in oklab, var(--color-accent) 55%, transparent);
+  color: var(--color-ink);
+  background: var(--color-cyan);
+
+  /* A mark inside the control takes the colour of the control. A class of the old
+     style named the accent for the icon, and an accent icon on an accent block is a
+     block with nothing in it. */
+  & :where(*) {
+    color: var(--color-ink);
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--color-cyan);
+  }
 }
 
+/* A box that scrolls sideways, and keeps the offset shadow of what is inside it.
+   **`overflow-x` set to anything but `visible` makes `overflow-y` compute to the same
+   value**, so a row that scrolls sideways clips the shadow at its foot as well. The
+   row of the sources met this: each control kept its border and lost the shadow that
+   the rest of the interface has.
+
+   The padding gives the shadow room to fall into, inside the box that clips, and the
+   negative margin takes that room back out of the layout. It holds the 3 pixels of a
+   shadow at rest. A control that a person points at moves 2 pixels and grows its
+   shadow to 5, so a corner of it clips while the pointer is on it, and that is the
+   price of a row that scrolls. */
 @utility scroller {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-edge-bright) transparent;
+  scrollbar-color: var(--color-ink) transparent;
+  margin: -0.25rem;
+  padding: 0.25rem;
+}
+
+/* An input is a card that a person types in. */
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="password"],
+input[type="url"],
+select,
+textarea {
+  background: var(--color-panel);
+  border: var(--border-weight) solid var(--color-ink);
+  box-shadow: 3px 3px 0 0 var(--color-shadow);
+  color: var(--color-ink);
 }

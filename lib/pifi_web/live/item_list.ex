@@ -227,7 +227,7 @@ defmodule PiFiWeb.ItemList do
       "relative flex shrink-0 items-center justify-center overflow-hidden rounded",
       @class
     ]}>
-      <.icon name="hero-folder" class={[@icon_class, "text-ink-faint"]} />
+      <.icon name="ph-folder" class={[@icon_class, "text-ink-faint"]} />
       <img
         :if={@path}
         src={@path}
@@ -275,13 +275,13 @@ defmodule PiFiWeb.ItemList do
       phx-value-id={@row.id}
       class="group flex w-full min-w-0 items-center gap-3 py-1 text-left"
     >
-      <.icon name="hero-folder" class="size-4 shrink-0 text-ink-faint" />
-      <span class="min-w-0 grow truncate text-ink group-hover:text-accent">
+      <.icon name="ph-folder" class="size-4 shrink-0 text-ink-faint" />
+      <span class="display min-w-0 grow truncate text-ink group-hover:text-accent">
         {to_string(@row.value.value)}
       </span>
       <.count of={@row.item_count} />
       <.icon
-        name="hero-chevron-right-mini"
+        name="ph-caret-right"
         class="size-4 shrink-0 text-ink-faint group-hover:text-accent"
       />
     </button>
@@ -302,12 +302,12 @@ defmodule PiFiWeb.ItemList do
       >
         <.cover path={@artwork} class="size-8" />
         <span class="min-w-0 grow">
-          <span class="block truncate text-ink group-hover:text-accent">{@row.title}</span>
+          <span class="display block truncate text-ink group-hover:text-accent">{@row.title}</span>
           <.facts :if={@facts != []} row={@row} facts={@facts} />
         </span>
         <.count of={@row.child_count} />
         <.icon
-          name="hero-chevron-right-mini"
+          name="ph-caret-right"
           class="size-4 shrink-0 text-ink-faint group-hover:text-accent"
         />
       </button>
@@ -380,13 +380,13 @@ defmodule PiFiWeb.ItemList do
       <span :if={@status == :playing} class="meter" aria-hidden="true">
         <span /><span /><span />
       </span>
-      <.icon :if={@status == :paused} name="hero-pause-mini" class="size-4" />
+      <.icon :if={@status == :paused} name="ph-pause" class="size-4" />
       <.icon
         :if={@status == :buffering}
-        name="hero-arrow-path-mini"
+        name="ph-arrows-clockwise"
         class="size-4 motion-safe:animate-spin"
       />
-      <.icon :if={is_nil(@status)} name="hero-play-mini" class="size-4" />
+      <.icon :if={is_nil(@status)} name="ph-play" class="size-4" />
     </span>
     """
   end
@@ -405,7 +405,7 @@ defmodule PiFiWeb.ItemList do
   def play_cell(%{kind: :facet} = assigns) do
     ~H"""
     <span class="flex size-8 items-center justify-center text-ink-faint">
-      <.icon name="hero-folder" class="size-4" />
+      <.icon name="ph-folder" class="size-4" />
     </span>
     """
   end
@@ -478,7 +478,7 @@ defmodule PiFiWeb.ItemList do
     >
       <.cover path={@artwork} class="size-8" />
       <span class="min-w-0">
-        <span class="block truncate text-ink group-hover:text-accent">{@row.title}</span>
+        <span class="display block truncate text-ink group-hover:text-accent">{@row.title}</span>
         <.facts :if={@facts != []} row={@row} facts={@facts} />
       </span>
       <.count of={@row.child_count} />
@@ -489,7 +489,7 @@ defmodule PiFiWeb.ItemList do
   def title_cell(assigns) do
     ~H"""
     <span class="block min-w-0">
-      <span class="block truncate text-ink">{@row.title}</span>
+      <span class="display block truncate text-ink">{@row.title}</span>
       <.facts :if={@facts != []} row={@row} facts={@facts} />
       <span :if={@facts == [] and @row.subtitle} class="block truncate text-xs text-ink-faint">
         {@row.subtitle}
@@ -636,7 +636,7 @@ defmodule PiFiWeb.ItemList do
       aria-label={"Add #{@row.title} to the queue"}
       class="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-faint hover:text-ink"
     >
-      <.icon name="hero-plus" class="size-5" />
+      <.icon name="ph-plus" class="size-5" />
     </button>
     """
   end
@@ -657,7 +657,7 @@ defmodule PiFiWeb.ItemList do
       aria-label={"Put #{@row.title} in a playlist"}
       class="flex size-9 shrink-0 items-center justify-center rounded-full text-ink-faint hover:text-ink"
     >
-      <.icon name="hero-list-bullet" class="size-5" />
+      <.icon name="ph-list-bullets" class="size-5" />
     </button>
     """
   end
@@ -691,7 +691,7 @@ defmodule PiFiWeb.ItemList do
           aria-label="Cancel"
           class="control rounded-lg p-1.5"
         >
-          <.icon name="hero-x-mark" class="size-4" />
+          <.icon name="ph-x" class="size-4" />
         </button>
       </div>
 
@@ -704,7 +704,7 @@ defmodule PiFiWeb.ItemList do
             phx-value-playlist={playlist.id}
             class="flex w-full items-center gap-3 py-2 text-left hover:text-accent"
           >
-            <.icon name="hero-list-bullet" class="size-5 shrink-0 text-ink-faint" />
+            <.icon name="ph-list-bullets" class="size-5 shrink-0 text-ink-faint" />
             <span class="min-w-0 grow truncate text-ink">{playlist.name}</span>
           </button>
         </li>
@@ -741,11 +741,11 @@ defmodule PiFiWeb.ItemList do
     ~H"""
     <span :if={@audio} class="flex shrink-0 items-center gap-1 text-xs text-ink-faint">
       <span :if={@audio != :held} class="numerals">{@audio}</span>
-      <.icon :if={@audio == :held} name="hero-arrow-down-tray-mini" class="size-4" />
+      <.icon :if={@audio == :held} name="ph-download-simple" class="size-4" />
       <span :if={@audio == :held} class="sr-only">Downloaded</span>
       <.icon
         :if={@audio != :held}
-        name="hero-arrow-path-mini"
+        name="ph-arrows-clockwise"
         class="size-4 motion-safe:animate-spin"
       />
     </span>
@@ -923,7 +923,7 @@ defmodule PiFiWeb.ItemList do
     ~H"""
     <span
       :if={@of > 0}
-      class="numerals shrink-0 rounded-full bg-edge px-2 py-0.5 text-[0.7rem] text-ink-faint"
+      class="numerals shrink-0 border-2 border-ink px-1.5 text-[0.7rem] leading-5 text-ink"
     >
       {@of}
     </span>
@@ -959,7 +959,7 @@ defmodule PiFiWeb.ItemList do
         if(@row.favourite?, do: "text-accent", else: "text-ink-faint hover:text-ink")
       ]}
     >
-      <.icon name={if @row.favourite?, do: "hero-star-solid", else: "hero-star"} class="size-5" />
+      <.icon name={if @row.favourite?, do: "ph-star", else: "ph-star"} class="size-5" />
     </button>
     """
   end
@@ -995,7 +995,7 @@ defmodule PiFiWeb.ItemList do
       ]}
     >
       <.icon
-        name={if @row.played?, do: "hero-check-circle-solid", else: "hero-check-circle"}
+        name={if @row.played?, do: "ph-check-circle", else: "ph-check-circle"}
         class="size-5"
       />
     </button>

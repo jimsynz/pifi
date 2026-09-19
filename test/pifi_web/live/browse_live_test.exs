@@ -1571,7 +1571,7 @@ defmodule PiFiWeb.BrowseLiveTest do
 
       {:ok, _view, html} = live(conn, "#{@podcasts}/subscriptions")
 
-      assert html =~ "hero-folder"
+      assert html =~ "ph-folder"
       assert html =~ "data-cover"
     end
   end

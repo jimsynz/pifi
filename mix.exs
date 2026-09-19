@@ -152,6 +152,22 @@ defmodule PiFi.MixProject do
       {:membrane_mp3_mad_plugin, "~> 0.18"},
       {:membrane_mpeg_ts_plugin, "~> 2.4"},
       {:gettext, "~> 1.0"},
+      # **Phosphor holds one weight across the whole set, and Heroicons does not.** The
+      # solid set of Heroicons fills a gear and leaves a magnifying glass as a thin
+      # ring, and beside a border of 3 pixels that difference is the thing that a
+      # person sees. `assets/vendor/phosphor.js` reads the bold weight of this.
+      #
+      # Heroicons stays, because Cinder names four of its chevrons and this project
+      # does not own those templates. See `assets/vendor/phosphor.js`.
+      {:phosphor_icons,
+       [
+         github: "phosphor-icons/core",
+         tag: "v2.0.8",
+         sparse: "assets/bold",
+         app: false,
+         compile: false,
+         depth: 1
+       ]},
       {:heroicons,
        [
          github: "tailwindlabs/heroicons",

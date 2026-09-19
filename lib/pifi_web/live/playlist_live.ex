@@ -174,7 +174,7 @@ defmodule PiFiWeb.PlaylistLive do
     <div id="playlists" class="glass sheen rounded-xl p-4">
       <div class="mb-3 flex items-center gap-2">
         <.link navigate={~p"/"} id="back" aria-label="Back" class="control rounded-lg p-1.5">
-          <.icon name="hero-chevron-left" class="size-4" />
+          <.icon name="ph-caret-left" class="size-4" />
         </.link>
         <h2 class="grow text-xs uppercase tracking-[0.18em] text-ink-faint">Playlists</h2>
 
@@ -230,7 +230,7 @@ defmodule PiFiWeb.PlaylistLive do
               id={"open-#{playlist.id}"}
               class="group flex min-w-0 grow items-center gap-3 py-2 text-left"
             >
-              <.icon name="hero-list-bullet" class="size-5 shrink-0 text-ink-faint" />
+              <.icon name="ph-list-bullets" class="size-5 shrink-0 text-ink-faint" />
               <span class="min-w-0 grow">
                 <span class="block truncate text-ink group-hover:text-accent">{playlist.name}</span>
                 <span class="block truncate text-xs text-ink-faint">
@@ -247,7 +247,7 @@ defmodule PiFiWeb.PlaylistLive do
               aria-label={"Play #{playlist.name}"}
               class="control rounded-lg p-1"
             >
-              <.icon name="hero-play" class="size-4" />
+              <.icon name="ph-play" class="size-4" />
             </button>
 
             <button
@@ -258,7 +258,7 @@ defmodule PiFiWeb.PlaylistLive do
               aria-label={"Add #{playlist.name} to the queue"}
               class="control rounded-lg p-1"
             >
-              <.icon name="hero-queue-list" class="size-4" />
+              <.icon name="ph-queue" class="size-4" />
             </button>
           </div>
         </li>
@@ -278,7 +278,7 @@ defmodule PiFiWeb.PlaylistLive do
           aria-label="Back"
           class="control rounded-lg p-1.5"
         >
-          <.icon name="hero-chevron-left" class="size-4" />
+          <.icon name="ph-caret-left" class="size-4" />
         </.link>
         <h2 id="playlist-name" class="grow truncate text-xs uppercase tracking-[0.18em] text-ink-faint">
           {@playlist.name}
@@ -292,7 +292,7 @@ defmodule PiFiWeb.PlaylistLive do
           aria-label={"Play #{@playlist.name}"}
           class="control rounded-lg p-1.5"
         >
-          <.icon name="hero-play" class="size-4" />
+          <.icon name="ph-play" class="size-4" />
         </button>
 
         <button
@@ -303,7 +303,7 @@ defmodule PiFiWeb.PlaylistLive do
           aria-label={"Remove #{@playlist.name}"}
           class="control rounded-lg p-1.5"
         >
-          <.icon name="hero-trash" class="size-4" />
+          <.icon name="ph-trash" class="size-4" />
         </button>
       </div>
 
@@ -375,7 +375,7 @@ defmodule PiFiWeb.PlaylistLive do
       </button>
 
       <span :if={@row.item_id == @playing_id} class="shrink-0 text-accent" aria-label="Playing now">
-        <.icon name="hero-speaker-wave" class="size-4" />
+        <.icon name="ph-speaker-high" class="size-4" />
       </span>
 
       <span
@@ -384,7 +384,7 @@ defmodule PiFiWeb.PlaylistLive do
         aria-label="Drag to reorder"
         class="control shrink-0 cursor-grab touch-none rounded-lg p-1 active:cursor-grabbing"
       >
-        <.icon name="hero-bars-2-mini" class="size-4" />
+        <.icon name="ph-rows" class="size-4" />
       </span>
 
       <button
@@ -395,7 +395,7 @@ defmodule PiFiWeb.PlaylistLive do
         aria-label="Remove from the playlist"
         class="control rounded-lg p-1"
       >
-        <.icon name="hero-x-mark-mini" class="size-4" />
+        <.icon name="ph-x" class="size-4" />
       </button>
     </div>
     """
