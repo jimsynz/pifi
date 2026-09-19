@@ -167,6 +167,10 @@ defmodule PiFi.Peripheral.PiTft do
   @impl PiFi.Peripheral
   def subscriptions, do: [:player, :device, :view]
 
+  @doc "This peripheral draws a screen, so the settings of a screen are for a person."
+  @impl PiFi.Peripheral
+  def screen?, do: true
+
   @doc false
   @impl PiFi.Peripheral
   def handle_event(%Player.Standby{entered?: true}, state), do: doze(state)

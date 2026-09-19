@@ -14,6 +14,7 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias PiFi.Settings
   alias PiFi.Source
   alias PiFi.Test.Lamp
+  alias PiFi.Test.Panel
   alias PiFi.Test.NoCardOutput
   alias PiFi.Test.Stations
   alias PiFi.Test.TwoCardOutput
@@ -58,6 +59,7 @@ defmodule PiFiWeb.SettingsLiveTest do
             Index.key_setting(),
             Index.secret_setting(),
             Peripheral.enabled_key(Lamp),
+            Peripheral.enabled_key(Panel),
             Source.enabled_key(Source.InternetRadio),
             Source.enabled_key(Source.Podcasts)
           ] do
@@ -512,7 +514,21 @@ defmodule PiFiWeb.SettingsLiveTest do
     end
   end
 
+  # **The page of a screen is for a device that draws one.** See
+  # `PiFi.Peripheral.any_screen?/0`.
   describe "the screen section" do
+    setup do
+      Application.put_env(:pifi, :peripherals, [{Panel, []}])
+      Peripheral.enable(Panel, true)
+
+      on_exit(fn ->
+        Peripheral.stop(Panel)
+        Application.delete_env(:pifi, :peripherals)
+      end)
+
+      :ok
+    end
+
     test "it draws the periods", %{conn: conn} do
       {:ok, view, html} = live(conn, ~p"/settings/screen")
 
@@ -545,6 +561,34 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
       assert html =~ "After 30 seconds"
+    end
+
+    # A person with a knob and a battery gauge and no panel has no use for this.
+    test "a device with no screen draws no row for it", %{conn: conn} do
+      Peripheral.enable(Panel, false)
+
+      {:ok, view, _html} = live(conn, ~p"/settings")
+
+      refute has_element?(view, "#screen-row")
+    end
+
+    test "a device with no screen sends a person back from the page", %{conn: conn} do
+      Peripheral.enable(Panel, false)
+
+      assert {:error, {:live_redirect, %{to: "/settings"}}} = live(conn, ~p"/settings/screen")
+    end
+
+    # A peripheral that this firmware knows is not a peripheral that a person wired.
+    test "a screen that no person put in use draws no row either", %{conn: conn} do
+      Application.put_env(:pifi, :peripherals, [{Panel, []}, {Lamp, []}])
+      Peripheral.enable(Panel, false)
+      Peripheral.enable(Lamp, true)
+
+      on_exit(fn -> Peripheral.enable(Lamp, false) end)
+
+      {:ok, view, _html} = live(conn, ~p"/settings")
+
+      refute has_element?(view, "#screen-row")
     end
   end
 

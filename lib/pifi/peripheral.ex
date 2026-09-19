@@ -117,7 +117,19 @@ defmodule PiFi.Peripheral do
   """
   @callback handle_info(message :: term(), state()) :: {:ok, state()} | {:error, term()}
 
-  @optional_callbacks handle_info: 2
+  @doc """
+  Whether this peripheral draws a screen.
+
+  **A device holds a screen or it does not, and the settings of a screen belong to
+  the first one.** A person with a knob and a battery gauge and no panel has no use
+  for a page that sets how long the screen waits before it goes dark.
+
+  A peripheral that draws nothing names this callback never, and `screen?/1` reads
+  `false` for it.
+  """
+  @callback screen?() :: boolean()
+
+  @optional_callbacks handle_info: 2, screen?: 0
 
   @doc """
   The peripherals that this device can hold.
@@ -179,6 +191,40 @@ defmodule PiFi.Peripheral do
       {:ok, %{value: "true"}} -> true
       _other -> false
     end
+  end
+
+  @doc """
+  Whether this peripheral draws a screen.
+
+  A peripheral that names no `c:screen?/0` draws none. See that callback.
+
+      iex> PiFi.Peripheral.screen?(PiFi.Peripheral.PiTft)
+      true
+
+      iex> PiFi.Peripheral.screen?(PiFi.Peripheral.Battery)
+      false
+  """
+  @spec screen?(module()) :: boolean()
+  def screen?(module) do
+    # **`function_exported?/3` answers for a module that is loaded, and no other.** A
+    # release of this firmware loads every module at the boot, and a host build loads
+    # one when something calls it, so a check that stood alone here read `false` for a
+    # peripheral that nothing had touched yet.
+    Code.ensure_loaded?(module) and function_exported?(module, :screen?, 0) and
+      module.screen?()
+  end
+
+  @doc """
+  Whether this device draws a screen now.
+
+  **It asks which peripherals a person put in use, and not which ones this firmware
+  knows.** The same image runs on a board with a panel and on a board with none, so
+  the answer is a setting and never a compile-time fact. A page about a screen reads
+  this, and it draws nothing for a device that has none.
+  """
+  @spec any_screen?() :: boolean()
+  def any_screen? do
+    Enum.any?(all(), fn {module, _options} -> screen?(module) and enabled?(module) end)
   end
 
   @doc """

@@ -97,6 +97,14 @@ defmodule PiFiWeb.SettingsLive do
     end
   end
 
+  # **A device with no screen has no page about one.** A person reaches this address
+  # from a device that had a panel and then lost it, or by typing it, and the menu that
+  # they came from is the honest place to send them.
+  @impl Phoenix.LiveView
+  def handle_params(_params, _uri, %{assigns: %{live_action: :screen, screen?: false}} = socket) do
+    {:noreply, push_navigate(socket, to: ~p"/settings")}
+  end
+
   @impl Phoenix.LiveView
   def handle_params(_params, _uri, socket), do: {:noreply, title(socket)}
 
@@ -320,7 +328,13 @@ defmodule PiFiWeb.SettingsLive do
         {standby_summary(@standby_minutes)}
       </.row>
 
-      <.row id="screen-row" to={~p"/settings/screen"} icon="hero-light-bulb" title="Screen">
+      <.row
+        :if={@screen?}
+        id="screen-row"
+        to={~p"/settings/screen"}
+        icon="hero-light-bulb"
+        title="Screen"
+      >
         {screen_summary(@screen_blank_seconds)}
       </.row>
 
@@ -1155,6 +1169,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())
     |> assign(:screen_blank_seconds, PiFi.Playback.screen_blank_seconds!())
+    |> assign(:screen?, Peripheral.any_screen?())
     |> assign(:switch_off?, SwitchOff.enabled?())
     |> assign(:volume, PiFi.Playback.volume!())
     |> assign_usage()
