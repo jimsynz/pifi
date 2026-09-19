@@ -270,6 +270,17 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("set_screen_blank_seconds", %{"seconds" => seconds}, socket) do
+    case PiFi.Playback.set_screen_blank_seconds(String.to_integer(seconds)) do
+      {:ok, :ok} ->
+        {:noreply, socket |> put_flash(:info, screen_flash(seconds)) |> refresh()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "The device kept the period: #{inspect(reason)}")}
+    end
+  end
+
+  @impl Phoenix.LiveView
   def handle_event("select_output", %{"id" => id}, socket) do
     case PiFi.Playback.select_output(id) do
       {:ok, :ok} ->
@@ -307,6 +318,10 @@ defmodule PiFiWeb.SettingsLive do
 
       <.row id="standby-row" to={~p"/settings/standby"} icon="hero-moon" title="Standby">
         {standby_summary(@standby_minutes)}
+      </.row>
+
+      <.row id="screen-row" to={~p"/settings/screen"} icon="hero-light-bulb" title="Screen">
+        {screen_summary(@screen_blank_seconds)}
       </.row>
 
 
@@ -772,6 +787,52 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def render(%{live_action: :screen} = assigns) do
+    ~H"""
+    <.section id="settings-screen" title="Screen" back={~p"/settings"}>
+      <p class="mb-3 text-sm text-ink-dim">
+        The screen of the device goes dark when no person presses a button for this
+        long. The audio continues, so this is not standby. A press of any button brings
+        the screen back, and that press does nothing else.
+      </p>
+
+      <p class="mb-3 text-sm text-ink-dim">
+        The light is a large part of what a device takes from a battery. Choose a short
+        period for a device that a person carries, and choose <em>Never</em>
+        for a device that stands on a shelf and shows what it plays.
+      </p>
+
+      <ul class="divide-y divide-edge">
+        <li :for={seconds <- blank_periods()}>
+          <button
+            type="button"
+            id={"screen-period-#{seconds}"}
+            phx-click="set_screen_blank_seconds"
+            phx-value-seconds={seconds}
+            class={[
+              "flex w-full items-center gap-3 py-2 text-left",
+              seconds == @screen_blank_seconds && "text-accent"
+            ]}
+          >
+            <span class={[
+              "flex size-5 shrink-0 items-center justify-center rounded-full",
+              if(seconds == @screen_blank_seconds,
+                do: "bg-accent/15 shadow-[inset_0_0_0_1px_var(--color-accent)]",
+                else: "shadow-[inset_0_0_0_1px_var(--color-edge)]"
+              )
+            ]}>
+              <span :if={seconds == @screen_blank_seconds} class="size-2 rounded-full bg-accent" />
+            </span>
+
+            <span class="min-w-0 grow truncate">{blank_title(seconds)}</span>
+          </button>
+        </li>
+      </ul>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
   def render(%{live_action: :network} = assigns) do
     ~H"""
     <.section id="settings-network" title="Network" back={~p"/settings"}>
@@ -1093,6 +1154,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())
+    |> assign(:screen_blank_seconds, PiFi.Playback.screen_blank_seconds!())
     |> assign(:switch_off?, SwitchOff.enabled?())
     |> assign(:volume, PiFi.Playback.volume!())
     |> assign_usage()
@@ -1157,6 +1219,19 @@ defmodule PiFiWeb.SettingsLive do
   defp standby_summary(0), do: "The device stays awake"
   defp standby_summary(minutes), do: period_title(minutes)
 
+  # The periods that a person can pick for the screen. A device that runs on a battery
+  # wants a short one, and a device on the mains wants none at all.
+  defp blank_periods, do: [0, 10, 15, 30, 45, 60, 120, 300]
+
+  defp blank_title(0), do: "Never"
+  defp blank_title(60), do: "After 1 minute"
+  defp blank_title(120), do: "After 2 minutes"
+  defp blank_title(300), do: "After 5 minutes"
+  defp blank_title(seconds), do: "After #{seconds} seconds"
+
+  defp screen_summary(0), do: "The screen stays lit"
+  defp screen_summary(seconds), do: blank_title(seconds)
+
   defp switch_off_flash(true),
     do: "The device stops its work in standby, and it says when it is safe to switch off."
 
@@ -1169,6 +1244,11 @@ defmodule PiFiWeb.SettingsLive do
 
   defp standby_flash("0"), do: "The device stays awake."
   defp standby_flash(minutes), do: "The device enters standby after #{minutes} minutes of quiet."
+
+  defp screen_flash("0"), do: "The screen stays lit."
+
+  defp screen_flash(seconds),
+    do: "The screen goes dark after #{seconds} seconds with no press."
 
   # `:sources` belongs to `PiFiWeb.Shell`, and the top row of the faceplate draws
   # it. That list names the sources in use, and this one names every source and the

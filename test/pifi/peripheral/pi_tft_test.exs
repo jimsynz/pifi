@@ -505,6 +505,72 @@ defmodule PiFi.Peripheral.PiTftTest do
     defp net_up, do: %DeviceEvents.NetworkChanged{interfaces: [%{connection: :internet}]}
   end
 
+  describe "the screen that goes dark" do
+    test "a blank turns the light off and leaves the panel awake", %{state: state} do
+      {:ok, state} = PiTft.handle_event(started(), state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PiTft.handle_event(%ViewEvents.ScreenBlanked{blanked?: true}, state)
+
+      assert state.blanked?
+      assert state.awake?
+      assert RecordingScreen.backlight() == [0]
+      assert sent() == []
+      assert frames() == 0
+    end
+
+    test "an event while the screen is dark moves the view and writes no byte",
+         %{state: state} do
+      {:ok, state} = PiTft.handle_event(%ViewEvents.ScreenBlanked{blanked?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} =
+        PiTft.handle_event(%Player.Progress{position_ms: 4000, duration_ms: 60_000}, state)
+
+      assert state.view.position_ms == 4000
+      assert frames() == 0
+    end
+
+    # The view moved while the screen was dark, so a light that came on before the draw
+    # would show the frame of a track that stopped.
+    test "the screen draws and lights after that when it comes back", %{state: state} do
+      {:ok, state} = PiTft.handle_event(%ViewEvents.ScreenBlanked{blanked?: true}, state)
+      {:ok, state} = PiTft.handle_event(started(), state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PiTft.handle_event(%ViewEvents.ScreenBlanked{blanked?: false}, state)
+
+      refute state.blanked?
+      assert frames() == 1
+      assert RecordingScreen.backlight() == [1]
+    end
+
+    test "a second blank writes nothing more", %{state: state} do
+      {:ok, state} = PiTft.handle_event(%ViewEvents.ScreenBlanked{blanked?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PiTft.handle_event(%ViewEvents.ScreenBlanked{blanked?: true}, state)
+
+      assert state.blanked?
+      assert RecordingScreen.backlight() == []
+    end
+
+    # A blank that survived standby would keep the draw from happening, and the light
+    # would come on over a panel that lost its frame.
+    test "standby clears the blank, so the way back draws the frame", %{state: state} do
+      {:ok, state} = PiTft.handle_event(%ViewEvents.ScreenBlanked{blanked?: true}, state)
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PiTft.handle_event(%Player.Standby{entered?: false}, state)
+
+      refute state.blanked?
+      assert state.awake?
+      assert frames() == 1
+      assert RecordingScreen.backlight() == [1]
+    end
+  end
+
   defp started do
     %Player.Started{
       source: PiFi.Source.Podcasts,

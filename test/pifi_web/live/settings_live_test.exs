@@ -38,6 +38,10 @@ defmodule PiFiWeb.SettingsLiveTest do
     # environment, so this test holds its own and it goes at the end of the test.
     start_supervised!(PiFi.AutoStandby)
 
+    # The screen section reads and writes its period through `PiFi.DeviceUi`, which the
+    # test environment starts no instance of either.
+    start_supervised!(PiFi.DeviceUi)
+
     on_exit(fn ->
       # The name lives in `Nerves.Runtime.KV`, and a host build keeps that store in
       # memory for the whole node. See `PiFi.Device.Identity`.
@@ -48,6 +52,7 @@ defmodule PiFiWeb.SettingsLiveTest do
       # The settings outlive a test, because they are rows and not process state.
       for key <- [
             PiFi.AutoStandby.key(),
+            PiFi.DeviceUi.blank_key(),
             FromRemote.countries_key(),
             PiFi.Player.output_device_key(),
             Index.key_setting(),
@@ -504,6 +509,42 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
       assert html =~ "The device stays awake"
+    end
+  end
+
+  describe "the screen section" do
+    test "it draws the periods", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/screen")
+
+      assert html =~ "Never"
+      assert has_element?(view, "#screen-period-0")
+      assert has_element?(view, "#screen-period-30")
+    end
+
+    test "a press of a period writes it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/screen")
+
+      html = view |> element("#screen-period-30") |> render_click()
+
+      assert html =~ "The screen goes dark after 30 seconds with no press."
+      assert PiFi.Playback.screen_blank_seconds!() == 30
+    end
+
+    test "a person can keep the screen lit", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/screen")
+
+      html = view |> element("#screen-period-0") |> render_click()
+
+      assert html =~ "The screen stays lit."
+      assert PiFi.Playback.screen_blank_seconds!() == 0
+    end
+
+    test "the menu row says what the device holds", %{conn: conn} do
+      {:ok, :ok} = PiFi.Playback.set_screen_blank_seconds(30)
+
+      {:ok, _view, html} = live(conn, ~p"/settings")
+
+      assert html =~ "After 30 seconds"
     end
   end
 

@@ -14,6 +14,7 @@ defmodule PiFi.DeviceUiTest do
   alias PiFi.Peripheral.PirateAudio
   alias PiFi.Peripheral.PiTft
   alias PiFi.Playback
+  alias PiFi.Settings
   alias PiFi.Test.Stations
   alias PiFi.Test.TwoCardOutput
 
@@ -358,6 +359,105 @@ defmodule PiFi.DeviceUiTest do
 
       assert Process.alive?(Process.whereis(PiFi.DeviceUi))
       refute_receive %Player.Standby{}, 200
+    end
+  end
+
+  describe "the screen that goes dark" do
+    # A period of 30 seconds cannot be measured in a test suite, so this instance holds
+    # a second of 5 ms. See `PiFi.DeviceUi.start_link/1`.
+    @blank_ms 5
+    @blank_seconds 10
+
+    setup do
+      # The instance of the setup above carries the real name and a period of 0, so it
+      # blanks nothing and it would act on each press that these tests make. One
+      # instance is what a test of the blank can read.
+      stop_supervised!(PiFi.DeviceUi)
+
+      Settings.put(DeviceUi.blank_key(), to_string(@blank_seconds))
+
+      on_exit(fn ->
+        case Settings.fetch(DeviceUi.blank_key()) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok = Event.subscribe(:view)
+
+      start_supervised!({DeviceUi, blank_ms: @blank_ms})
+
+      :ok
+    end
+
+    test "the screen goes dark when no person presses a button" do
+      assert_receive %View.ScreenBlanked{blanked?: true}, 5000
+    end
+
+    test "a press brings the screen back and does nothing else" do
+      assert_receive %View.ScreenBlanked{blanked?: true}, 5000
+      flush()
+
+      press(1)
+
+      assert_receive %View.ScreenBlanked{blanked?: false}, 5000
+      refute_receive %Player.Standby{}, 500
+    end
+
+    test "the press after the screen came back does what the button says" do
+      assert_receive %View.ScreenBlanked{blanked?: true}, 5000
+
+      press(1)
+      assert_receive %View.ScreenBlanked{blanked?: false}, 5000
+
+      press(1)
+      assert_receive %Player.Standby{entered?: true}, 5000
+    end
+
+    test "a press in standby leaves standby, and the dark of standby is not a blank" do
+      {:ok, :ok} = Playback.standby(true)
+      assert_receive %Player.Standby{entered?: true}, 5000
+
+      refute_receive %View.ScreenBlanked{blanked?: true}, 500
+
+      press(1)
+      assert_receive %Player.Standby{entered?: false}, 5000
+    end
+
+    test "a press starts the period again" do
+      for _press <- 1..5 do
+        press(3, PirateAudio)
+        Process.sleep(@blank_ms * 3)
+      end
+
+      refute_received %View.ScreenBlanked{blanked?: true}
+    end
+  end
+
+  describe "the period of the screen" do
+    setup do
+      on_exit(fn ->
+        case Settings.fetch(DeviceUi.blank_key()) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+    end
+
+    test "a new device keeps its screen lit" do
+      assert DeviceUi.blank_seconds() == 0
+    end
+
+    test "a period that a person sets stays" do
+      assert :ok = DeviceUi.set_blank_seconds(30)
+      assert DeviceUi.blank_seconds() == 30
+      assert {:ok, %{value: "30"}} = Settings.fetch(DeviceUi.blank_key())
+    end
+
+    test "a period that the device cannot hold changes nothing" do
+      assert {:error, :out_of_range} = DeviceUi.set_blank_seconds(-1)
+      assert {:error, :out_of_range} = DeviceUi.set_blank_seconds(3601)
+      assert DeviceUi.blank_seconds() == 0
     end
   end
 end

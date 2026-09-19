@@ -73,6 +73,31 @@ defmodule PiFi.DeviceUi do
 
   A press that plays closes the menu as well, because a person who chose a track wants
   to read what plays.
+
+  ## The screen that goes dark
+
+  A device that runs on a battery plays an episode for two hours, and the screen
+  shows a picture that no person reads for most of that time. The light is a large
+  part of what the board takes from the cell, so this module turns it off after a
+  period of no press and publishes `PiFi.Event.View.ScreenBlanked`. Each screen
+  decides what dark means for it.
+
+  **This is not standby.** `PiFi.AutoStandby` stops the audio, and it waits for
+  quiet, so a track that plays keeps it off. This period runs while the audio plays,
+  which is the case that costs the battery, and the audio continues.
+
+  `PiFi.Playback.set_screen_blank_seconds/1` sets the period, and 0 turns it off. 0
+  is what a new device uses, because a stereo on a shelf must keep showing what it
+  plays. A person who carries the device sets a number.
+
+  **The press that brings the screen back does nothing else.** A person who presses
+  a button to read what plays must not skip the episode, so this module takes that
+  press and stops.
+
+  **A press in standby is not that press.** The screen is dark in standby as well,
+  and the buttons are the only way out of it on a board that has no other control.
+  This module therefore reads the player before it takes a press, and a press in
+  standby goes through.
   """
 
   use GenServer
@@ -84,6 +109,7 @@ defmodule PiFi.DeviceUi do
   alias PiFi.Event.View
   alias PiFi.Peripheral
   alias PiFi.Playback
+  alias PiFi.Settings
 
   require Logger
 
@@ -93,7 +119,23 @@ defmodule PiFi.DeviceUi do
   # quarter of the way, and a larger step would make the control too coarse to set.
   @volume_step 5
 
-  @doc "Start reading the controls of the device."
+  # **The longest period is an hour.** A person who wants a screen that stays lit
+  # chooses 0 instead.
+  @max_blank_seconds 3600
+
+  # **A new device blanks no screen.** The two boards that this firmware drives are a
+  # stereo component and a portable player, and only the second one gains from a dark
+  # screen. A person who carries the device asks for the period.
+  @default_blank_seconds 0
+
+  @blank_key "screen.blank_seconds"
+
+  @doc """
+  Start reading the controls of the device.
+
+  `:blank_ms` is the length of a second, and a test gives a small number for it. A
+  period of 30 seconds cannot be measured in a test suite in any other way.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -108,12 +150,50 @@ defmodule PiFi.DeviceUi do
   @spec places(GenServer.server()) :: [Menu.place()]
   def places(server \\ __MODULE__), do: GenServer.call(server, :places)
 
+  @doc "The settings key of the period that the screen waits for."
+  @spec blank_key() :: String.t()
+  def blank_key, do: @blank_key
+
+  @doc """
+  The seconds of no press that the screen waits for before it goes dark.
+
+  0 means that the screen stays lit.
+  """
+  @spec blank_seconds(GenServer.server()) :: non_neg_integer()
+  def blank_seconds(server \\ __MODULE__), do: GenServer.call(server, :blank_seconds)
+
+  @doc """
+  Set the seconds of no press that the screen waits for before it goes dark.
+
+  The value stays after a restart. 0 keeps the screen lit, and the longest period is
+  #{@max_blank_seconds} seconds.
+  """
+  @spec set_blank_seconds(GenServer.server(), non_neg_integer()) ::
+          :ok | {:error, :out_of_range}
+  def set_blank_seconds(server \\ __MODULE__, seconds)
+
+  def set_blank_seconds(server, seconds)
+      when is_integer(seconds) and seconds in 0..@max_blank_seconds do
+    GenServer.call(server, {:set_blank_seconds, seconds})
+  end
+
+  def set_blank_seconds(_server, _seconds), do: {:error, :out_of_range}
+
   @doc false
   @impl GenServer
-  def init(_opts) do
+  def init(opts) do
     Event.subscribe(:input)
 
-    {:ok, %{stack: [], timer: nil}}
+    state = %{
+      stack: [],
+      timer: nil,
+      blank_seconds: stored_blank_seconds(),
+      blank_ms: Keyword.get(opts, :blank_ms, 1000),
+      blank_timer: nil,
+      blanked?: false
+    }
+
+    {:ok, hold_lit(state)}
   end
 
   @doc false
@@ -122,19 +202,50 @@ defmodule PiFi.DeviceUi do
     {:reply, Enum.map(state.stack, & &1.place), state}
   end
 
+  def handle_call(:blank_seconds, _from, state), do: {:reply, state.blank_seconds, state}
+
+  # A period that a person shortens must take effect now, and not after the period that
+  # is already running, so this starts the new one and lights the screen.
+  def handle_call({:set_blank_seconds, seconds}, _from, state) do
+    Settings.put(@blank_key, to_string(seconds))
+
+    {:reply, :ok, %{state | blank_seconds: seconds} |> unblank() |> hold_lit()}
+  end
+
   @doc false
   @impl GenServer
   def handle_info(%Input.ButtonPressed{} = event, state) do
-    {:noreply, press(event.peripheral, event.button, event.hold, state)}
+    state = press(event.peripheral, event.button, event.hold, state)
+
+    {:noreply, hold_lit(state)}
   end
 
   # The menu closes itself, and a press that arrived in the moment before this message
   # started the period again. See `@close_after`.
   def handle_info(:close_menu, state), do: {:noreply, close(state)}
 
+  # **A device in standby is dark already, and it must not become blanked.** The dark of
+  # standby and the dark of this timer look the same to a person, and they do not mean
+  # the same thing to a press: a press in standby leaves standby, and a press of a
+  # blanked screen does nothing. A read of the player is what keeps the two apart, and
+  # this process keeps no copy of it.
+  def handle_info(:blank, state) do
+    state = %{state | blank_timer: nil}
+
+    if Playback.state!().standby? do
+      {:noreply, hold_lit(state)}
+    else
+      {:noreply, blank(state)}
+    end
+  end
+
   # A knob and a touch panel send events of this topic as well, and each one arrives
   # here before the part of this module that reads it exists.
   def handle_info(%_{}, state), do: {:noreply, state}
+
+  # **The first press after the screen went dark brings it back and does nothing else.**
+  # A person who presses a button to read what plays must not skip the episode.
+  defp press(_peripheral, _button, _hold, %{blanked?: true} = state), do: unblank(state)
 
   # **The board decides the meaning, so the event carries the board.** A row of four and
   # a pad of two cannot share one mapping, and the driver of a board must never hold the
@@ -297,6 +408,64 @@ defmodule PiFi.DeviceUi do
     Process.cancel_timer(state.timer)
 
     %{state | timer: nil}
+  end
+
+  # A screen that is lit stays lit for the period, and each press starts the period
+  # again. A period of 0 is a person who asked for a screen that never goes dark.
+  defp hold_lit(%{blank_seconds: 0} = state), do: let_dark(state)
+
+  defp hold_lit(state) do
+    state = let_dark(state)
+
+    %{
+      state
+      | blank_timer: Process.send_after(self(), :blank, state.blank_seconds * state.blank_ms)
+    }
+  end
+
+  # `Process.cancel_timer/1` can arrive too late, and the message of a timer that already
+  # fired then waits in the mailbox. A read of it here keeps the screen from going dark
+  # in the moment after a person pressed a button. See `PiFi.AutoStandby`.
+  defp let_dark(%{blank_timer: nil} = state), do: state
+
+  defp let_dark(state) do
+    Process.cancel_timer(state.blank_timer)
+
+    receive do
+      :blank -> :ok
+    after
+      0 -> :ok
+    end
+
+    %{state | blank_timer: nil}
+  end
+
+  defp blank(%{blanked?: true} = state), do: state
+
+  defp blank(state) do
+    Event.publish(:view, %View.ScreenBlanked{blanked?: true})
+
+    %{state | blanked?: true}
+  end
+
+  defp unblank(%{blanked?: false} = state), do: state
+
+  defp unblank(state) do
+    Event.publish(:view, %View.ScreenBlanked{blanked?: false})
+
+    %{state | blanked?: false}
+  end
+
+  # A person who set no period gets a screen that stays lit. A row that carries
+  # something that is not a number is a row that no part of this firmware writes, and
+  # the default is a better answer than a process that will not start.
+  defp stored_blank_seconds do
+    with {:ok, %{value: value}} <- Settings.fetch(@blank_key),
+         {seconds, ""} when seconds in 0..@max_blank_seconds <- Integer.parse(value) do
+      seconds
+    else
+      _other -> @default_blank_seconds
+    end
   end
 
   # **A button that a person holds moves the level, and it reads the level first.** The

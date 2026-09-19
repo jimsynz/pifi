@@ -208,6 +208,37 @@ defmodule PiFi.Playback.Player do
       end
     end
 
+    action :screen_blank_seconds, :integer do
+      description """
+      The seconds of no press that the screen of the device waits for before it goes
+      dark.
+
+      0 means that the screen stays lit.
+      """
+
+      run fn _input, _context -> {:ok, PiFi.DeviceUi.blank_seconds()} end
+    end
+
+    action :set_screen_blank_seconds, :atom do
+      description """
+      Set the seconds of no press that the screen of the device waits for before it
+      goes dark.
+
+      The audio continues, and only the light goes off, so this is not standby. A press
+      of any button brings the screen back and does nothing else. 0 keeps the screen
+      lit. See `PiFi.DeviceUi`.
+      """
+
+      argument :seconds, :integer, allow_nil?: false
+
+      run fn input, _context ->
+        case PiFi.DeviceUi.set_blank_seconds(input.arguments.seconds) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
     action :enable_source, :atom do
       description """
       Put a source in use, or take it out of use.

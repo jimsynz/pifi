@@ -104,7 +104,8 @@ defmodule PiFi.Peripheral.PiTft do
         renderer: renderer,
         volume_ms: Keyword.get(opts, :volume_ms, @volume_ms),
         view: Screen.new() |> with_battery() |> with_identity() |> with_network(),
-        awake?: true
+        awake?: true,
+        blanked?: false
       })
     end
   end
@@ -172,6 +173,14 @@ defmodule PiFi.Peripheral.PiTft do
   def handle_event(%Player.Standby{entered?: true}, state), do: doze(state)
 
   def handle_event(%Player.Standby{entered?: false}, state), do: wake(state)
+
+  # **A blank turns the light off and leaves the panel awake.** The panel then keeps the
+  # frame that a person last read, and the screen comes back in one frame write. A panel
+  # that slept would lose the frame and need 120 ms before it took a command. See
+  # `PiFi.Event.View.ScreenBlanked`.
+  def handle_event(%ViewEvents.ScreenBlanked{blanked?: true}, state), do: blank(state)
+
+  def handle_event(%ViewEvents.ScreenBlanked{blanked?: false}, state), do: unblank(state)
 
   # The level goes away by itself, so this schedules the message that takes it away.
   # A person who is still moving it schedules a later one, and the last one decides.
@@ -306,12 +315,16 @@ defmodule PiFi.Peripheral.PiTft do
   # Standby keeps the view. A person who paused a track and pressed standby gets no
   # event on the way back, because the player leaves that track paused, so a view that
   # this cleared would show the name of the device and not the track that waits.
-  defp doze(%{awake?: false} = state), do: {:ok, state}
+  # **Standby clears the blank.** The two make the screen dark and they are not the same
+  # thing, and a panel that came out of standby must draw the frame that it lost. A blank
+  # that survived standby would keep `draw/1` from writing that frame, and the light
+  # would come on over a panel with nothing in it.
+  defp doze(%{awake?: false} = state), do: {:ok, %{state | blanked?: false}}
 
   defp doze(state) do
     with :ok <- Stmpe610.backlight(state.stmpe, false),
          :ok <- Ili9341.display(state.screen, false) do
-      {:ok, %{state | awake?: false}}
+      {:ok, %{state | awake?: false, blanked?: false}}
     end
   end
 
@@ -319,7 +332,7 @@ defmodule PiFi.Peripheral.PiTft do
 
   defp wake(state) do
     with :ok <- Ili9341.display(state.screen, true),
-         {:ok, state} <- draw(%{state | awake?: true}),
+         {:ok, state} <- draw(%{state | awake?: true, blanked?: false}),
          :ok <- Stmpe610.backlight(state.stmpe, true) do
       {:ok, state}
     end
@@ -327,7 +340,35 @@ defmodule PiFi.Peripheral.PiTft do
 
   # A panel that sleeps draws nothing, so a `Progress` event in standby moves the view
   # and writes no byte to the bus.
+  # A screen that is dark for standby is dark already, and the timer of the blank does
+  # not run then. This clause is what makes the two orders safe in any case.
+  defp blank(%{awake?: false} = state), do: {:ok, state}
+
+  defp blank(%{blanked?: true} = state), do: {:ok, state}
+
+  defp blank(state) do
+    with :ok <- Stmpe610.backlight(state.stmpe, false) do
+      {:ok, %{state | blanked?: true}}
+    end
+  end
+
+  defp unblank(%{blanked?: false} = state), do: {:ok, state}
+
+  # The panel kept the frame, and the view moved while the screen was dark, so this
+  # draws before it turns the light on. A person must never read the frame of a track
+  # that stopped playing.
+  defp unblank(state) do
+    with {:ok, state} <- draw(%{state | blanked?: false}),
+         :ok <- Stmpe610.backlight(state.stmpe, true) do
+      {:ok, state}
+    end
+  end
+
   defp draw(%{awake?: false} = state), do: {:ok, state}
+
+  # A screen that is blank keeps its frame, and a draw of it would write 153 600 bytes
+  # that no person reads.
+  defp draw(%{blanked?: true} = state), do: {:ok, state}
 
   defp draw(state) do
     case Renderer.pixels(state.renderer, Screen.render(state.view)) do

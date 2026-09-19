@@ -56,4 +56,28 @@ defmodule PiFi.Event.View do
 
     defstruct []
   end
+
+  defmodule ScreenBlanked do
+    @moduledoc """
+    The screen of the device goes dark, or it comes back.
+
+    A screen that stays lit while an episode plays uses the battery for a picture
+    that no person reads, so `PiFi.DeviceUi` turns it off after a period of no
+    press. **This is not standby.** The audio continues, and the only thing that
+    changes is the light.
+
+    **Each screen decides what dark means for it.** The two screens of this firmware
+    turn the backlight off and leave the panel awake, so the frame stays in the panel
+    and the screen comes back in one frame write. A screen of another kind may do
+    something else.
+
+    The event carries `blanked?`, and `false` says that the screen comes back. A press
+    of any button brings it back, and that press does nothing else. See
+    `PiFi.DeviceUi`.
+    """
+
+    @type t :: %__MODULE__{blanked?: boolean()}
+
+    defstruct blanked?: false
+  end
 end

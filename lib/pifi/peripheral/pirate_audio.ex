@@ -85,6 +85,7 @@ defmodule PiFi.Peripheral.PirateAudio do
   alias PiFi.Event.Device, as: DeviceEvents
   alias PiFi.Event.Input
   alias PiFi.Event.Player
+  alias PiFi.Event.View
   alias PiFi.Peripheral.Battery
   alias PiFi.Peripheral.Buttons
   alias PiFi.Peripheral.PirateAudio.{Screen, St7789}
@@ -138,7 +139,8 @@ defmodule PiFi.Peripheral.PirateAudio do
         show_ms: Keyword.get(opts, :show_ms, @show_ms),
         volume_ms: Keyword.get(opts, :volume_ms, @volume_ms),
         view: Screen.new() |> with_battery() |> with_identity() |> with_network(),
-        awake?: true
+        awake?: true,
+        blanked?: false
       })
     end
   end
@@ -193,15 +195,28 @@ defmodule PiFi.Peripheral.PirateAudio do
 
   It also carries `PiFi.Event.Device.IdentityChanged`, so a person who names the
   device on the web page reads that name on the screen at once.
+
+  The `:view` topic carries `PiFi.Event.View.ScreenBlanked`, which turns the light off
+  after a period of no press. This screen draws no menu, so it reads nothing else of
+  that topic.
   """
   @impl PiFi.Peripheral
-  def subscriptions, do: [:player, :device]
+  def subscriptions, do: [:player, :device, :view]
 
   @doc false
   @impl PiFi.Peripheral
   def handle_event(%Player.Standby{entered?: true}, state), do: doze(state)
 
   def handle_event(%Player.Standby{entered?: false}, state), do: wake(state)
+
+  # **A blank turns the light off and leaves the panel awake.** The light is the large
+  # part of what this board takes from the cell, and a panel that sleeps loses its frame
+  # and needs 120 ms to wake. The panel therefore keeps the frame that a person last
+  # read, and the screen comes back in one frame write. See
+  # `PiFi.Event.View.ScreenBlanked`.
+  def handle_event(%View.ScreenBlanked{blanked?: true}, state), do: blank(state)
+
+  def handle_event(%View.ScreenBlanked{blanked?: false}, state), do: unblank(state)
 
   # **The panel sleeps in standby, and this message is the one thing worth waking it
   # for.** A person who pressed standby is holding the device and waiting to know that
@@ -342,12 +357,16 @@ defmodule PiFi.Peripheral.PirateAudio do
   defp duration(%{duration_ms: duration_ms}), do: duration_ms
   defp duration(_track), do: nil
 
-  defp doze(%{awake?: false} = state), do: {:ok, state}
+  # **Standby clears the blank.** The two make the screen dark and they are not the same
+  # thing, and a panel that came out of standby must draw the frame that it lost. A
+  # blank that survived standby would keep `draw/1` from writing that frame, and the
+  # light would come on over a panel with nothing in it.
+  defp doze(%{awake?: false} = state), do: {:ok, %{state | blanked?: false}}
 
   defp doze(state) do
     with :ok <- St7789.backlight(state.screen, false),
          :ok <- St7789.display(state.screen, false) do
-      {:ok, %{state | awake?: false}}
+      {:ok, %{state | awake?: false, blanked?: false}}
     end
   end
 
@@ -355,15 +374,42 @@ defmodule PiFi.Peripheral.PirateAudio do
 
   defp wake(state) do
     with :ok <- St7789.display(state.screen, true),
-         {:ok, state} <- draw(%{state | awake?: true}),
+         {:ok, state} <- draw(%{state | awake?: true, blanked?: false}),
+         :ok <- St7789.backlight(state.screen, true) do
+      {:ok, state}
+    end
+  end
+
+  # A screen that is dark for standby is dark already, and the timer of the blank does
+  # not run then. This clause is what makes the two orders safe in any case.
+  defp blank(%{awake?: false} = state), do: {:ok, state}
+
+  defp blank(%{blanked?: true} = state), do: {:ok, state}
+
+  defp blank(state) do
+    with :ok <- St7789.backlight(state.screen, false) do
+      {:ok, %{state | blanked?: true}}
+    end
+  end
+
+  defp unblank(%{blanked?: false} = state), do: {:ok, state}
+
+  # The panel kept the frame, and the view moved while the screen was dark, so this
+  # draws before it turns the light on. A person must never read the frame of a track
+  # that stopped playing.
+  defp unblank(state) do
+    with {:ok, state} <- draw(%{state | blanked?: false}),
          :ok <- St7789.backlight(state.screen, true) do
       {:ok, state}
     end
   end
 
   # A panel that sleeps draws nothing, so an event in standby moves the view and writes
-  # no byte to the bus.
+  # no byte to the bus. A screen that is blank keeps its frame, and a draw of it would
+  # write 115 200 bytes that no person reads.
   defp draw(%{awake?: false} = state), do: {:ok, state}
+
+  defp draw(%{blanked?: true} = state), do: {:ok, state}
 
   defp draw(state) do
     case Renderer.pixels(state.renderer, Screen.render(state.view)) do

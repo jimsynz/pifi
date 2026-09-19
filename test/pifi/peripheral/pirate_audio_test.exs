@@ -7,6 +7,7 @@ defmodule PiFi.Peripheral.PirateAudioTest do
   alias PiFi.Device.Identity
   alias PiFi.Event.Device, as: DeviceEvents
   alias PiFi.Event.Player
+  alias PiFi.Event.View
   alias PiFi.Peripheral.PirateAudio
   alias PiFi.Peripheral.PirateAudio.Screen
   alias PiFi.Screen.Renderer
@@ -72,8 +73,8 @@ defmodule PiFi.Peripheral.PirateAudioTest do
     assert Path.basename(state.view.splash_path) == "pifi-240x240.png"
   end
 
-  test "it reads the player topic and the device topic" do
-    assert PirateAudio.subscriptions() == [:player, :device]
+  test "it reads the player topic, the device topic and the view topic" do
+    assert PirateAudio.subscriptions() == [:player, :device, :view]
   end
 
   describe "handle_event/2" do
@@ -375,6 +376,71 @@ defmodule PiFi.Peripheral.PirateAudioTest do
 
   # A tap is a press and the release that follows it. This board reads a long press, so
   # the press alone says nothing until one of the two arrives.
+  describe "the screen that goes dark" do
+    test "a blank turns the light off and leaves the panel awake", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(started(), state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_event(%View.ScreenBlanked{blanked?: true}, state)
+
+      assert state.blanked?
+      assert state.awake?
+      assert RecordingScreen.backlight_line() == [0]
+      assert sent() == []
+      assert frames() == 0
+    end
+
+    test "an event while the screen is dark moves the view and writes no byte",
+         %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(%View.ScreenBlanked{blanked?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_event(started(), state)
+
+      assert state.view.title == "The Detail"
+      assert frames() == 0
+    end
+
+    # The view moved while the screen was dark, so a light that came on before the draw
+    # would show the frame of a track that stopped.
+    test "the screen draws and lights after that when it comes back", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(%View.ScreenBlanked{blanked?: true}, state)
+      {:ok, state} = PirateAudio.handle_event(started(), state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_event(%View.ScreenBlanked{blanked?: false}, state)
+
+      refute state.blanked?
+      assert frames() == 1
+      assert RecordingScreen.backlight_line() == [1]
+    end
+
+    test "a second blank writes nothing more", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(%View.ScreenBlanked{blanked?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_event(%View.ScreenBlanked{blanked?: true}, state)
+
+      assert state.blanked?
+      assert RecordingScreen.backlight_line() == []
+    end
+
+    # A blank that survived standby would keep the draw from happening, and the light
+    # would come on over a panel that lost its frame.
+    test "standby clears the blank, so the way back draws the frame", %{state: state} do
+      {:ok, state} = PirateAudio.handle_event(%View.ScreenBlanked{blanked?: true}, state)
+      {:ok, state} = PirateAudio.handle_event(%Player.Standby{entered?: true}, state)
+      RecordingScreen.forget()
+
+      {:ok, state} = PirateAudio.handle_event(%Player.Standby{entered?: false}, state)
+
+      refute state.blanked?
+      assert state.awake?
+      assert frames() == 1
+      assert RecordingScreen.backlight_line() == [1]
+    end
+  end
+
   defp tap_button(state, line) do
     now = System.monotonic_time(:nanosecond)
     {:ok, state} = PirateAudio.handle_info({:circuits_gpio, line, now, 0}, state)
