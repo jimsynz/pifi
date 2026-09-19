@@ -43,11 +43,11 @@ defmodule PiFi.Screen.Network do
   - **`:lan` draws amber**, which is the colour of a device that is working on
     something. The radio link works and the network stops beyond it, so a person looks
     at their router and not at this device.
-  - **`:disconnected` draws rose**, which is the colour of a fault. Nothing carries the
-    link at all, and rose is the worse of the two colours for the worse of the two
+  - **`:disconnected` draws coral**, which is the colour of a fault. Nothing carries the
+    link at all, and coral is the worse of the two colours for the worse of the two
     states.
 
-  A reader who cannot tell amber from rose still reads that something is wrong, because
+  A reader who cannot tell amber from coral still reads that something is wrong, because
   the mark is there at all. They lose which of the two it is, and the network page of
   the web interface names the state of each interface.
 
@@ -59,6 +59,7 @@ defmodule PiFi.Screen.Network do
   use Emerge.UI
 
   alias Emerge.UI.{Background, Border}
+  alias PiFi.Screen.Style
 
   @typedoc "What VintageNet says one interface is doing."
   @type connection :: :internet | :lan | :disconnected
@@ -90,9 +91,9 @@ defmodule PiFi.Screen.Network do
   @spec render(connection() | nil, keyword()) :: Emerge.tree()
   def render(connection, opts \\ [])
 
-  def render(:lan, opts), do: bars(tallest(opts), color(:amber, 400))
+  def render(:lan, opts), do: bars(tallest(opts), Style.amber())
 
-  def render(:disconnected, opts), do: bars(tallest(opts), color(:rose, 400))
+  def render(:disconnected, opts), do: bars(tallest(opts), Style.coral())
 
   # A network that carries the music draws nothing, and so does a device that names no
   # interface.
@@ -143,7 +144,7 @@ defmodule PiFi.Screen.Network do
         height(px(bar_height)),
         align_bottom(),
         Background.color(colour),
-        Border.rounded(1)
+        Border.rounded(0)
       ],
       none()
     )

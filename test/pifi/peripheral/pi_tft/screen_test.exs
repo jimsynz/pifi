@@ -2,7 +2,9 @@ defmodule PiFi.Peripheral.PiTft.ScreenTest do
   use ExUnit.Case, async: true
 
   alias PiFi.Peripheral.PiTft.Screen
+  alias PiFi.Screen.{Battery, Network, Style}
   alias PiFi.Test.Drawing
+  alias PiFi.Test.Tree
 
   # One flat red picture of 8 by 8 pixels. A flat colour is what makes a measurement of
   # the pixels mean something: every place that the picture covers holds one value.
@@ -83,11 +85,16 @@ defmodule PiFi.Peripheral.PiTft.ScreenTest do
 
       assert byte_size(pixels) == width * height * 4
 
-      # The picture is one flat red, so a row above the band holds it and the band at
+      # **This one measures the pixels on purpose.** The claim is that light text reads
+      # over any picture, and that is a claim about contrast and not about the layout.
+      # The picture is one flat red, so a row above the card holds it, and the card at
       # the foot is dark enough to read light text on.
       assert {red, _green, _blue} = pixel(pixels, width, 4, 40)
       assert red > 150
-      assert {red, green, blue} = pixel(pixels, width, 4, height - 4)
+
+      # The card stands away from the glass by 8, so the picture shows in the margin
+      # and the card itself is a few pixels in from it.
+      assert {red, green, blue} = pixel(pixels, width, 14, height - 14)
       assert red < 90 and green < 90 and blue < 90
     end
 
@@ -116,23 +123,34 @@ defmodule PiFi.Peripheral.PiTft.ScreenTest do
 
   # **A mark that is there at all is the signal**, and the colour says which fault. See
   # `PiFi.Screen.Network`.
-  describe "the network" do
+  # **A mark that is there at all is the signal.** Which colour belongs to which fault
+  # is the business of `PiFi.Screen.Network`, and the test of that module names it, so
+  # this asks only whether the screen draws the mark and whether it draws the battery.
+  # See `PiFi.Test.Tree`.
+  describe "what the hardware says" do
     test "a network that carries the music draws no mark" do
-      assert marks(:internet) == %{amber: 0, rose: 0}
-      assert marks(nil) == %{amber: 0, rose: 0}
+      refute mark?(:internet)
+      refute mark?(nil)
     end
 
-    # Amber is the colour of a device that is working on something. The radio link works
-    # and a person looks at their router.
-    test "a device with no way out of its network draws an amber mark" do
-      assert %{amber: amber, rose: 0} = marks(:lan)
-      assert amber > 0
+    test "a device with no way out of its network draws a mark" do
+      assert mark?(:lan)
     end
 
-    # Rose is the colour of a fault, and it is the worse colour for the worse state.
-    test "a device with no network at all draws a rose mark" do
-      assert %{amber: 0, rose: rose} = marks(:disconnected)
-      assert rose > 0
+    test "a device with no network at all draws a mark" do
+      assert mark?(:disconnected)
+    end
+
+    test "a device with a cell draws the charge of it" do
+      assert Tree.shows?(Screen.render(view_with(:internet)), Battery.render(94, false))
+    end
+
+    # **A device on the mains draws no battery at all.** It has no gauge, so a battery
+    # at 0 would be a lie.
+    test "a device with no cell draws no battery" do
+      view = %{view_with(:internet) | battery_percent: nil}
+
+      refute Enum.any?(0..100, &Tree.shows?(Screen.render(view), Battery.render(&1, false)))
     end
 
     # A stop clears the track. What the hardware says is not the track.
@@ -146,57 +164,32 @@ defmodule PiFi.Peripheral.PiTft.ScreenTest do
     # the mains holds no gauge and it can still hold a router that is off, so that row
     # must draw for one.
     test "the idle screen of a device with no gauge still draws the mark" do
-      context = splash_file(%{})
-
       view = %{
         Screen.new()
         | device_name: "Kitchen",
-          splash_path: context.path,
+          splash_path: "/nowhere/splash.thumbnail",
           battery_percent: nil,
           network: :disconnected
       }
 
-      assert %{rose: rose} = count(render_pixels(view, context.assets))
-      assert rose > 0
+      assert Tree.shows?(Screen.render(view), Network.render(:disconnected))
     end
 
-    defp marks(network) do
-      view = %{
+    defp view_with(network) do
+      %{
         Screen.new()
         | state: :playing,
           title: "Tiny Ruins",
           battery_percent: 94,
           network: network
       }
-
-      count(render_pixels(view))
     end
 
-    defp render_pixels(view, assets \\ []) do
-      {width, height} = Screen.size()
+    defp mark?(network) do
+      tree = network |> view_with() |> Screen.render()
 
-      view
-      |> Screen.render()
-      |> Drawing.pixels(width, height, assets)
+      Enum.any?([:lan, :disconnected], &Tree.shows?(tree, Network.render(&1)))
     end
-
-    # **The mark is the one amber or rose thing at the top of the screen.** A state of
-    # `:playing` draws an emerald pill, and a buffering one draws an amber pill, so
-    # every view here plays.
-    defp count(pixels) do
-      {width, _height} = Screen.size()
-
-      for y <- 8..40, x <- 0..(width - 1), reduce: %{amber: 0, rose: 0} do
-        counted -> Map.update(counted, shade(pixel(pixels, width, x, y)), 1, &(&1 + 1))
-      end
-      |> Map.take([:amber, :rose])
-    end
-
-    # Amber 400 is `fbbf24` and rose 400 is `fb7185`. The green channel is what tells
-    # them apart, and no other pixel of this strip holds a red channel that high.
-    defp shade({red, green, blue}) when red > 220 and green > 160 and blue < 90, do: :amber
-    defp shade({red, green, blue}) when red > 220 and green in 80..150 and blue > 100, do: :rose
-    defp shade(_pixel), do: :other
   end
 
   # **The menu takes the whole screen**, because a list needs the rows. The event
@@ -327,31 +320,34 @@ defmodule PiFi.Peripheral.PiTft.ScreenTest do
     end
   end
 
-  describe "the colour of the artwork" do
-    # The bar of the progress and the pill of the status take the colour, so a view
-    # that holds one draws pixels that a view without one does not.
-    test "it reaches the pixels of the screen" do
-      {width, height} = Screen.size()
+  # **The screen reads no colour of the artwork**, so the chip of a state holds one
+  # colour whatever the cover is. See `PiFi.Screen.Style.state_colour/1`.
+  describe "the chip of the state" do
+    test "it says what the player is doing" do
+      for {state, word} <- [
+            {:playing, "PLAYING"},
+            {:paused, "PAUSED"},
+            {:failed, "FAILED"}
+          ] do
+        view = %{Screen.new() | state: state, title: "The Detail"}
 
-      playing = %{
-        Screen.new()
-        | state: :playing,
-          title: "The Detail",
-          position_ms: 30_000,
-          duration_ms: 60_000
-      }
-
-      assert pixels(playing, width, height) !=
-               pixels(%{playing | accent: {230, 90, 60}}, width, height)
+        assert word in Tree.texts(Screen.render(view)), "#{state} draws no #{word}"
+      end
     end
 
-    # A picture of greys gives no colour, and the screen then draws what it drew
-    # before. See `PiFi.Artwork.Accent`.
-    test "a view that holds no colour draws the colours of the states" do
-      {width, height} = Screen.size()
-      view = %{Screen.new() | state: :playing, title: "The Detail"}
+    # A person who reads this screen across a room reads the block of colour first, so
+    # the colour of a chip must not move with the track that plays.
+    test "two tracks of the one state draw the one chip" do
+      playing = %{Screen.new() | state: :playing, title: "The Detail"}
 
-      assert pixels(view, width, height) == pixels(%{view | accent: nil}, width, height)
+      assert chip(playing) == chip(%{playing | title: "Black Sheep", subtitle: "RNZ"})
+    end
+
+    defp chip(view) do
+      Tree.find_by(
+        Screen.render(view),
+        &(&1.attrs[:background] == Style.state_colour(view.state))
+      )
     end
   end
 
@@ -375,12 +371,6 @@ defmodule PiFi.Peripheral.PiTft.ScreenTest do
     <<_::binary-size(^offset), red, green, blue, _alpha, _rest::binary>> = pixels
 
     {red, green, blue}
-  end
-
-  defp pixels(view, width, height) do
-    view
-    |> Screen.render()
-    |> Drawing.pixels(width, height)
   end
 
   defp views do

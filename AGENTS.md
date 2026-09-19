@@ -179,6 +179,16 @@ Licence: Apache-2.0.
   that holds no order of place, and two builds named the wrong row from such a list.
   `PiFi.DeviceUi` decides what a place in the row means, and the driver names the
   place alone.
+- **A dark screen has two causes, and a press does not mean the same thing under each
+  one.** Standby stops the audio. A blank leaves the audio playing and turns the light
+  off, because the light is a large part of what a portable device takes from its cell.
+  `PiFi.DeviceUi` owns the period and publishes `PiFi.Event.View.ScreenBlanked`, and
+  each screen decides what dark means for it. Two rules keep the two apart. **The first
+  press of a blanked screen brings the light back and does nothing else**, and a press
+  in standby must leave standby, so `PiFi.DeviceUi` reads the player before it blanks.
+  **A peripheral clears its blank when it dozes**, because a blank that survived standby
+  would stop the draw, and the light would then come on over a panel that lost its
+  frame.
 - **Emerge draws the device screen, through its raster part alone.**
   `PiFi.Screen.Renderer` starts one headless renderer for each screen, and
   `PiFi.Peripheral.PiTft` writes the pixels to the ILI9341 over SPI. Do not add a
@@ -218,12 +228,39 @@ Licence: Apache-2.0.
     `PiFi.Screen.Renderer.assets/0` names the two that this firmware gives it:
     `.thumbnail` for the cache, and `.png` for the picture that the firmware ships
     for an idle screen.
+  - **`PiFi.Screen.Style` holds every colour, size and edge that a screen draws
+    with, and a part names none of its own.** The screens follow the neubrutalist
+    style of the website: flat colour, a hard border, an offset shadow with no blur,
+    and no round corner. The ground is dark and **the offset shadow is cyan**, because
+    a black shadow on a near black ground is nothing at all. `Emerge.UI.Border.shadow/1`
+    blurs by 10 pixels when a caller says nothing, so the blur must be 0 each time.
+  - **The display face ships in `priv/fonts` and each renderer loads it.** Neither
+    this firmware nor the Nerves system held a font before, so the screens drew in the
+    face that Skia uses when it finds no other. `EmergeSkia.load_font_file/5`
+    registers a file for **one renderer**, so `PiFi.Screen.Renderer.start/2` loads it
+    each time. A renderer that cannot read the file still starts: a screen in another
+    face is one that a person can read, and a screen that will not start is a black
+    panel.
+  - **`Emerge.UI.key/1` cannot name a part for a test to find.** Emerge keeps a key
+    for reconciliation and it raises `All siblings must have key when any key is
+    provided`, so one named element means that every element beside it needs a name.
+    `PiFi.Test.Tree` therefore reads the tree without names: `texts/1` gives the words
+    that a person reads, and `shows?/2` asks whether the screen holds the tree that a
+    part gives. **A test of a layout reads the tree, and never the pixels.** A test of
+    a part, such as `PiFi.Screen.Battery`, still reads the pixels, because the shape
+    is the whole of what that part does.
   - **The idle screen of a device that a person gave no picture draws the mark of the
     product.** `priv/splash` holds one PNG for each screen, named
     `<product>-<width>x<height>.png`, and `PiFi.Device.Identity.shipped_splash/1`
     reads it. **The file is the size of the screen**: another size costs a scale on each
     draw, and a screen that had to crop would lose the ends of the waveform of that
-    artwork. A new screen therefore needs a file and no code.
+    artwork. A new screen therefore needs a file and no code. The mark comes from the
+    SVG of the website, and `assets/logo/README.md` holds the source files and the one
+    rule that matters: **render at four times the size and scale the answer down**, or
+    the ground shows through the seam between the rectangles of each letter.
+
+    **A screen draws no name over the mark of the product**, because the mark carries
+    that name already. A device that a person named draws a card with the name in it.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `PiFi.Application` calls

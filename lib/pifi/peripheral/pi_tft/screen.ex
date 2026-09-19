@@ -8,7 +8,9 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   process, so a test draws it to a PNG and a person looks at the file.
 
   The layout is deliberately plain. A person reads this screen from a chair, across
-  a room, so the title takes the largest text that fits two lines.
+  a room, so the title takes the largest text that fits two lines, in the display face
+  of the product. See `PiFi.Screen.Style` for the colours, the type and the edges that
+  every part of this screen takes.
 
   A browse view comes with `PiFi.DeviceUi`, which owns the list and the selected
   index. This module draws no list today.
@@ -18,7 +20,7 @@ defmodule PiFi.Peripheral.PiTft.Screen do
 
   alias Emerge.UI.{Background, Border, Font}
   alias PiFi.Device.Identity
-  alias PiFi.Screen.{Badge, Bar, Battery, Clock, Network, Row}
+  alias PiFi.Screen.{Badge, Bar, Battery, Clock, Network, Row, Style}
 
   @width 320
   @height 240
@@ -42,11 +44,10 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   `artwork_path` is the disk path of a thumbnail image, or `nil` for no artwork.
   The path must be absolute and allowed by Emerge's runtime paths configuration.
 
-  `accent` is the colour of that artwork, as red, green and blue, or `nil` for a
-  picture that gives no colour. The bar of the progress and the pill of the status
-  take it, and the text does not: a colour that a picture gives is held inside a band
-  that reads well, and text is where a colour that misses that band stops a person
-  from reading the screen. See `PiFi.Artwork.Accent`.
+  **This screen reads no colour of the artwork.** The palette of the product holds six
+  colours and each one means one thing, so a bar that took the colour of the cover
+  would mean nothing at all. `PiFi.Artwork.Accent` stays for the web page, which has
+  the room to give a colour a place of its own. See `PiFi.Screen.Style`.
   """
   @type view :: %{
           state: :stopped | :buffering | :playing | :paused | :failed,
@@ -56,7 +57,6 @@ defmodule PiFi.Peripheral.PiTft.Screen do
           subtitle: String.t() | nil,
           message: String.t() | nil,
           artwork_path: String.t() | nil,
-          accent: {0..255, 0..255, 0..255} | nil,
           live?: boolean(),
           battery_percent: 0..100 | nil,
           low_battery?: boolean(),
@@ -98,7 +98,6 @@ defmodule PiFi.Peripheral.PiTft.Screen do
       subtitle: nil,
       message: nil,
       artwork_path: nil,
-      accent: nil,
       live?: false,
       battery_percent: nil,
       low_battery?: false,
@@ -144,7 +143,7 @@ defmodule PiFi.Peripheral.PiTft.Screen do
         height(px(@height)),
         padding(16),
         spacing(10),
-        Background.color(color(:slate, 950))
+        Background.color(Style.ground())
       ],
       [status_row(view), body(view), progress(view)]
     )
@@ -163,7 +162,7 @@ defmodule PiFi.Peripheral.PiTft.Screen do
         height(px(@height)),
         padding(12),
         spacing(8),
-        Background.color(color(:slate, 950))
+        Background.color(Style.ground())
       ],
       [menu_head(view, menu), menu_rows(menu)]
     )
@@ -173,7 +172,7 @@ defmodule PiFi.Peripheral.PiTft.Screen do
     Row.ends(
       [
         el(
-          [Font.size(13), Font.color(color(:slate, 500))],
+          Style.display(13) ++ [Font.color(Style.ink_dim())],
           text(String.upcase(menu.title))
         )
       ],
@@ -202,33 +201,33 @@ defmodule PiFi.Peripheral.PiTft.Screen do
     index |> Kernel.-(@menu_rows - 2) |> Kernel.max(0) |> Kernel.min(last)
   end
 
-  # The row that a person is on draws a band, because a colour of the text alone is not
-  # enough for a person who reads this screen across a room.
+  # The row that a person is on draws a block of colour, because a colour of the text
+  # alone is not enough for a person who reads this screen across a room.
+  #
+  # **The block is cyan, which this firmware gives the thing that a person acts on.**
+  # The hard border and the offset shadow lift that one row off the list, which is what
+  # the style of the product does for a control of a web page. See `PiFi.Screen.Style`.
   defp menu_row(row, on?) do
     Row.ends(
       [
         el(
-          [
-            Font.size(19),
-            Font.color(if(on?, do: color(:slate, 950), else: color(:slate, 50)))
-          ],
+          Style.display(15) ++ [Font.color(if(on?, do: Style.ground(), else: Style.ink()))],
           text(row.title)
         )
       ],
       [menu_mark(row.kind, on?)],
       spacing: 8
     )
-    |> then(fn line ->
-      el(
-        [
-          width(fill()),
-          padding_xy(8, 5),
-          Border.rounded(6),
-          Background.color(if(on?, do: color(:amber, 400), else: color_rgba(0, 0, 0, 0)))
-        ],
-        line
-      )
-    end)
+    |> then(fn line -> el(menu_row_style(on?), line) end)
+  end
+
+  defp menu_row_style(true) do
+    [width(fill()), padding_xy(7, 4), Background.color(Style.cyan())] ++
+      Style.edge() ++ [Style.offset(size: :sm)]
+  end
+
+  defp menu_row_style(false) do
+    [width(fill()), padding_xy(7, 4), Border.width(2), Border.color(color_rgba(0, 0, 0, 0))]
   end
 
   # A row that leads somewhere draws a chevron, a row that plays draws a triangle, and a
@@ -243,8 +242,8 @@ defmodule PiFi.Peripheral.PiTft.Screen do
 
   defp menu_mark(_kind, _on?), do: none()
 
-  defp mark_colour(true), do: color(:slate, 950)
-  defp mark_colour(false), do: color(:slate, 500)
+  defp mark_colour(true), do: Style.ground()
+  defp mark_colour(false), do: Style.ink_dim()
 
   @doc """
   What a person reads at the top of the screen.
@@ -282,46 +281,51 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   end
 
   # The status row is absent from this layout, so what the hardware says sits over the
-  # picture, on a band that keeps it readable. **The row draws for a device on the mains
-  # as well**, because a device with no gauge can still stand beside a router that is off.
+  # picture. **The two marks sit together at one end**, which is where the status row
+  # of a track puts them, so a person looks in one place whatever the screen shows.
+  #
+  # **The row draws for a device on the mains as well**, because a device with no gauge
+  # can still stand beside a router that is off.
   defp splash_battery(view) do
-    Row.ends([network(view)], [splash_gauge(view)], padding: {12, 10})
+    Row.ends([], [network(view), battery(view)], padding: {12, 10}, spacing: 8)
   end
 
-  defp splash_gauge(%{battery_percent: nil}), do: none()
-
-  defp splash_gauge(view) do
-    Badge.render(Battery.render(view.battery_percent, view.low_battery?), padding: {6, 4})
-  end
-
+  # **A device that no person named draws no card over the mark of the product.** The
+  # mark carries the name of the product already, so a card would write the same word
+  # twice and cut the mark in half while it did. See
+  # `PiFi.Peripheral.PirateAudio.Screen`, which draws the same card for the same reason.
   defp splash_name(view) do
+    if view.device_name == Identity.default_name(), do: none(), else: name_card(view)
+  end
+
+  # The card stands away from three edges of the glass, so the offset shadow has room to
+  # fall.
+  defp name_card(view) do
     el(
-      [width(fill()), padding_xy(16, 14), Background.color(color_rgba(0, 0, 0, 0.72))],
-      paragraph([width(fill()), Font.size(24), Font.color(color(:slate, 50))], [
-        text(view.device_name)
-      ])
+      [width(fill()), padding_each(0, 8, 8, 8)],
+      el(
+        [width(fill()), padding_xy(12, 10), Background.color(Style.panel_over_art())] ++
+          Style.edge() ++ [Style.offset()],
+        paragraph([width(fill()), Font.color(Style.ink())] ++ Style.display(20), [
+          text(view.device_name)
+        ])
+      )
     )
   end
 
   defp status_row(view) do
     Row.ends(
       [
-        el(
-          [
-            padding_xy(8, 3),
-            Border.rounded(999),
-            Background.color(status_colour(view)),
-            Font.size(13),
-            Font.color(color(:slate, 950))
-          ],
-          text(status_text(view))
+        Badge.render(
+          el(
+            Style.display(12) ++ [Font.color(Style.ground())],
+            text(String.upcase(status_text(view)))
+          ),
+          fill: Style.state_colour(view.state),
+          padding: {7, 2}
         )
       ],
-      [
-        network(view),
-        el([Font.size(13), Font.color(color(:slate, 500))], text(elapsed(view))),
-        battery(view)
-      ],
+      [network(view), battery(view)],
       spacing: 8
     )
   end
@@ -354,56 +358,87 @@ defmodule PiFi.Peripheral.PiTft.Screen do
     ])
   end
 
-  # The artwork is a square thumbnail, 120 pixels on each side. A track that has
-  # no artwork shows nothing in that place, and the text takes the full width.
+  # The artwork is a square thumbnail, 118 pixels on each side, in a frame of ink with
+  # the offset shadow of the product. **A cover is a picture of anything at all**, and
+  # the frame is what keeps a pale one from bleeding into the ground of the screen.
+  #
+  # A track that has no artwork shows nothing in that place, and the text takes the
+  # full width.
   defp artwork(%{artwork_path: nil}), do: none()
 
   defp artwork(%{artwork_path: path}) do
     image(
-      [width(px(120)), height(px(120)), Border.rounded(8), image_fit(:cover)],
+      [width(px(118)), height(px(118)), image_fit(:cover)] ++
+        Style.edge() ++ [Style.offset()],
       {:path, path}
     )
   end
 
   # `paragraph/2` wraps, and `el/2` with `text/1` does not. A title of a podcast
   # episode is long, and a title that does not wrap goes past the edge of the glass.
+  # **A title keeps the case that the track gave it, and a label is in capitals.** The
+  # display face is wide, and a capital of it is wider still: `Superheavy,
+  # Supercritical` in capitals at this size runs off the glass, where the same words in
+  # the case of the track fit the column. Capitals are for `PLAYING` and `VOLUME`,
+  # which this module writes and which are short by rule.
   defp title(%{title: nil} = view) do
-    paragraph([width(fill()), Font.size(20), Font.color(color(:slate, 500))], [
-      text(view.message || "Nothing is playing")
-    ])
+    paragraph(
+      [width(fill()), Font.color(Style.ink_dim())] ++ Style.display(18),
+      [text(view.message || "Nothing is playing")]
+    )
   end
 
   defp title(view) do
-    paragraph([width(fill()), Font.size(28), Font.color(color(:slate, 50))], [text(view.title)])
+    paragraph([width(fill()), Font.color(Style.ink())] ++ Style.display(20), [text(view.title)])
   end
 
   defp subtitle(%{subtitle: nil}), do: none()
 
   defp subtitle(view) do
-    paragraph([width(fill()), Font.size(17), Font.color(color(:slate, 400))], [
+    paragraph([width(fill()), Font.size(16), Font.color(Style.ink_dim())], [
       text(view.subtitle)
     ])
   end
 
-  # **The level takes the place of the progress bar while a person sets it.** A person
+  # **The times sit with the bar and not in the row at the head.** The bar says how much
+  # of the track is left at a glance, and the numbers say how much that is, so a person
+  # who wants the second reads it where they already looked for the first. An earlier
+  # version put them beside the battery, three rows away from the thing that they
+  # measure.
+  #
+  # **The level takes the place of the whole of that while a person sets it.** A person
   # holding a button is looking for the number, and a second bar would ask them which
   # one moved. The progress comes back when the level goes.
   #
-  # Amber, and not the accent of the artwork, so a person reads at a glance that this
-  # bar is not the place of the track.
+  # Amber is the second colour of the mark, where the place of the track takes cyan, so
+  # a person reads at a glance that this bar is not the place of the track.
   defp progress(%{volume_percent: percent}) when is_integer(percent) do
-    column([width(fill()), spacing(4)], [
-      Row.ends([volume_words("VOLUME")], [volume_words("#{percent}%")]),
-      bar(percent / 100, color(:amber, 400))
+    column([width(fill()), spacing(5)], [
+      Row.ends([label("VOLUME")], [label("#{percent}%")]),
+      bar(percent / 100, Style.amber())
     ])
   end
 
-  defp progress(%{duration_ms: nil}), do: none()
+  # A device that plays nothing has no time to show, and a fault has none that means
+  # anything.
+  defp progress(%{state: :stopped}), do: none()
+  defp progress(%{state: :failed}), do: none()
 
-  defp progress(view), do: bar(played(view), accent(view, color(:emerald, 500)))
+  # A live stream shows the time from the start of it, and it has no end and no bar.
+  defp progress(%{duration_ms: nil} = view), do: label(Clock.text(view.position_ms))
 
-  defp volume_words(words) do
-    el([Font.size(13), Font.color(color(:slate, 400))], text(words))
+  defp progress(view) do
+    column([width(fill()), spacing(5)], [times(view), bar(played(view), Style.cyan())])
+  end
+
+  defp times(view) do
+    Row.ends([label(Clock.text(view.position_ms))], [label(Clock.text(view.duration_ms))])
+  end
+
+  # The times and the word `VOLUME` are labels and not prose, so they take the display
+  # face, in the way that the labels of the website do.
+  defp label(words) do
+    el(Style.display(12) ++ [Font.color(Style.ink_dim())], text(words))
   end
 
   # The bar sits inside the padding of the body, so it is that much narrower than the
@@ -412,9 +447,8 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   defp bar(part, colour) do
     Bar.render(part,
       width: @width - 32,
-      height: 6,
-      radius: 3,
-      track: color(:slate, 800),
+      height: 9,
+      track: Style.panel(),
       fill: colour
     )
   end
@@ -422,22 +456,4 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   # `use Emerge.UI` brings its own `min/2`, which builds a layout constraint and not a
   # number, so this names the `Kernel` one.
   defp played(view), do: Kernel.min(view.position_ms, view.duration_ms) / view.duration_ms
-
-  defp elapsed(%{state: :stopped}), do: ""
-  defp elapsed(%{duration_ms: nil} = view), do: Clock.text(view.position_ms)
-
-  defp elapsed(view), do: "#{Clock.text(view.position_ms)} / #{Clock.text(view.duration_ms)}"
-
-  # **The pill says which state the player is in, so a colour of the artwork takes the
-  # place of one state alone.** Buffering is amber and a fault is rose on every track,
-  # because a person reads those two by their colour before they read the word.
-  defp status_colour(%{state: :failed}), do: color(:rose, 400)
-  defp status_colour(%{state: :playing} = view), do: accent(view, color(:emerald, 400))
-  defp status_colour(%{state: :buffering}), do: color(:amber, 400)
-  defp status_colour(_view), do: color(:slate, 500)
-
-  # A picture of greys gives no colour, and a track with no artwork gives none either,
-  # so each place that draws one names what it draws instead.
-  defp accent(%{accent: {red, green, blue}}, _instead), do: color_rgb(red, green, blue)
-  defp accent(_view, instead), do: instead
 end

@@ -58,6 +58,22 @@ defmodule PiFi.Screen.Renderer do
   drew the mark for a picture that it cannot read, in the place of the artwork.
   `assets/0` names the two that this firmware gives it.
 
+  ## The typeface of the product
+
+  **The screens of this device draw their headings in Archivo Black**, which is the
+  display face of the PiFi mark and of the website. Neither this firmware nor the
+  Nerves system held a font before, so the screens drew in the face that Skia uses
+  when it finds no other, and that face is not the face of the product.
+
+  `EmergeSkia.load_font_file/5` registers a file under a family name, and the
+  registration belongs to one renderer, so `start/2` loads the file each time. A
+  screen then names the family with `Emerge.UI.Font.family/1`.
+  `PiFi.Screen.Style.display_face/0` is the one place that names it.
+
+  **A renderer that cannot read the file still starts.** A screen that draws in
+  another face is a screen that a person can read, and a screen that will not start
+  is a black panel. See `load_display_face/1`.
+
   ## `rendering_api: :raster`
 
   The board holds no GPU that this firmware uses, and `config/target.exs` names
@@ -70,6 +86,7 @@ defmodule PiFi.Screen.Renderer do
 
   alias PiFi.Cache
   alias PiFi.Device.Identity
+  alias PiFi.Screen.Style
 
   @typedoc "A renderer of Emerge, as `EmergeSkia.start/1` gives it."
   @type t :: reference() | struct()
@@ -87,15 +104,20 @@ defmodule PiFi.Screen.Renderer do
   def start(size, assets \\ assets())
 
   def start({width, height}, assets) do
-    EmergeSkia.start(
-      otp_app: :pifi,
-      backend: :headless,
-      rendering_api: :raster,
-      width: width,
-      height: height,
-      assets: assets,
-      headless: [target: self(), mode: :binary, pixel_format: :rgba8888]
-    )
+    with {:ok, renderer} <-
+           EmergeSkia.start(
+             otp_app: :pifi,
+             backend: :headless,
+             rendering_api: :raster,
+             width: width,
+             height: height,
+             assets: assets,
+             headless: [target: self(), mode: :binary, pixel_format: :rgba8888]
+           ) do
+      load_display_face(renderer)
+
+      {:ok, renderer}
+    end
   end
 
   @doc """
@@ -150,6 +172,24 @@ defmodule PiFi.Screen.Renderer do
         extensions: [".thumbnail", ".png"]
       ]
     ]
+  end
+
+  # **A face that will not load costs a screen nothing that a person cannot read.**
+  # Emerge draws in the face that Skia uses when it finds no other, so the words stay
+  # on the glass and only the shape of them changes. A renderer that refused to start
+  # for a missing font would give a person a black panel instead.
+  defp load_display_face(renderer) do
+    path = Application.app_dir(:pifi, ["priv", "fonts", "ArchivoBlack-Regular.ttf"])
+
+    case EmergeSkia.load_font_file(renderer, Style.display_face(), 400, false, path) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("The screens draw in another face: #{inspect(reason)}")
+
+        :ok
+    end
   end
 
   # The last frame of this upload. Each one after the first holds more of the picture

@@ -2,7 +2,17 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
   use ExUnit.Case, async: true
 
   alias PiFi.Peripheral.PirateAudio.Screen
+  alias PiFi.Screen.{Battery, Network, Style}
   alias PiFi.Test.Drawing
+  alias PiFi.Test.Tree
+
+  # The card of the words stands away from the glass by this much. This is
+  # `@panel_margin` of the screen.
+  @margin 6
+
+  # The part of the bar that is full, when the track is at its end. The card is 240
+  # less the margin, the padding and the border of the card and of the bar.
+  @full_bar 202
 
   # One flat red picture of 8 by 8 pixels. A flat colour is what makes a measurement of
   # the pixels mean something: every place that the picture covers holds one value.
@@ -80,7 +90,10 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
 
       assert {red, _green, _blue} = pixel(pixels, width, 4, 40)
       assert red > 150
-      assert {red, green, blue} = pixel(pixels, width, 4, height - 4)
+
+      # The card of the name stands away from the glass, so the picture shows in the
+      # margin and the card itself is a few pixels in from it.
+      assert {red, green, blue} = pixel(pixels, width, @margin + 6, height - @margin - 6)
       assert red < 90 and green < 90 and blue < 90
     end
 
@@ -100,6 +113,9 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
     end
   end
 
+  # **These read the tree and not the pixels.** A test that counted the pixels of one
+  # colour broke on every change of a margin or a border and said nothing that a
+  # person could read. See `PiFi.Test.Tree`.
   describe "the timeline" do
     # The bar and the numbers are the same fact twice, and a person needs both: the bar
     # at a glance, and the numbers when they want to know how long is left.
@@ -112,8 +128,13 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
           duration_ms: 4_275_000
       }
 
-      # 812 of 4275 seconds is 19 percent, and the bar spans the width of the scrim.
-      assert_in_delta bar_width(view), 0.19 * 212, 3
+      tree = Screen.render(view)
+
+      assert "13:32" in Tree.texts(tree)
+      assert "1:11:15" in Tree.texts(tree)
+
+      # 812 of 4275 seconds is 19 percent.
+      assert_in_delta filled_bar(tree), 0.19 * @full_bar, 1
     end
 
     # A position past the end of a track is what a decoder gives when a file is longer
@@ -127,7 +148,7 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
           duration_ms: 4_275_000
       }
 
-      assert_in_delta bar_width(view), 212, 3
+      assert filled_bar(Screen.render(view)) == @full_bar
     end
 
     # A bar of no width draws nothing, and a track that just began still needs to show
@@ -135,18 +156,22 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
     test "a track that just began draws a bar that a person can see" do
       view = %{Screen.new() | state: :playing, title: "Tiny Ruins", duration_ms: 4_275_000}
 
-      assert bar_width(view) >= 2
+      assert filled_bar(Screen.render(view)) >= 2
     end
 
-    # A live stream has no end, so a bar would draw a lie.
-    test "a live stream draws no bar" do
+    # A live stream has no end, so a bar would draw a lie. It still says how long it
+    # has been playing.
+    test "a live stream draws the time and no bar" do
       view = %{Screen.new() | state: :playing, title: "RNZ National", position_ms: 95_000}
 
-      assert bar_width(view) == 0
+      tree = Screen.render(view)
+
+      refute drawn_bar?(tree)
+      assert "1:35" in Tree.texts(tree)
     end
 
     test "a device that plays nothing draws no bar" do
-      assert bar_width(Screen.new()) == 0
+      refute drawn_bar?(Screen.render(Screen.new()))
     end
 
     # A person who must charge the device reads that and nothing else.
@@ -155,40 +180,79 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
         Screen.new()
         | state: :playing,
           title: "Tiny Ruins",
+          subtitle: "Ceremony",
           position_ms: 812_000,
           duration_ms: 4_275_000,
           low_battery?: true
       }
 
-      assert bar_width(view) == 0
+      tree = Screen.render(view)
+
+      refute drawn_bar?(tree)
+      refute "Ceremony" in Tree.texts(tree)
+      assert "LOW BATTERY\nCHARGE NOW" in Tree.texts(tree)
     end
   end
 
-  # **A mark that is there at all is the signal**, and the colour says which fault. See
-  # `PiFi.Screen.Network`.
-  describe "the network" do
+  # The chip at the head says the state, and the card at the foot says the track. Both
+  # screens of this device draw that row. See `PiFi.Peripheral.PiTft.Screen`.
+  describe "the chip of the state" do
+    test "it says what the player is doing" do
+      for {state, word} <- [
+            {:playing, "PLAYING"},
+            {:paused, "PAUSED"},
+            {:buffering, "BUFFERING"},
+            {:failed, "FAILED"}
+          ] do
+        view = %{Screen.new() | state: state, title: "Tiny Ruins"}
+
+        assert word in Tree.texts(Screen.render(view)), "#{state} draws no #{word}"
+      end
+    end
+
+    # A person who must charge the device reads that in the chip as well as in the card.
+    test "a flat cell takes the chip" do
+      view = %{Screen.new() | state: :playing, title: "Tiny Ruins", low_battery?: true}
+
+      assert "CHARGE" in Tree.texts(Screen.render(view))
+    end
+
+    # The card carries the name of the device in that moment, and a chip beside it
+    # would say the same thing twice.
+    test "a device that plays nothing draws no chip" do
+      refute Enum.any?(Screen.render(Screen.new()) |> Tree.texts(), &(&1 in states()))
+    end
+  end
+
+  # **A mark that is there at all is the signal.** Which colour belongs to which fault
+  # is the business of `PiFi.Screen.Network`, and the test of that module names it, so
+  # this asks only whether the screen draws the mark and whether it draws the battery.
+  describe "what the hardware says" do
     test "a network that carries the music draws no mark" do
-      assert marks(:internet) == %{amber: 0, rose: 0}
-      assert marks(nil) == %{amber: 0, rose: 0}
+      refute mark?(:internet)
+      refute mark?(nil)
     end
 
-    # Amber is the colour of a device that is working on something. The radio link works
-    # and a person looks at their router.
-    test "a device with no way out of its network draws an amber mark" do
-      assert %{amber: amber, rose: 0} = marks(:lan)
-      assert amber > 0
+    test "a device with no way out of its network draws a mark" do
+      assert mark?(:lan)
     end
 
-    # Rose is the colour of a fault, and it is the worse colour for the worse state.
-    test "a device with no network at all draws a rose mark" do
-      assert %{amber: 0, rose: rose} = marks(:disconnected)
-      assert rose > 0
+    test "a device with no network at all draws a mark" do
+      assert mark?(:disconnected)
     end
 
-    # The battery sits at the other end of the row, so a mark that arrives moves nothing
-    # that a person was already reading.
-    test "the battery does not move when the mark arrives" do
-      assert battery_corner(:internet) == battery_corner(:lan)
+    test "a device with a cell draws the charge of it" do
+      view = %{view_with(:internet) | battery_percent: 94}
+
+      assert Tree.shows?(Screen.render(view), Battery.render(94, false))
+    end
+
+    # **A device on the mains draws no battery at all.** It has no gauge, so a battery
+    # at 0 would be a lie.
+    test "a device with no cell draws no battery" do
+      view = %{view_with(:internet) | battery_percent: nil}
+
+      refute Enum.any?(0..100, &Tree.shows?(Screen.render(view), Battery.render(&1, false)))
     end
 
     # A stop clears the track. What the hardware says is not the track.
@@ -208,37 +272,10 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
       }
     end
 
-    defp pixels_of(network) do
-      {width, height} = Screen.size()
+    defp mark?(network) do
+      tree = network |> view_with() |> Screen.render()
 
-      network
-      |> view_with()
-      |> Screen.render()
-      |> Drawing.pixels(width, height)
-    end
-
-    # The corner that the mark sits in, and the row that the battery shares with it.
-    defp marks(network) do
-      {width, _height} = Screen.size()
-      pixels = pixels_of(network)
-
-      for y <- 4..34, x <- 0..(width - 1), reduce: %{amber: 0, rose: 0} do
-        counted -> Map.update(counted, shade(pixel(pixels, width, x, y)), 1, &(&1 + 1))
-      end
-      |> Map.take([:amber, :rose])
-    end
-
-    # Amber 400 is `fbbf24` and rose 400 is `fb7185`. The green channel is what tells
-    # them apart, and no other pixel of this corner holds a red channel that high.
-    defp shade({red, green, blue}) when red > 220 and green > 160 and blue < 90, do: :amber
-    defp shade({red, green, blue}) when red > 220 and green in 80..150 and blue > 100, do: :rose
-    defp shade(_pixel), do: :other
-
-    # The right end of the row, which is where the battery sits.
-    defp battery_corner(network) do
-      {width, _height} = Screen.size()
-
-      pixel(pixels_of(network), width, width - 14, 18)
+      Enum.any?([:lan, :disconnected], &Tree.shows?(tree, Network.render(&1)))
     end
   end
 
@@ -274,6 +311,23 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
     end
   end
 
+  # **The part of the bar that is full is the one element filled with cyan.** The
+  # offset shadow of the card is cyan as well, and that is a shadow and not a fill, so
+  # nothing else on this screen answers.
+  defp bar_fill(tree) do
+    Tree.find_by(tree, &(&1.attrs[:background] == Style.cyan()))
+  end
+
+  defp drawn_bar?(tree), do: bar_fill(tree) != nil
+
+  defp filled_bar(tree) do
+    {:px, pixels} = bar_fill(tree).attrs.width
+
+    pixels
+  end
+
+  defp states, do: ["PLAYING", "PAUSED", "BUFFERING", "FAILED", "CHARGE"]
+
   # Emerge refuses a runtime path by its extension, so the file carries the name that
   # the cache gives a thumbnail. See `PiFi.Screen.Renderer.assets/0`.
   defp splash_file(_context) do
@@ -300,21 +354,6 @@ defmodule PiFi.Peripheral.PirateAudio.ScreenTest do
   # The bar is the one bright row at the foot of the screen, and the words above it hold
   # no row of their own. A count of the light pixels of that row therefore measures the
   # bar, and 0 says that the screen drew none.
-  defp bar_width(view) do
-    {width, height} = Screen.size()
-
-    pixels =
-      view
-      |> Screen.render()
-      |> Drawing.pixels(width, height)
-
-    Enum.count(0..(width - 1), fn x ->
-      {red, green, blue} = pixel(pixels, width, x, height - 14)
-
-      red > 200 and green > 200 and blue > 200
-    end)
-  end
-
   defp pixel(pixels, width, x, y) do
     offset = (y * width + x) * 4
     <<_::binary-size(^offset), red, green, blue, _alpha, _rest::binary>> = pixels

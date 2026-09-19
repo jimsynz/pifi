@@ -12,11 +12,17 @@ defmodule PiFi.Screen.Bar do
   **The caller gives the width in pixels.** Emerge takes a share of the parent for the
   width of an element, and the fill of a bar is a share of the bar and not of the row
   around it, so the caller works the number out from the width of its own layout.
+
+  **The bar is square and it carries a border of ink**, which is the style of the
+  product. See `PiFi.Screen.Style`. The border takes 2 pixels from each side, so a bar
+  needs a height of at least 8 for the part that is full to read as a bar and not as a
+  line. A caller that wants a thinner one gives `border: 1`.
   """
 
   use Emerge.UI
 
-  alias Emerge.UI.{Background, Border}
+  alias Emerge.UI.Background
+  alias PiFi.Screen.Style
 
   @least 2
 
@@ -32,26 +38,22 @@ defmodule PiFi.Screen.Bar do
   - `:height` - how tall it is, in pixels. It is required.
   - `:fill` - the colour of the part that is full. It is required.
   - `:track` - the colour of the rest of it. It is required.
-  - `:radius` - how round the corners are, in pixels. Half of the height by default.
+  - `:border` - how heavy the border of ink is, in pixels. 2 by default.
   """
   @spec render(float(), keyword()) :: Emerge.tree()
   def render(part, options) do
     width = Keyword.fetch!(options, :width)
     height = Keyword.fetch!(options, :height)
-    radius = Keyword.get(options, :radius, round(height / 2))
+    border = Keyword.get(options, :border, 2)
+    inside = width - 2 * border
 
     el(
-      [
-        width(fill()),
-        height(px(height)),
-        Border.rounded(radius),
-        Background.color(Keyword.fetch!(options, :track))
-      ],
+      [width(fill()), height(px(height)), Background.color(Keyword.fetch!(options, :track))] ++
+        Style.edge(width: border),
       el(
         [
-          width(px(full_width(part, width))),
-          height(px(height)),
-          Border.rounded(radius),
+          width(px(full_width(part, inside))),
+          height(fill()),
           Background.color(Keyword.fetch!(options, :fill))
         ],
         none()
