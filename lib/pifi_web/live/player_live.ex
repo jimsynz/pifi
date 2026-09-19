@@ -299,7 +299,7 @@ defmodule PiFiWeb.PlayerLive do
             type="button"
             phx-click="expand"
             disabled={@standby?}
-            aria-label="Show the large view"
+            aria-label="Show the full player"
             class="relative size-12 shrink-0 overflow-hidden rounded-lg bg-shell shadow-[inset_0_0_0_1px_var(--color-edge)]"
           >
             <img
@@ -377,7 +377,7 @@ defmodule PiFiWeb.PlayerLive do
           id="collapse"
           click="collapse"
           icon="hero-x-mark"
-          label="Close the large view"
+          label="Close the full player"
           class="absolute right-5 top-5 size-10"
         />
 
@@ -426,7 +426,7 @@ defmodule PiFiWeb.PlayerLive do
               id="previous"
               click="previous"
               icon="hero-backward"
-              label="The track before"
+              label="Previous track"
               disabled={is_nil(@track)}
             />
             <.round_control
@@ -450,7 +450,7 @@ defmodule PiFiWeb.PlayerLive do
               id="next"
               click="next"
               icon="hero-forward"
-              label="The track after"
+              label="Next track"
               disabled={is_nil(@track)}
             />
           </div>
@@ -470,7 +470,7 @@ defmodule PiFiWeb.PlayerLive do
                 max="100"
                 step="1"
                 value={@volume.percent}
-                aria-label="The level of the output"
+                aria-label="Volume"
                 class="w-full accent-[var(--color-accent)]"
               />
             </form>
@@ -572,7 +572,7 @@ defmodule PiFiWeb.PlayerLive do
         phx-focus="scrub_start"
         phx-blur="scrub_end"
         phx-debounce="400"
-        aria-label="The place in the track"
+        aria-label="Position in the track"
         class="w-full accent-[var(--color-accent)] disabled:opacity-40"
       />
     </form>

@@ -106,7 +106,7 @@ defmodule PiFiWeb.HistoryLive do
         page_size={25}
         empty_message="This device has played nothing yet."
         loading_message="Reading…"
-        filters_label="Find"
+        filters_label="Filter"
         sort_label="Sort"
         show_filters={true}
         search={[label: "Name", placeholder: "Search the history…", fn: &ItemList.search_title/3]}

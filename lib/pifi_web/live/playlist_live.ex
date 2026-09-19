@@ -9,7 +9,7 @@ defmodule PiFiWeb.PlaylistLive do
   ## Where a playlist comes from
 
   **The queue is what fills the first one.** A person plays an album or a country and
-  the queue then carries that list, so "Keep the queue" writes a playlist of what they
+  the queue then carries that list, so "Save the queue" writes a playlist of what they
   are already listening to. Nothing else needs a control, and a person who wants one
   track adds it from the list that they found it in. See `PiFiWeb.ItemList`.
 
@@ -75,7 +75,7 @@ defmodule PiFiWeb.PlaylistLive do
   def handle_event("keep_queue", %{"name" => name}, socket) do
     case Playback.queue!() do
       [] ->
-        {:noreply, put_flash(socket, :error, "The queue is empty, so there is nothing to keep.")}
+        {:noreply, put_flash(socket, :error, "The queue is empty, so there's nothing to save.")}
 
       rows ->
         keep(socket, name, Enum.map(rows, & &1.item_id))
@@ -92,7 +92,7 @@ defmodule PiFiWeb.PlaylistLive do
         {:noreply,
          socket
          |> assign(:playlist, renamed)
-         |> put_flash(:info, "That playlist is #{renamed.name} now.")
+         |> put_flash(:info, "Renamed to #{renamed.name}.")
          |> reload()}
 
       {:error, reason} ->
@@ -185,14 +185,14 @@ defmodule PiFiWeb.PlaylistLive do
           phx-click="name"
           class="control rounded-lg px-2 py-1 text-xs"
         >
-          Keep the queue
+          Save the queue
         </button>
       </div>
 
       <form :if={@naming?} id="keep-queue-form" phx-submit="keep_queue" class="mb-3">
         <p class="mb-2 text-sm text-ink-dim">
-          The queue has {tracks(@queue_count)}. Give the playlist a name, and the tracks
-          that are in the queue now go in it.
+          The queue has {tracks(@queue_count)}. Name the playlist and everything in the
+          queue goes into it.
         </p>
 
         <div class="flex items-center gap-2">
@@ -206,7 +206,7 @@ defmodule PiFiWeb.PlaylistLive do
             placeholder="Friday"
             class="control grow rounded-lg px-3 py-2 text-sm"
           />
-          <button type="submit" id="keep" class="control rounded-lg px-3 py-2 text-sm">Keep</button>
+          <button type="submit" id="keep" class="control rounded-lg px-3 py-2 text-sm">Save</button>
           <button
             type="button"
             id="cancel-name"
@@ -219,7 +219,7 @@ defmodule PiFiWeb.PlaylistLive do
       </form>
 
       <p :if={@playlists == []} id="playlists-empty" class="text-sm text-ink-dim">
-        This device has no playlist. Play a list, and then keep the queue as one.
+        No playlists yet. Play something, then save the queue as a playlist.
       </p>
 
       <ul :if={@playlists != []} class="divide-y divide-edge">
@@ -316,7 +316,7 @@ defmodule PiFiWeb.PlaylistLive do
           maxlength="100"
           required
           autocomplete="off"
-          aria-label="The name of this playlist"
+          aria-label="Playlist name"
           class="control grow rounded-lg px-3 py-2 text-sm"
         />
         <button type="submit" id="rename" class="control rounded-lg px-3 py-2 text-sm">
@@ -325,7 +325,7 @@ defmodule PiFiWeb.PlaylistLive do
       </form>
 
       <p :if={@rows == []} id="playlist-empty" class="text-sm text-ink-dim">
-        This playlist is empty. Play a list, and then keep the queue as a playlist.
+        This playlist is empty.
       </p>
 
       <ul
@@ -381,7 +381,7 @@ defmodule PiFiWeb.PlaylistLive do
       <span
         id={"drag-#{@row.id}"}
         data-drag-handle
-        aria-label="Drag to move this track"
+        aria-label="Drag to reorder"
         class="control shrink-0 cursor-grab touch-none rounded-lg p-1 active:cursor-grabbing"
       >
         <.icon name="hero-bars-2-mini" class="size-4" />
@@ -392,7 +392,7 @@ defmodule PiFiWeb.PlaylistLive do
         id={"remove-#{@row.id}"}
         phx-click="remove"
         phx-value-id={@row.id}
-        aria-label="Take this track out of the playlist"
+        aria-label="Remove from the playlist"
         class="control rounded-lg p-1"
       >
         <.icon name="hero-x-mark-mini" class="size-4" />
@@ -422,7 +422,7 @@ defmodule PiFiWeb.PlaylistLive do
 
       {:error, _reason} ->
         socket
-        |> put_flash(:error, "This device has no such playlist.")
+        |> put_flash(:error, "No such playlist.")
         |> push_navigate(to: ~p"/playlists")
     end
   end
@@ -483,11 +483,11 @@ defmodule PiFiWeb.PlaylistLive do
   # meets, so it says so in words. Anything else is a fault of the device.
   defp refusal(%Ash.Error.Invalid{errors: errors} = error) do
     if Enum.any?(errors, &match?(%Ash.Error.Changes.InvalidAttribute{field: :name}, &1)) do
-      "Another playlist has that name, or the name is empty."
+      "That name is already taken, or it's empty."
     else
-      "The device could not do that: #{inspect(error)}"
+      "Couldn't do that: #{inspect(error)}"
     end
   end
 
-  defp refusal(reason), do: "The device could not do that: #{inspect(reason)}"
+  defp refusal(reason), do: "Couldn't do that: #{inspect(reason)}"
 end

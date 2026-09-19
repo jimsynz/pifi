@@ -146,7 +146,7 @@ defmodule PiFiWeb.SettingsLive do
   def handle_event("save_device_name", %{"device" => %{"name" => name}}, socket) do
     case Identity.put_name(name) do
       :ok ->
-        {:noreply, socket |> put_flash(:info, "This device is #{Identity.name()}.") |> refresh()}
+        {:noreply, socket |> put_flash(:info, "Renamed to #{Identity.name()}.") |> refresh()}
 
       {:error, message} ->
         {:noreply, put_flash(socket, :error, message)}
@@ -164,7 +164,7 @@ defmodule PiFiWeb.SettingsLive do
 
     {:noreply,
      socket
-     |> put_flash(:info, "Each screen shows the picture that came with the firmware again.")
+     |> put_flash(:info, "Each screen shows the default picture again.")
      |> refresh()}
   end
 
@@ -175,7 +175,7 @@ defmodule PiFiWeb.SettingsLive do
       {:noreply, socket |> put_flash(:info, in_use(module)) |> reload(module)}
     else
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+        {:noreply, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
     end
   end
 
@@ -195,7 +195,7 @@ defmodule PiFiWeb.SettingsLive do
       {:error, reason} ->
         {:noreply,
          socket
-         |> put_flash(:error, "That did not start: #{inspect(reason)}")
+         |> put_flash(:error, "Couldn't start that: #{inspect(reason)}")
          |> refresh()}
     end
   end
@@ -209,10 +209,10 @@ defmodule PiFiWeb.SettingsLive do
         {:noreply,
          socket
          |> assign(:profile, Hardware.chosen())
-         |> put_flash(:info, "The device restarts to use that.")}
+         |> put_flash(:info, "Restarting to apply that.")}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "That did not work: #{inspect(reason)}")}
+        {:noreply, put_flash(socket, :error, "That didn't work: #{inspect(reason)}")}
     end
   end
 
@@ -245,7 +245,7 @@ defmodule PiFiWeb.SettingsLive do
         {:noreply, socket |> put_flash(:info, sync_flash(key, hours)) |> load_source(module)}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "That did not work: #{inspect(reason)}")}
+        {:noreply, put_flash(socket, :error, "That didn't work: #{inspect(reason)}")}
     end
   end
 
@@ -273,7 +273,7 @@ defmodule PiFiWeb.SettingsLive do
         {:noreply, socket |> put_flash(:info, standby_flash(minutes)) |> refresh()}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "The device kept the period: #{inspect(reason)}")}
+        {:noreply, put_flash(socket, :error, "Couldn't change the period: #{inspect(reason)}")}
     end
   end
 
@@ -284,7 +284,7 @@ defmodule PiFiWeb.SettingsLive do
         {:noreply, socket |> put_flash(:info, screen_flash(seconds)) |> refresh()}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "The device kept the period: #{inspect(reason)}")}
+        {:noreply, put_flash(socket, :error, "Couldn't change the period: #{inspect(reason)}")}
     end
   end
 
@@ -292,10 +292,10 @@ defmodule PiFiWeb.SettingsLive do
   def handle_event("select_output", %{"id" => id}, socket) do
     case PiFi.Playback.select_output(id) do
       {:ok, :ok} ->
-        {:noreply, socket |> put_flash(:info, "The output device is #{id}.") |> refresh()}
+        {:noreply, socket |> put_flash(:info, "Now using #{id}.") |> refresh()}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+        {:noreply, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
     end
   end
 
@@ -360,16 +360,16 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-device" title="Device" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
-        The name reaches the network, the screen of the device, and the access point
-        that the Wi-Fi setup makes. A household with two of these needs two names.
+        This name shows up on the network, on the device's screen, and on the Wi-Fi
+        access point during setup. Give two of them different names.
       </p>
 
       <.form for={@device_form} id="device-form" phx-submit="save_device_name">
         <.input field={@device_form[:name]} type="text" label="Name" maxlength="32" />
 
         <p class="mt-1 text-sm text-ink-dim">
-          This device answers at <span class="numerals">{@device_slug}.local</span>,
-          and at the name that the board came with. A name takes 32 characters or less.
+          PiFi is reachable at <span class="numerals">{@device_slug}.local</span>, and at
+          the name the board shipped with. Up to 32 characters.
         </p>
 
         <button type="submit" id="save-device-name" class="control mt-3 rounded-lg px-4 py-2 text-sm">
@@ -379,20 +379,19 @@ defmodule PiFiWeb.SettingsLive do
 
       <div class="mt-4 border-t border-edge pt-4">
         <p class="mb-3 text-sm text-ink-dim">
-          The screen of the device shows this picture when it plays nothing. Choose a
-          JPEG or a PNG of 4096 KB or less, and the device keeps it when it arrives.
+          Shown on the screen when nothing is playing. JPEG or PNG, up to 4096 KB.
         </p>
 
         <img
           :if={@splash_path}
           id="splash"
           src={@splash_path}
-          alt="The picture that the screen shows when the device plays nothing"
+          alt="Shown on the screen when nothing is playing"
           class="mb-3 max-h-40 rounded-lg"
         />
 
         <p :if={is_nil(@splash_path)} id="no-splash" class="mb-3 text-sm text-ink-dim">
-          This device has no picture, so each screen shows its name.
+          No picture set, so each screen shows the device name.
         </p>
 
         <.form for={@splash_form} id="splash-form" phx-change="validate_splash">
@@ -436,11 +435,11 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-output" title="Output device" back={~p"/settings"}>
       <p :if={@output.devices == []} id="no-output" class="text-sm text-ink-dim">
-        No sound card is present.
+        No sound card found.
       </p>
 
       <p :if={absent_choice?(@output)} id="absent-output" class="mb-3 text-sm text-ink-dim">
-        The card that you chose is not present. The device uses the first one instead.
+        The card you chose isn't connected, so PiFi is using the first one.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -477,19 +476,19 @@ defmodule PiFiWeb.SettingsLive do
             <span :if={@volume.enabled?} class="size-2 rounded-full bg-accent" />
           </span>
 
-          <span class="min-w-0 grow">Set the level on this device</span>
+          <span class="min-w-0 grow">Set the volume on this device</span>
         </button>
 
         <p :if={@volume.supported?} class="mt-1 text-sm text-ink-dim">
-          A stereo has its level on the amplifier, and a card that attenuates does it
-          by throwing bits away. Leave this off for a device that feeds an amplifier,
-          and turn it on for headphones or for powered speakers, which have nowhere
-          else to set it. Turning it off puts the card back to its loudest.
+          Digital volume works by throwing bits away, so leave this off if you are
+          feeding an amplifier and use its knob instead. Turn it on for headphones or
+          powered speakers, which have nowhere else to set the level. Turning it off
+          puts the card back to full volume.
         </p>
 
         <p :if={not @volume.supported?} id="no-volume-control" class="mt-1 text-sm text-ink-dim">
-          This card has no level that the device can set. Most DACs of a stereo give
-          a fixed output on purpose. Set the level on your amplifier.
+          This card has no volume control PiFi can set. Most hi-fi DACs are fixed
+          output by design. Use your amplifier instead.
         </p>
       </div>
 
@@ -499,7 +498,7 @@ defmodule PiFiWeb.SettingsLive do
         class="mt-4 flex items-center gap-2 border-t border-edge pt-4 text-sm text-ink-dim hover:text-accent"
       >
         <.icon name="hero-question-mark-circle" class="size-4 shrink-0" />
-        Do you not see your audio device?
+        Can't see your audio device?
       </.link>
     </.section>
     """
@@ -513,8 +512,8 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-hardware" title="Audio hardware" back={~p"/settings/output"}>
       <p class="mb-4 text-sm text-ink-dim">
-        A DAC on the pins of the board needs a driver that starts before the rest of the
-        firmware. Name what you added, and the device restarts to use it.
+        A DAC wired to the board's pins needs a driver that loads before the rest of the
+        firmware. Tell PiFi what you fitted and it restarts to load it.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -555,8 +554,7 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-sources" title="Sources" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
-        A source that is out of use leaves the top row, and it asks the network for
-        nothing.
+        A disabled source drops off the top row and stops talking to the network.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -645,8 +643,8 @@ defmodule PiFiWeb.SettingsLive do
 
       <div :if={@source.jobs != []} id="source-syncing" class="mt-4 border-t border-edge pt-4">
         <p class="mb-3 text-sm text-ink-dim">
-          The device reads these when the period has passed and the network answers, so
-          one that is switched off at night reads what it missed when you turn it on.
+          PiFi checks for new items once the interval has passed and the network is up,
+          so one that is off overnight catches up when you switch it on.
         </p>
 
         <div :for={job <- @source.jobs} id={"sync-#{job.key}"} class="mb-3">
@@ -682,12 +680,12 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-peripherals" title="Peripherals" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
-        This firmware runs on a board with a screen and on a board with none, so it
-        cannot know what yours has. Name the parts that you wired.
+        The same firmware runs on boards with a screen and boards without, so it cannot
+        tell what yours has. Turn on the parts you wired up.
       </p>
 
       <p :if={@peripheral_list == []} id="no-peripherals" class="text-sm text-ink-dim">
-        This firmware knows no peripheral.
+        No peripherals are configured.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -722,7 +720,7 @@ defmodule PiFiWeb.SettingsLive do
               peripheral.enabled? && "control-on"
             ]}
           >
-            {if peripheral.enabled?, do: "Take out of use", else: "Put in use"}
+            {if peripheral.enabled?, do: "Disable", else: "Enable"}
           </button>
         </li>
       </ul>
@@ -735,9 +733,8 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-standby" title="Standby" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
-        The device enters standby when it plays nothing for this long and no person
-        presses a control. A track that plays keeps the period off, so an episode of
-        two hours reaches its end.
+        PiFi goes into standby after this long with nothing playing and no button
+        pressed. Playback keeps it awake, so a two-hour episode always finishes.
       </p>
 
       <div id="switch-off" class="mb-4 border-b border-edge pb-4">
@@ -758,15 +755,14 @@ defmodule PiFiWeb.SettingsLive do
             <span :if={@switch_off?} class="size-2 rounded-full bg-accent" />
           </span>
 
-          <span class="min-w-0 grow">Prepare to be switched off</span>
+          <span class="min-w-0 grow">Prepare for switch-off</span>
         </button>
 
         <p class="mt-1 text-sm text-ink-dim">
-          A device that runs on a battery is switched off by hand. This stops the
-          background work when the device enters standby, writes what it holds on to the
-          card, and says on the screen that it is safe to switch off. Leave it off
-          for a device on the mains, whose background work runs while it stands in
-          standby.
+          A battery device gets switched off by hand. Turn this on and PiFi stops its
+          background work when it enters standby, writes everything to the card, and says
+          on the screen when it is safe to switch off. Leave it off for a mains-powered
+          device, which can keep working in standby.
         </p>
       </div>
 
@@ -805,15 +801,15 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-screen" title="Screen" back={~p"/settings"}>
       <p class="mb-3 text-sm text-ink-dim">
-        The screen of the device goes dark when no person presses a button for this
-        long. The audio continues, so this is not standby. A press of any button brings
-        the screen back, and that press does nothing else.
+        The screen goes dark after this long without a button press. Playback carries
+        on, so this is not standby. Any button wakes it, and that first press does
+        nothing else.
       </p>
 
       <p class="mb-3 text-sm text-ink-dim">
-        The light is a large part of what a device takes from a battery. Choose a short
-        period for a device that a person carries, and choose <em>Never</em>
-        for a device that stands on a shelf and shows what it plays.
+        The backlight is a big part of what a battery device draws. Pick a short period
+        if you carry it around, or <em>Never</em>
+        if it sits on a shelf showing what is playing.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -851,7 +847,7 @@ defmodule PiFiWeb.SettingsLive do
     ~H"""
     <.section id="settings-network" title="Network" back={~p"/settings"}>
       <p :if={@interfaces == []} id="no-network" class="text-sm text-ink-dim">
-        This device reports no network interface.
+        No network interfaces found.
       </p>
 
       <ul class="divide-y divide-edge">
@@ -1069,7 +1065,7 @@ defmodule PiFiWeb.SettingsLive do
           By default
         </span>
         <.icon name="hero-speaker-wave" class="size-5 text-accent" />
-        <span class="sr-only">In use</span>
+        <span class="sr-only">Enabled</span>
       </span>
     </button>
     """
@@ -1090,7 +1086,7 @@ defmodule PiFiWeb.SettingsLive do
         @source.enabled? && "control-on"
       ]}
     >
-      {if @source.enabled?, do: "Take out of use", else: "Put in use"}
+      {if @source.enabled?, do: "Disable", else: "Enable"}
     </button>
     """
   end
@@ -1114,9 +1110,9 @@ defmodule PiFiWeb.SettingsLive do
   defp splash_answer(socket, {:error, message}), do: put_flash(socket, :error, message)
 
   defp upload_message(:too_large), do: "That file is larger than 4096 KB."
-  defp upload_message(:not_accepted), do: "That file is not a JPEG and not a PNG."
-  defp upload_message(:too_many_files), do: "Give one picture."
-  defp upload_message(error), do: "That file did not arrive: #{inspect(error)}"
+  defp upload_message(:not_accepted), do: "That file isn't a JPEG or a PNG."
+  defp upload_message(:too_many_files), do: "Choose one picture."
+  defp upload_message(error), do: "That upload failed: #{inspect(error)}"
 
   defp title(socket), do: assign(socket, :page_title, "Settings")
 
@@ -1220,7 +1216,7 @@ defmodule PiFiWeb.SettingsLive do
     end
   end
 
-  defp last_run_title(nil), do: "It has not run on this device yet."
+  defp last_run_title(nil), do: "Hasn't run yet."
   defp last_run_title(at), do: "It last ran on #{Calendar.strftime(at, "%d %B at %H:%M UTC")}."
 
   defp periods, do: [0, 5, 10, 15, 20, 30, 45, 60, 90, 120]
@@ -1231,7 +1227,7 @@ defmodule PiFiWeb.SettingsLive do
   defp period_title(120), do: "After 2 hours"
   defp period_title(minutes), do: "After #{minutes} minutes"
 
-  defp standby_summary(0), do: "The device stays awake"
+  defp standby_summary(0), do: "Stays awake"
   defp standby_summary(minutes), do: period_title(minutes)
 
   # The periods that a person can pick for the screen. A device that runs on a battery
@@ -1248,22 +1244,22 @@ defmodule PiFiWeb.SettingsLive do
   defp screen_summary(seconds), do: blank_title(seconds)
 
   defp switch_off_flash(true),
-    do: "The device stops its work in standby, and it says when it is safe to switch off."
+    do: "PiFi stops its background work in standby and says when it's safe to switch off."
 
-  defp switch_off_flash(false), do: "The device continues its work in standby."
+  defp switch_off_flash(false), do: "PiFi keeps working in standby."
 
-  defp volume_flash(true), do: "This device sets the level of the sound card."
+  defp volume_flash(true), do: "PiFi sets the volume on the sound card."
 
   defp volume_flash(false),
-    do: "The sound card plays at its loudest. Set the level on your amplifier."
+    do: "The sound card plays at full volume. Use your amplifier instead."
 
-  defp standby_flash("0"), do: "The device stays awake."
-  defp standby_flash(minutes), do: "The device enters standby after #{minutes} minutes of quiet."
+  defp standby_flash("0"), do: "PiFi stays awake."
+  defp standby_flash(minutes), do: "PiFi enters standby after #{minutes} minutes of quiet."
 
   defp screen_flash("0"), do: "The screen stays lit."
 
   defp screen_flash(seconds),
-    do: "The screen goes dark after #{seconds} seconds with no press."
+    do: "The screen goes dark after #{seconds} seconds."
 
   # `:sources` belongs to `PiFiWeb.Shell`, and the top row of the faceplate draws
   # it. That list names the sources in use, and this one names every source and the
@@ -1295,9 +1291,9 @@ defmodule PiFiWeb.SettingsLive do
     end)
   end
 
-  defp peripheral_state(%{enabled?: false}), do: "Out of use"
-  defp peripheral_state(%{running?: true}), do: "In use"
-  defp peripheral_state(_peripheral), do: "In use, but it did not start"
+  defp peripheral_state(%{enabled?: false}), do: "Disabled"
+  defp peripheral_state(%{running?: true}), do: "Enabled"
+  defp peripheral_state(_peripheral), do: "Enabled, but it failed to start"
 
   defp peripheral_in_use(module) do
     if Peripheral.enabled?(module),
@@ -1305,7 +1301,7 @@ defmodule PiFiWeb.SettingsLive do
       else: "#{module.title()} is out of use."
   end
 
-  defp peripherals_summary([]), do: "This firmware knows no peripheral"
+  defp peripherals_summary([]), do: "No peripherals are configured"
 
   defp peripherals_summary(peripherals) do
     "#{Enum.count(peripherals, & &1.running?)} of #{length(peripherals)} running"
@@ -1320,15 +1316,15 @@ defmodule PiFiWeb.SettingsLive do
       else: "#{module.title()} is out of use. The device is removing what it kept for it."
   end
 
-  defp state(true), do: "In use"
-  defp state(false), do: "Out of use"
+  defp state(true), do: "Enabled"
+  defp state(false), do: "Disabled"
 
   # A write-only field shows nothing that the device keeps, so the control says
   # what a person must type instead.
   defp placeholder(%{write_only?: true, title: title}), do: title
   defp placeholder(_field), do: nil
 
-  defp output_summary(%{devices: []}), do: "No sound card is present"
+  defp output_summary(%{devices: []}), do: "No sound card found"
 
   defp output_summary(%{devices: devices, selected: selected, in_use: in_use}) do
     title =
@@ -1349,10 +1345,10 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   defp sources_summary(sources) do
-    "#{Enum.count(sources, & &1.enabled?)} of #{length(sources)} in use"
+    "#{Enum.count(sources, & &1.enabled?)} of #{length(sources)} enabled"
   end
 
-  defp network_summary([]), do: "This device reports no network interface"
+  defp network_summary([]), do: "No network interfaces found"
 
   defp network_summary(interfaces) do
     Enum.map_join(interfaces, ", ", &connection(&1.connection))

@@ -86,7 +86,7 @@ defmodule PiFiWeb.PlaylistLiveTest do
       view |> element("#keep-queue") |> render_click()
       html = view |> form("#keep-queue-form", %{"name" => "Friday"}) |> render_submit()
 
-      assert html =~ "Another playlist has that name"
+      assert html =~ "That name is already taken"
     end
   end
 
@@ -205,7 +205,7 @@ defmodule PiFiWeb.PlaylistLiveTest do
 
       html = view |> form("#rename-form", %{"name" => "Saturday"}) |> render_submit()
 
-      assert html =~ "That playlist is Saturday now"
+      assert html =~ "Renamed to Saturday"
       assert to_string(Playback.get_playlist!(made.id).name) == "Saturday"
     end
 

@@ -682,13 +682,13 @@ defmodule PiFiWeb.ItemList do
       class="glass sheen fixed inset-x-3 bottom-24 z-50 mx-auto max-w-md rounded-xl p-4 sm:inset-x-5"
     >
       <div class="mb-3 flex items-center gap-2">
-        <h2 class="grow text-xs uppercase tracking-[0.18em] text-ink-faint">Put this in</h2>
+        <h2 class="grow text-xs uppercase tracking-[0.18em] text-ink-faint">Add to playlist</h2>
 
         <button
           type="button"
           id="cancel-add"
           phx-click="cancel_add"
-          aria-label="Leave this"
+          aria-label="Cancel"
           class="control rounded-lg p-1.5"
         >
           <.icon name="hero-x-mark" class="size-4" />
@@ -718,12 +718,12 @@ defmodule PiFiWeb.ItemList do
           maxlength="100"
           required
           autocomplete="off"
-          placeholder="A new playlist"
-          aria-label="The name of a new playlist"
+          placeholder="New playlist"
+          aria-label="Name for the new playlist"
           class="control grow rounded-lg px-3 py-2 text-sm"
         />
         <button type="submit" id="add-to-new" class="control rounded-lg px-3 py-2 text-sm">
-          Make it
+          Create
         </button>
       </form>
     </div>
@@ -742,7 +742,7 @@ defmodule PiFiWeb.ItemList do
     <span :if={@audio} class="flex shrink-0 items-center gap-1 text-xs text-ink-faint">
       <span :if={@audio != :held} class="numerals">{@audio}</span>
       <.icon :if={@audio == :held} name="hero-arrow-down-tray-mini" class="size-4" />
-      <span :if={@audio == :held} class="sr-only">On the card</span>
+      <span :if={@audio == :held} class="sr-only">Downloaded</span>
       <.icon
         :if={@audio != :held}
         name="hero-arrow-path-mini"
@@ -1020,7 +1020,7 @@ defmodule PiFiWeb.ItemList do
        |> put_flash(:info, "Playing #{item.title}.")}
     else
       {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Could not play that: #{inspect(reason)}")}
+        {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
     end
   end
 
@@ -1032,7 +1032,7 @@ defmodule PiFiWeb.ItemList do
   defp event("play_collection", _params, socket) do
     case queue_ids(socket, nil) do
       [] ->
-        {:halt, put_flash(socket, :error, "There is nothing here to play.")}
+        {:halt, put_flash(socket, :error, "Nothing here to play.")}
 
       ids ->
         play_all(socket, ids)
@@ -1049,7 +1049,7 @@ defmodule PiFiWeb.ItemList do
       {:halt, put_flash(socket, :info, "#{item.title} is next in the queue.")}
     else
       {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Could not add that to the queue: #{inspect(reason)}")}
+        {:halt, put_flash(socket, :error, "Couldn't add that to the queue: #{inspect(reason)}")}
     end
   end
 
@@ -1058,7 +1058,7 @@ defmodule PiFiWeb.ItemList do
   defp event("queue_collection", _params, socket) do
     case queue_ids(socket, nil) do
       [] ->
-        {:halt, put_flash(socket, :error, "There is nothing here to add.")}
+        {:halt, put_flash(socket, :error, "Nothing here to add.")}
 
       ids ->
         case Playback.append_to_queue(ids) do
@@ -1067,7 +1067,7 @@ defmodule PiFiWeb.ItemList do
 
           {:error, reason} ->
             {:halt,
-             put_flash(socket, :error, "Could not add those to the queue: #{inspect(reason)}")}
+             put_flash(socket, :error, "Couldn't add those to the queue: #{inspect(reason)}")}
         end
     end
   end
@@ -1078,7 +1078,7 @@ defmodule PiFiWeb.ItemList do
       {:halt, socket |> opened(marked) |> read_again()}
     else
       {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+        {:halt, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
     end
   end
 
@@ -1090,7 +1090,7 @@ defmodule PiFiWeb.ItemList do
       {:halt, read_again(socket)}
     else
       {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Could not do that: #{inspect(reason)}")}
+        {:halt, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
     end
   end
 
@@ -1121,7 +1121,7 @@ defmodule PiFiWeb.ItemList do
         {:halt,
          socket
          |> Phoenix.Component.assign(:adding, nil)
-         |> put_flash(:error, "Could not do that: #{inspect(reason)}")}
+         |> put_flash(:error, "Couldn't do that: #{inspect(reason)}")}
     end
   end
 
@@ -1139,7 +1139,7 @@ defmodule PiFiWeb.ItemList do
          put_flash(
            socket,
            :error,
-           "Another playlist has that name, or the name is empty."
+           "That name is already taken, or it's empty."
          )}
     end
   end
@@ -1155,7 +1155,7 @@ defmodule PiFiWeb.ItemList do
        |> put_flash(:info, "Playing #{length(ids)} tracks.")}
     else
       {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Could not play that: #{inspect(reason)}")}
+        {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
     end
   end
 

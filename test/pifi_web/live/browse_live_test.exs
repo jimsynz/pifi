@@ -783,11 +783,11 @@ defmodule PiFiWeb.BrowseLiveTest do
 
       {:ok, view, html} = live(conn, "/")
 
-      assert html =~ "This firmware knows no source"
+      assert html =~ "No sources are set up yet"
 
       changed(view)
 
-      assert render(view) =~ "This firmware knows no source"
+      assert render(view) =~ "No sources are set up yet"
     end
   end
 
@@ -1081,7 +1081,7 @@ defmodule PiFiWeb.BrowseLiveTest do
 
       html = view |> element("#refresh") |> render_click()
 
-      assert html =~ "The device is reading this list again."
+      assert html =~ "Refreshing that list."
       assert_enqueued(worker: PiFi.Podcast.Show.Workers.Refresh)
     end
   end
@@ -1173,7 +1173,7 @@ defmodule PiFiWeb.BrowseLiveTest do
       view |> element("#playlist-#{station.id}") |> render_click()
       html = view |> form("#add-to-new-form", %{"name" => "Friday"}) |> render_submit()
 
-      assert html =~ "Another playlist has that name"
+      assert html =~ "That name is already taken"
     end
 
     test "a person leaves the panel, and nothing goes in", %{view: view, station: station} do
@@ -1507,7 +1507,7 @@ defmodule PiFiWeb.BrowseLiveTest do
 
     {:ok, _view, html} = live(conn, @radio)
 
-    assert html =~ "This firmware knows no source."
+    assert html =~ "No sources are set up yet."
   end
 
   describe "the picture of a collection" do

@@ -144,7 +144,7 @@ defmodule PiFiWeb.SearchLive do
     <div id="search">
       <.playlist_sheet adding={@adding} playlists={@playlists} />
 
-      <nav aria-label="Where you are" class="mb-4 flex items-center gap-1 text-sm">
+      <nav aria-label="Breadcrumb" class="mb-4 flex items-center gap-1 text-sm">
         <.link
           navigate={~p"/browse/#{@current_source}"}
           class="rounded px-1 py-0.5 text-ink-dim hover:text-accent"
@@ -163,7 +163,7 @@ defmodule PiFiWeb.SearchLive do
         page_size={25}
         empty_message="Nothing matches that."
         loading_message="Reading…"
-        filters_label="Find"
+        filters_label="Filter"
         sort_label="Sort"
         show_filters={true}
         search={

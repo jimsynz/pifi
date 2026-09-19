@@ -368,10 +368,12 @@ background work.
 
 ## Rules for this project
 
-- Write every text artefact in ASD-STE100 Simplified Technical English. That
-  covers `README.md`, this file, module and function documentation, code
-  comments, commit messages, issue titles and bodies, pull request descriptions,
-  and messages to the user. See the STE section below.
+- **Write plain, direct English.** That covers everything: `README.md`, this file,
+  module and function documentation, code comments, commit messages, issue and
+  pull request text, and every word that a person reads in the product. Write the
+  way you would explain the thing to another developer who is about to change it.
+  Contractions are fine. Prefer a concrete noun to an abstract one, and a short
+  sentence to a long one. See the writing section below.
 - Use New Zealand English spelling. Write "licence" for the noun and "colour",
   not the American forms.
 - Do not add a source, an output, or a peripheral without the behaviour. The point
@@ -387,47 +389,63 @@ background work.
   reason for a change in the commit message. Do not write a plan document, and do
   not restore `docs/`.
 
-## Simplified Technical English
+## Writing
 
-STE is easy to read wrong, because ordinary technical English feels correct. Each
-line below is a mistake that this project has already made and corrected.
+This project used to write everything in ASD-STE100 Simplified Technical English.
+That rule is gone. It banned contractions and phrasal verbs and held a list of
+approved words, and the result read like a translated manual: a button that said
+"Put in use" where a person expects "Enable", and a moduledoc where every verb was
+"holds".
 
-- **One word has one meaning.** Do not write "keep a station" for a favourite,
-  and do not write "drop it" for the opposite. Write "make a station a
-  favourite", and write "remove that mark".
-- **No metaphors.** A task is not a "gate". Memory does not "cost" anything, it
-  "needs" it. A caller does not "walk" a tree, it "moves through" it. A stream has
-  no "edge", it has a "current point".
-- **No phrasal verbs.** Write "uses X instead", and not "falls back to X". Write
-  "get access", and not "log in".
-- **Use each word in its approved part of speech.** A variable "becomes"
-  `unknown`. It does not "default to" it.
-- **Avoid these words**, which are not approved: assume, elapsed, nobody,
-  recover, stall, throwaway. Write: the plan is correct only if; the time from the
-  start; no person; continue; interruption; temporary.
-- **Keep sentences short.** 20 words for an instruction, and 25 for a
-  description. Split a long sentence, and do not join clauses with a comma.
-- **Use the active voice, the present tense, and the imperative** for each
-  instruction. Give one instruction in each sentence.
-- **Use articles.** Write "the device", and not "device".
-- **Write a plain sentence, and not a clipped one.** STE asks for short active
-  sentences in ordinary words. It does not ask for an aphorism. Give each
-  sentence a subject and a verb, and write "returns" for a function that
-  returns something. Do not write "holds" for every verb: a module makes a
-  decision, a row carries a number, and a cache keeps a file.
+**Deleting a rule about register does not leave neutral prose.** Strip out one
+voice and the writing drifts into another, usually a literary one. So here is the
+positive rule.
 
-A code identifier, a product name, and a protocol name are technical names. Use
-them as they are, even when the word is not on the approved list. `aplay`,
-`Membrane.HLS.Source`, Shoutcast, and HE-AAC are all correct.
+### For documentation, comments and commit messages
 
-The rule covers the text that this project writes. It does not cover text from
-another source. Leave the generator comments in `config/target.exs` and in
-`config/host.exs` as they are, and leave the Nerves text in `README.md` as it is.
-A rewrite of that text gives no benefit, and it hides the difference from the
-template.
+The reader is a developer who is about to change this code. Write for them.
 
-<!-- usage-rules-start -->
-<!-- usage_rules-start -->
+- **Say why, not what.** The code says what it does. A comment earns its place by
+  holding the reason, the measurement, or the trap. "The dwc2 controller handles a
+  44.1 kHz packet badly" is worth a line. "Set the rate" is not.
+- **Name the thing that bit you.** A moduledoc that records a wrong turn saves the
+  next person a build. Most of the good comments in this repository are of that
+  shape, and they should stay that shape.
+- **Vary the verbs.** Under the old rule almost everything "held" something. A
+  module makes a decision, a row carries a number, a cache keeps a file, a
+  function returns a value.
+- **Use ordinary technical English.** Contractions are fine. "Falls back to" and
+  "walks the tree" are fine, and they are clearer than the paraphrases that the
+  old rule forced.
+- No metaphor for its own sake, and no aphorisms. Say the thing plainly.
+
+### For the words a person reads in the product
+
+Every label, button, empty state, flash message and description of the web
+interface, and every word that a screen of the device draws.
+
+- **A control says what it does.** "Enable" and "Disable", not "Put in use".
+- **Do not let the device narrate itself in the third person.** Write "Couldn't
+  play that", not "The device could not play that". Where the subject matters, use
+  the name of the product: "PiFi enters standby after 20 minutes".
+- **Say "you" for the person.**
+- **An empty state says what to do next**, not merely that there is nothing there.
+- **An error says what happened and what a person can do**, and it never makes them
+  feel stupid.
+- Keep it short. A label is one or two words. A description is one sentence where
+  one sentence does.
+
+This is the rule that `CLAUDE.md` of the website repository holds, and the two
+must sound like one product.
+
+### What stays
+
+Use New Zealand English spelling: "licence" for the noun, "colour", "behaviour".
+
+**The existing moduledocs are still in the old voice, and that is fine.** They are
+accurate, and rewriting several thousand lines of them buys nothing. Fix the voice
+of a docstring when you are already changing that code, and leave the rest alone.
+
 ## usage_rules usage
 _A config-driven dev tool for Elixir projects to manage AGENTS.md files and agent skills from dependencies_
 

@@ -175,10 +175,10 @@ defmodule PiFiWeb.BrowseLive do
   def handle_event("refresh", _params, socket) do
     case Source.refresh(socket.assigns.source, opened_item(socket.assigns)) do
       :ok ->
-        {:noreply, put_flash(socket, :info, "The device is reading this list again.")}
+        {:noreply, put_flash(socket, :info, "Refreshing that list.")}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "The device could not read this list again.")}
+        {:noreply, put_flash(socket, :error, "Couldn't refresh that list.")}
     end
   end
 
@@ -230,7 +230,7 @@ defmodule PiFiWeb.BrowseLive do
     ~H"""
     <div id="browse">
       <p :if={is_nil(@source)} id="no-source" class="text-ink-dim">
-        This firmware knows no source.
+        No sources are set up yet.
       </p>
 
       <div :if={@source}>
@@ -333,7 +333,7 @@ defmodule PiFiWeb.BrowseLive do
     assigns = assign(assigns, :letters, @letters)
 
     ~H"""
-    <nav id="letters" aria-label="The first letter of the title" class="mb-3 flex flex-wrap gap-1">
+    <nav id="letters" aria-label="Jump to a letter" class="mb-3 flex flex-wrap gap-1">
       <button
         :for={letter <- @letters}
         type="button"
@@ -370,7 +370,7 @@ defmodule PiFiWeb.BrowseLive do
     ~H"""
     <nav
       id="crumbs"
-      aria-label="Where you are"
+      aria-label="Breadcrumb"
       class="mb-4 flex flex-wrap items-center gap-1 text-sm"
     >
       <button
@@ -413,7 +413,7 @@ defmodule PiFiWeb.BrowseLive do
           type="button"
           id="refresh"
           phx-click="refresh"
-          aria-label="Read this list again"
+          aria-label="Refresh this list"
           class="control flex size-8 shrink-0 items-center justify-center rounded-lg"
         >
           <.icon name="hero-arrow-path" class="size-4" />
@@ -464,7 +464,7 @@ defmodule PiFiWeb.BrowseLive do
       <button
         type="submit"
         id="do-search"
-        aria-label="Find"
+        aria-label="Search"
         class="control flex size-9 shrink-0 items-center justify-center rounded-lg"
       >
         <.icon name="hero-magnifying-glass" class="size-4" />

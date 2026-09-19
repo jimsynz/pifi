@@ -192,11 +192,11 @@ defmodule PiFiWeb.SearchAllLive do
       </form>
 
       <p :if={not @searched?} id="search-all-prompt" class="text-sm text-ink-dim">
-        Type a name and press the control.
+        Type something and press search.
       </p>
 
       <p :if={@searched? and @groups == []} id="search-all-empty" class="text-sm text-ink-dim">
-        Nothing matches that.
+        No matches.
       </p>
 
       <section :for={group <- @groups} id={"group-#{group.id}"} class="mb-5">

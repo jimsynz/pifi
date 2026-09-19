@@ -14,8 +14,8 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias PiFi.Settings
   alias PiFi.Source
   alias PiFi.Test.Lamp
-  alias PiFi.Test.Panel
   alias PiFi.Test.NoCardOutput
+  alias PiFi.Test.Panel
   alias PiFi.Test.Stations
   alias PiFi.Test.TwoCardOutput
 
@@ -90,7 +90,7 @@ defmodule PiFiWeb.SettingsLiveTest do
     test "each row says what the section holds", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
-      assert html =~ "1 of 4 in use"
+      assert html =~ "1 of 4 enabled"
       assert html =~ "free of"
     end
 
@@ -123,7 +123,7 @@ defmodule PiFiWeb.SettingsLiveTest do
         |> form("#device-form", device: %{name: "Kitchen"})
         |> render_submit()
 
-      assert html =~ "This device is Kitchen."
+      assert html =~ "Renamed to Kitchen."
       assert html =~ "kitchen.local"
       assert Identity.name() == "Kitchen"
     end
@@ -162,7 +162,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       html = view |> element("#remove-splash") |> render_click()
 
-      assert html =~ "Each screen shows the picture that came with the firmware again."
+      assert html =~ "Each screen shows the default picture again."
       assert has_element?(view, "#no-splash")
       assert Identity.splash_path() == nil
     end
@@ -198,7 +198,7 @@ defmodule PiFiWeb.SettingsLiveTest do
         ])
 
       assert {:error, [[_ref, :not_accepted]]} = render_upload(picture, "notes.txt")
-      assert render(view) =~ "not a JPEG and not a PNG"
+      assert render(view) =~ "a JPEG or a PNG"
     end
 
     # Two browsers hold this page, and one of them names the device.
@@ -257,7 +257,7 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/output")
       html = view |> element("#select-output-1") |> render_click()
 
-      assert html =~ "The output device is #{second.id}."
+      assert html =~ "Now using #{second.id}."
       assert has_element?(view, "#selected-1")
       refute has_element?(view, "#selected-0")
       refute html =~ "By default"
@@ -324,7 +324,7 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, html} = live(conn, ~p"/settings/peripherals")
 
       assert has_element?(view, "#peripheral-row-lamp")
-      assert html =~ "Out of use"
+      assert html =~ "Disabled"
     end
 
     test "a person puts one in use, and it starts", %{conn: conn} do
@@ -353,8 +353,8 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
       html = view |> element("#enable-peripheral-lamp") |> render_click()
 
-      assert html =~ "That did not start: :no_such_device"
-      assert html =~ "In use, but it did not start"
+      assert html =~ "start that: :no_such_device"
+      assert html =~ "Enabled, but it failed to start"
     end
 
     test "the menu says how many run", %{conn: conn} do
@@ -373,7 +373,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       {:ok, _view, html} = live(conn, ~p"/settings/peripherals")
 
-      assert html =~ "In use"
+      assert html =~ "Enabled"
     end
   end
 
@@ -463,7 +463,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       html = view |> element("#toggle-switch-off") |> render_click()
 
-      assert html =~ "says when it is safe to switch off"
+      assert html =~ "safe to switch off"
       assert PiFi.SwitchOff.enabled?()
     end
 
@@ -473,7 +473,7 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/standby")
       html = view |> element("#toggle-switch-off") |> render_click()
 
-      assert html =~ "continues its work in standby"
+      assert html =~ "keeps working in standby"
       refute PiFi.SwitchOff.enabled?()
     end
   end
@@ -492,7 +492,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       html = view |> element("#standby-period-45") |> render_click()
 
-      assert html =~ "The device enters standby after 45 minutes of quiet."
+      assert html =~ "PiFi enters standby after 45 minutes of quiet."
       assert PiFi.Playback.standby_minutes!() == 45
     end
 
@@ -501,7 +501,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       html = view |> element("#standby-period-0") |> render_click()
 
-      assert html =~ "The device stays awake."
+      assert html =~ "PiFi stays awake."
       assert PiFi.Playback.standby_minutes!() == 0
     end
 
@@ -510,7 +510,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       {:ok, _view, html} = live(conn, ~p"/settings")
 
-      assert html =~ "The device stays awake"
+      assert html =~ "Stays awake"
     end
   end
 
@@ -542,7 +542,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       html = view |> element("#screen-period-30") |> render_click()
 
-      assert html =~ "The screen goes dark after 30 seconds with no press."
+      assert html =~ "The screen goes dark after 30 seconds."
       assert PiFi.Playback.screen_blank_seconds!() == 30
     end
 
@@ -655,7 +655,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       html = view |> element("#toggle-volume") |> render_click()
 
-      assert html =~ "This device sets the level of the sound card"
+      assert html =~ "PiFi sets the volume on the sound card"
       assert %{enabled?: true} = PiFi.Playback.volume!()
     end
 
@@ -666,7 +666,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       html = view |> element("#toggle-volume") |> render_click()
 
-      assert html =~ "Set the level on your amplifier"
+      assert html =~ "Use your amplifier instead"
       assert %{enabled?: false} = PiFi.Playback.volume!()
     end
 
@@ -678,7 +678,7 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/output")
 
       assert has_element?(view, "#no-volume-control")
-      assert render(view) =~ "has no level that the device can set"
+      assert render(view) =~ "no volume control PiFi can set"
     end
   end
 
@@ -690,11 +690,11 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       {:ok, view, html} = live(conn, ~p"/settings")
 
-      refute html =~ "No sound card is present"
+      refute html =~ "No sound card found"
 
       Event.publish(:device, %Events.OutputChanged{devices: [], selected: nil, in_use: nil})
 
-      assert render(view) =~ "No sound card is present"
+      assert render(view) =~ "No sound card found"
     end
 
     test "free space that moves reaches the page", %{conn: conn} do
@@ -758,8 +758,8 @@ defmodule PiFiWeb.SettingsLiveTest do
     test "holds one row for each source, and it says which are in use", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      assert has_element?(view, "#source-row-#{@radio}", "In use")
-      assert has_element?(view, "#source-row-#{@podcasts}", "Out of use")
+      assert has_element?(view, "#source-row-#{@radio}", "Enabled")
+      assert has_element?(view, "#source-row-#{@podcasts}", "Disabled")
     end
 
     test "a person takes a source out of use, and the top row loses it", %{conn: conn} do
@@ -791,7 +791,7 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      assert has_element?(view, "#source-row-#{@radio}", "Out of use")
+      assert has_element?(view, "#source-row-#{@radio}", "Disabled")
     end
   end
 

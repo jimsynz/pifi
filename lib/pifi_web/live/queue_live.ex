@@ -132,7 +132,7 @@ defmodule PiFiWeb.QueueLive do
       </div>
 
       <p :if={@rows == []} id="queue-empty" class="text-sm text-ink-dim">
-        The queue is empty. Play a track and the rest of its list joins the queue.
+        Nothing in the queue. Play a track and the rest of its list follows.
       </p>
 
       <ul
@@ -187,7 +187,7 @@ defmodule PiFiWeb.QueueLive do
       <span
         id={"drag-#{@row.id}"}
         data-drag-handle
-        aria-label="Drag to move this row"
+        aria-label="Drag to reorder"
         class="control shrink-0 cursor-grab touch-none rounded-lg p-1 active:cursor-grabbing"
       >
         <.icon name="hero-bars-2-mini" class="size-4" />
