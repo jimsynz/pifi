@@ -5,20 +5,17 @@ defmodule PiFi.Playback.Queue do
   Each row identifies one `PiFi.Playback.Item` and its place in the order. One row
   carries `playing?`, and that row is the track that the player is playing.
 
-  ## Why ETS, and what a restart does
+  ## The queue lives through a restart
 
-  A queue changes with each press of a control, and the database is on an SD card. ETS
-  writes nothing to the card, so a person who moves through a list wears nothing out.
+  **A reboot or a firmware upgrade leaves the queue where it was**, and the marked row
+  comes back with it. `PiFi.Player` reads that row when it starts and selects the track
+  without playing it, so a person reads what they were listening to and presses play.
+  Standby keeps the machine, so it never touched the queue in the first place.
 
-  **A restart therefore empties the queue.** A device that starts plays nothing until a
-  person asks. Standby is not a restart: it stops the audio and keeps the machine, so
-  the queue lives through it.
-
-  ## A row carries an identifier, and not a relationship
-
-  `item_id` is a plain attribute. An item lives in SQLite and a queue row lives in ETS,
-  and Ash cannot join two data layers. A caller that wants the item reads it with
-  `PiFi.Playback.get_item/1`.
+  This was on ETS, to spare the SD card the writes. The wear argument did not hold up:
+  a press writes a handful of rows and a replace writes one batch of at most the length
+  of a list, which is nothing beside the podcast episodes that this device writes to the
+  same card. A queue that a power cut emptied was the real cost.
 
   ## The order
 
@@ -30,14 +27,17 @@ defmodule PiFi.Playback.Queue do
   use Ash.Resource,
     otp_app: :pifi,
     domain: PiFi.Playback,
-    data_layer: Ash.DataLayer.Ets
+    data_layer: AshSqlite.DataLayer
 
-  # The player and the web interface read one queue, so the table is not private. A
-  # private table belongs to the process that made it, and each test would then see a
-  # queue of its own while the player saw another.
-  ets do
-    table :playback_queue
-    private? false
+  alias PiFi.Playback.Item
+
+  sqlite do
+    table "playback_queue"
+    repo PiFi.Repo
+
+    references do
+      reference :item, on_delete: :delete
+    end
   end
 
   actions do
@@ -152,8 +152,8 @@ defmodule PiFi.Playback.Queue do
       description "Empty the queue. It returns the number of rows that it removed."
 
       run fn _input, _context ->
-        rows = Ash.read!(__MODULE__)
-        Enum.each(rows, &Ash.destroy!/1)
+        %{status: :success, records: rows} =
+          Ash.bulk_destroy!(__MODULE__, :destroy, %{}, return_records?: true)
 
         {:ok, length(rows)}
       end
@@ -187,12 +187,6 @@ defmodule PiFi.Playback.Queue do
   attributes do
     uuid_primary_key :id
 
-    attribute :item_id, :uuid do
-      description "The `PiFi.Playback.Item` that this row identifies."
-      allow_nil? false
-      public? true
-    end
-
     attribute :position, :integer do
       description "Where it comes in the order. It counts from 0."
       allow_nil? false
@@ -204,6 +198,20 @@ defmodule PiFi.Playback.Queue do
       source :playing
       allow_nil? false
       default false
+      public? true
+    end
+  end
+
+  # **A sync that drops a track takes its queue row with it.** A row used to carry a
+  # plain identifier, because an item was in SQLite and a queue row was in ETS and Ash
+  # joins no two data layers. Both are in SQLite now, so one query draws a whole queue
+  # with the title and the artwork of each row, and a row that names nothing cannot
+  # survive a restart.
+  relationships do
+    belongs_to :item, Item do
+      description "The `PiFi.Playback.Item` that this row plays."
+      allow_nil? false
+      attribute_public? true
       public? true
     end
   end

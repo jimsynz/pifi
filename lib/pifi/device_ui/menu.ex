@@ -221,10 +221,7 @@ defmodule PiFi.DeviceUi.Menu do
 
   # The queue is the one level that a person reads to go back to a track that played.
   defp rows(:queue) do
-    items =
-      Playback.queue!()
-      |> Enum.map(& &1.item_id)
-      |> items_by_ids()
+    items = Playback.queue!(load: [:item]) |> Enum.map(& &1.item)
 
     {:ok, title(:queue), of_tracks(items)}
   end
@@ -311,16 +308,6 @@ defmodule PiFi.DeviceUi.Menu do
       kind: :play,
       action: {:play, ids, Enum.find_index(ids, &(&1 == item.id))}
     }
-  end
-
-  # A queue row and a playlist entry both name an item, and a row whose item is gone
-  # from the catalogue draws nothing.
-  defp items_by_ids([]), do: []
-
-  defp items_by_ids(ids) do
-    by_id = ids |> Playback.items_by_ids!() |> Map.new(&{&1.id, &1})
-
-    ids |> Enum.map(&Map.get(by_id, &1)) |> Enum.reject(&is_nil/1)
   end
 
   defp tracks(1), do: "1 track"

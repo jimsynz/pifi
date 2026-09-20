@@ -19,7 +19,6 @@ defmodule PiFi.Application do
     # eviction can see it. An interruption of the power leaves one behind, and this
     # is the only thing that reclaims it. See `PiFi.Player.Download`.
     Download.sweep()
-    make_queue_table()
 
     children =
       [
@@ -63,14 +62,6 @@ defmodule PiFi.Application do
       {:ok, supervisor}
     end
   end
-
-  # `PiFi.Playback.Queue` is on ETS, and the data layer makes the table when
-  # something first reads it. The process that owns the table registers its name
-  # before it makes the table, so a second caller in that moment is told that the
-  # table already exists and then finds none. The player and the web interface can
-  # both reach for the queue at once, so this reads it one time and the race cannot
-  # happen.
-  defp make_queue_table, do: Ash.read!(PiFi.Playback.Queue)
 
   # **These act on the player or on the card, and a test must start its own.**
   # Each one is named for the whole node, so a suite that ran them would give every test

@@ -105,7 +105,6 @@ defmodule PiFi.Player do
   # this is a pipeline that is already wedged.
   @skip_timeout :timer.seconds(5)
   @output_device_key "output_device"
-  @last_item_key "last_item"
   @standby_key "standby"
 
   # How long before the end of a track the device reads the next one. A track of 8 MB
@@ -504,8 +503,7 @@ defmodule PiFi.Player do
     if enabled? or state.source != source do
       {:reply, :ok, state}
     else
-      {:reply, :ok, state |> cleared() |> forget_station(),
-       {:continue, {:terminate, state.pipeline, state.monitor}}}
+      {:reply, :ok, cleared(state), {:continue, {:terminate, state.pipeline, state.monitor}}}
     end
   end
 
@@ -897,9 +895,6 @@ defmodule PiFi.Player do
 
     case start(source, item, state) do
       {:ok, state} ->
-        # Only a new choice goes to the settings. Leaving standby and starting the
-        # stream again both use the choice that is already there.
-        Settings.put(@last_item_key, item.id)
         state
 
       # `fail/2` has published the reason, so a user interface reads it from the topic.
@@ -933,28 +928,20 @@ defmodule PiFi.Player do
   # and a play control: the device selects the station and plays nothing. A stereo
   # that starts to play by itself after a power cut is a surprise.
   #
-  # The queue is in ETS and a restart empties it, so the device comes back with one
-  # track selected and no list behind it.
+  # **The queue is what remembers.** It is in SQLite, so a reboot and a firmware upgrade
+  # both leave it where it was, and the marked row of it is the track that this device
+  # was playing. The list therefore comes back with the track, and a press of next moves
+  # through it. A source that a person took out of use is skipped, and turning it on
+  # again brings its queue back.
   defp restore_station(%State{} = state) do
-    with {:ok, id} <- stored_value(@last_item_key),
-         {:ok, item} <- item(id),
+    with {:ok, %{item_id: item_id}} <- Playback.queue_playing(),
+         {:ok, item} <- item(item_id),
          {:ok, source} <- Source.from_slug(item.source),
          true <- Source.enabled?(source) do
       %State{state | source: source, item: item, paused?: true}
     else
       _other -> state
     end
-  end
-
-  # A source out of use must not come back after a restart, and the item that it
-  # played is no longer of use to any part.
-  defp forget_station(%State{} = state) do
-    case Settings.fetch(@last_item_key) do
-      {:ok, setting} -> Settings.delete(setting)
-      {:error, _reason} -> :ok
-    end
-
-    state
   end
 
   @doc """
@@ -1205,8 +1192,6 @@ defmodule PiFi.Player do
          {:ok, source} <- Source.from_slug(item.source),
          true <- Source.enabled?(source),
          {:ok, state} <- start(source, item, state) do
-      Settings.put(@last_item_key, item.id)
-
       {:ok, state}
     else
       _other -> :none

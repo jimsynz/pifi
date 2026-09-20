@@ -6,16 +6,12 @@ defmodule PiFiWeb.QueueLive do
   called them. A person could fill the queue by pressing a track, and after that they
   could neither see the queue nor change it.
 
-  ## Two reads, joined here
+  ## One read
 
-  A queue row lives in ETS and an item lives in SQLite, so **Ash cannot join the two**,
-  and `PiFi.Playback.Queue` stores an item identifier rather than a relationship.
-  Reading one item per row would mean one query per row, so this reads the rows in
-  order, reads all of their items in a single query, and pairs them up. See the `by_ids`
-  action on `PiFi.Playback.Item`.
-
-  **The rows decide the order, never the items.** The item query returns them in
-  whatever order the data layer likes.
+  A row and an item are both in SQLite, so Ash joins the two and one query draws the
+  whole page: the title, the artwork and the place of each row. This page used to read
+  the rows and then their items and pair the two up by hand, because the queue was on
+  ETS and Ash joins no two data layers. See `PiFi.Playback.Queue`.
 
   ## Pressing a row keeps the rest of the queue
 
@@ -207,17 +203,8 @@ defmodule PiFiWeb.QueueLive do
     """
   end
 
-  # **Two queries, not one per row.** A row whose item has since been removed from the
-  # catalogue is skipped: there is nothing to draw for it.
   defp load(socket) do
-    rows = Playback.queue!()
-
-    items =
-      rows
-      |> Enum.map(& &1.item_id)
-      |> items_by_id()
-
-    rows = rows_with_items(rows, items)
+    rows = Playback.queue!(load: [item: [:artwork]])
 
     socket |> assign(:rows, rows) |> ask_for_pictures(rows)
   end
@@ -241,19 +228,5 @@ defmodule PiFiWeb.QueueLive do
     Artwork.ensure(urls)
 
     assign(socket, :asked, MapSet.union(socket.assigns.asked, MapSet.new(urls)))
-  end
-
-  defp items_by_id([]), do: %{}
-
-  defp items_by_id(ids) do
-    ids
-    |> Playback.items_by_ids!(load: [:artwork])
-    |> Map.new(&{&1.id, &1})
-  end
-
-  defp rows_with_items(rows, items) do
-    rows
-    |> Enum.map(&Map.put(&1, :item, items[&1.item_id]))
-    |> Enum.reject(&is_nil(&1.item))
   end
 end

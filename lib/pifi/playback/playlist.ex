@@ -10,12 +10,10 @@ defmodule PiFi.Playback.Playlist do
   table.** A station of internet radio, an episode of a podcast and a song of a
   Jellyfin library all sit in one playlist, and nothing here names a source.
 
-  ## It is on the card, and the queue is not
+  ## A playlist is not a queue
 
-  `PiFi.Playback.Queue` is on ETS, so a restart empties it. A playlist is what a
-  person made, and it must be there next week, so it is on the card. A person writes
-  a playlist a few times and reads it many times, which is the write pattern that an
-  SD card takes.
+  `PiFi.Playback.Queue` is one list, and it is what the device is playing now. A
+  playlist is what a person made, and there are as many of them as they care to name.
 
   ## The order
 

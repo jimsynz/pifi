@@ -82,7 +82,7 @@ defmodule PiFi.PlayerSourceUseTest do
       Player.stop()
       Application.delete_env(:pifi, :sources)
 
-      for key <- ["last_item", Source.enabled_key(Station)] do
+      for key <- [Source.enabled_key(Station)] do
         case Settings.fetch(key) do
           {:ok, setting} -> Settings.delete!(setting)
           {:error, _reason} -> :ok
@@ -124,19 +124,13 @@ defmodule PiFi.PlayerSourceUseTest do
       assert {:error, _reason} = Playback.play([Station.item().id])
     end
 
-    test "a restart does not select it again" do
-      playing()
-      assert :ok = Player.enable_source(Station, false)
-
-      # The name of the last track goes with it, so nothing points at a source that
-      # a person put away.
-      assert {:error, _reason} = Settings.fetch("last_item")
-    end
-
-    test "a name in the settings that points at it selects nothing" do
+    # The queue lives through a restart, so the row of a source that a person put away
+    # is still there. Turning the source on again brings it back, and until then the
+    # device selects nothing. See `PiFi.Playback.Queue`.
+    test "a queue that points at it selects nothing" do
       playing()
       assert :ok = Player.stop()
-      assert {:ok, %{value: _id}} = Settings.fetch("last_item")
+      assert [_row] = Playback.queue!()
 
       Source.enable(Station, false)
       restart_player()
@@ -144,7 +138,7 @@ defmodule PiFi.PlayerSourceUseTest do
       assert %{source: nil, item: nil} = Player.state()
     end
 
-    test "a name in the settings that points at a source in use comes back" do
+    test "a queue that points at a source in use comes back" do
       playing()
       assert :ok = Player.stop()
 

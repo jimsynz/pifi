@@ -2,10 +2,8 @@ defmodule PiFi.Playback.PlaylistEntry do
   @moduledoc """
   One track of one playlist, and its place in the order.
 
-  **This is a relationship and not an identifier**, which is the opposite of
-  `PiFi.Playback.Queue`. An item and an entry are both in SQLite, so Ash joins the
-  two and one query draws a whole playlist with the title, the length and the artwork
-  of each row. A queue row is on ETS, and Ash cannot join two data layers.
+  An item and an entry are both in SQLite, so Ash joins the two and one query draws a
+  whole playlist with the title, the length and the artwork of each row.
 
   A removal of the item takes the entry with it, through the reference below. A
   service that no longer carries a track therefore leaves no row that draws nothing.

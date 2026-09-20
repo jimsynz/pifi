@@ -288,11 +288,24 @@ defmodule PiFi.Playback.QueueTest do
     end
   end
 
-  # ETS holds the queue, and nothing writes it to the card. A restart therefore
-  # empties it, and a device plays nothing until a person asks.
-  test "the queue is not in the database" do
+  # **The queue is in the database, so a reboot and a firmware upgrade both leave it
+  # where it was.** See the module documentation of `PiFi.Playback.Queue` for what this
+  # costs the card, and why the ETS table that held it was the worse trade.
+  test "the queue is in the database" do
     Playback.replace_queue!([item("Alpha").id])
 
-    assert Ash.DataLayer.Ets == Ash.DataLayer.data_layer(Queue)
+    assert AshSqlite.DataLayer == Ash.DataLayer.data_layer(Queue)
+  end
+
+  # The row names an item, and an item that a sync drops takes its row with it. A queue
+  # that lives through a restart would otherwise keep a row that draws nothing.
+  test "a row goes when its item does" do
+    alpha = item("Alpha")
+    Playback.replace_queue!([alpha.id, item("Bravo").id])
+
+    Ash.destroy!(alpha)
+
+    assert [row] = Playback.queue!()
+    assert Playback.get_item!(row.item_id).title == "Bravo"
   end
 end

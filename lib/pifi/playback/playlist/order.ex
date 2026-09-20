@@ -8,10 +8,9 @@ defmodule PiFi.Playback.Playlist.Order do
 
   ## Why this is not `PiFi.Playback.Queue.Order`
 
-  The arithmetic is the same and the tables are not. A queue is one list on ETS, so
-  that module reads every row of the table. A playlist is one of many on SQLite, so
-  each read here names a playlist and a write of one playlist leaves every other one
-  alone.
+  The arithmetic is the same and the tables are not. A queue is one list, so that
+  module reads every row of its table. A playlist is one of many, so each read here
+  names a playlist and a write of one playlist leaves every other one alone.
 
   The two hold the same two functions with the same names, so a third list of this
   firmware is the moment to make one module of them.
