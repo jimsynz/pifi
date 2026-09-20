@@ -124,8 +124,8 @@ defmodule PiFi.Plex.CompanionTest do
     # **The capabilities decide which controls a person sees**, so a name that this
     # player does not answer would give them a control that does nothing.
     test "it names the capabilities that it answers, and no navigation" do
-      assert Router.capabilities() == "timeline,playback,playqueues,playqueues-creation"
-      refute Router.capabilities() =~ "navigation"
+      assert Companion.capabilities() == "timeline,playback,playqueues,playqueues-creation"
+      refute Companion.capabilities() =~ "navigation"
     end
 
     test "the answer is XML" do

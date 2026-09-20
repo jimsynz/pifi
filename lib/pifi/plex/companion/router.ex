@@ -44,7 +44,7 @@ defmodule PiFi.Plex.Companion.Router do
   They belong to a player with a screen that a person points a remote at, and they say
   nothing to a device whose screen holds its own navigation. A player that named
   `navigation` in its capabilities and then ignored the commands would be worse than
-  one that never named it. See `capabilities/0`.
+  one that never named it. See `PiFi.Plex.Companion.capabilities/0`.
   """
 
   use Plug.Router
@@ -55,6 +55,7 @@ defmodule PiFi.Plex.Companion.Router do
   alias PiFi.Event
   alias PiFi.Playback
   alias PiFi.Playback.Item
+  alias PiFi.Plex.Companion
   alias PiFi.Plex.Companion.Queue
   alias PiFi.Plex.Server
   alias PiFi.Source
@@ -63,26 +64,8 @@ defmodule PiFi.Plex.Companion.Router do
   plug Plug.Parsers, parsers: [:urlencoded], pass: ["*/*"]
   plug :dispatch
 
-  # `timeline` is what a controller polls, `playback` is what it commands, and the two
-  # play queue names say that this player takes a list and moves through it.
-  # `navigation` is absent, and the moduledoc says why.
-  @capabilities "timeline,playback,playqueues,playqueues-creation"
-
-  # A player of music holds no screen that a controller draws on, and this is the class
-  # that other players of music name.
-  @device_class "stb"
-
-  # The two numbers that a controller reads to decide what this player understands.
-  # Every implementation that I read names these.
-  @protocol_version "1"
-  @protocol "plex"
-
   # How long a poll of `wait=1` holds when the player says nothing. See `state_of/1`.
   @wait :timer.seconds(5)
-
-  @doc "What this player tells a controller that it can do."
-  @spec capabilities() :: String.t()
-  def capabilities, do: @capabilities
 
   get "/resources" do
     send_xml(conn, resources())
@@ -237,9 +220,9 @@ defmodule PiFi.Plex.Companion.Router do
       {"Player",
        [
          {"title", Server.device_name()},
-         {"protocol", @protocol},
-         {"protocolVersion", @protocol_version},
-         {"protocolCapabilities", @capabilities},
+         {"protocol", Companion.protocol()},
+         {"protocolVersion", Companion.protocol_version()},
+         {"protocolCapabilities", Companion.capabilities()},
          {"machineIdentifier", Server.client_id()},
          {"product", Server.product()},
          {"platform", Server.platform()},
@@ -249,7 +232,7 @@ defmodule PiFi.Plex.Companion.Router do
          # macOS 25.6.0 names each number in its own place. The firmware is both of
          # those for this device, so the two carry the same number.
          {"version", Server.version()},
-         {"deviceClass", @device_class}
+         {"deviceClass", Companion.device_class()}
        ]}
     ])
   end

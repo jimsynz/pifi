@@ -20,21 +20,27 @@ defmodule PiFi.Plex.Companion do
   the setting decides, and a device that no person changed holds the port closed. The
   supervisor starts with no child for that reason.
 
-  ## What a controller needs, and what is still missing
-
-  A controller finds a player in two ways, and this module serves neither of them yet.
+  ## How a controller finds this player, and the two ways are both served
 
   - **plex.tv lists the players of an account.** Plexamp on iOS reads that list and
     runs no discovery of its own, so a device that is absent from it cannot be found by
-    the telephone of a person. That needs `X-Plex-Provides: client,player,pubsub-player`
-    and a `PUT` of the address of this player to `/devices/{id}`.
+    the telephone of a person. `PiFi.Plex.Companion.Announcement` publishes the address
+    of this player to the account and keeps it current.
   - **GDM finds a player on the same network.** A controller broadcasts
-    `M-SEARCH * HTTP/1.0` to UDP port 32412, and a player answers from that port.
+    `M-SEARCH * HTTP/1.0` to UDP port 32412, and `PiFi.Plex.Companion.Gdm` answers it.
+    A controller on a desktop uses this, and it needs no account at all.
 
-  **Both are absent on purpose.** The shape of every answer below comes from reading
-  what other implementations do, and no part of it is a published specification. A
-  person must therefore point a controller at this device by hand and say what happens,
-  and the two things that I expect to be wrong are in `PiFi.Plex.Companion.Router`.
+  **No part of any of it is a published specification.** Every fact comes from reading
+  what other implementations do and from watching a real controller, so each module
+  records which of the two its answers came from.
+
+  ## What this player says it is
+
+  The four facts below are what a controller reads to decide which controls to draw,
+  and both the XML of `PiFi.Plex.Companion.Router` and the headers of
+  `PiFi.Plex.Companion.Gdm` carry them. **They live here so the two cannot disagree**:
+  a player that named one set of capabilities over HTTP and another over UDP would draw
+  a different set of controls depending on how the controller found it.
   """
 
   use Supervisor
@@ -52,9 +58,44 @@ defmodule PiFi.Plex.Companion do
   # second, because that one is a player of music and the other is a library.
   @port 32_500
 
+  # `timeline` is what a controller polls, `playback` is what it commands, and the two
+  # play queue names say that this player takes a list and moves through it.
+  # `navigation` is absent, and the moduledoc of `PiFi.Plex.Companion.Router` says why.
+  @capabilities "timeline,playback,playqueues,playqueues-creation"
+
+  # A player of music holds no screen that a controller draws on, and this is the class
+  # that other players of music name.
+  @device_class "stb"
+
+  # The two numbers that a controller reads to decide what this player understands.
+  # Every implementation that I read names these.
+  @protocol "plex"
+  @protocol_version "1"
+
   @doc "The port that this player listens on."
   @spec port() :: pos_integer()
   def port, do: @port
+
+  @doc """
+  What this player tells a controller that it can do.
+
+      iex> PiFi.Plex.Companion.capabilities()
+      "timeline,playback,playqueues,playqueues-creation"
+  """
+  @spec capabilities() :: String.t()
+  def capabilities, do: @capabilities
+
+  @doc "What kind of player a controller should draw this as."
+  @spec device_class() :: String.t()
+  def device_class, do: @device_class
+
+  @doc "The protocol that this player speaks."
+  @spec protocol() :: String.t()
+  def protocol, do: @protocol
+
+  @doc "The version of that protocol."
+  @spec protocol_version() :: String.t()
+  def protocol_version, do: @protocol_version
 
   @doc """
   The settings key that says whether a person turned the player on.
@@ -158,11 +199,12 @@ defmodule PiFi.Plex.Companion do
   @doc false
   def start_link(options), do: Supervisor.start_link(__MODULE__, options, name: __MODULE__)
 
-  # **The listener comes first, and the announcement follows it.** That one tells
-  # plex.tv where this player is, and a controller that read the address before the port
-  # answered would meet nothing. See `PiFi.Plex.Companion.Announcement`.
+  # **The listener comes first, and the two ways of finding it follow.** Each of those
+  # tells a controller where this player is, and a controller that read the address
+  # before the port answered would meet nothing. See
+  # `PiFi.Plex.Companion.Announcement` and `PiFi.Plex.Companion.Gdm`.
   defp start_listener do
-    for child <- [queue(), listener(), announcement()], do: start_child(child)
+    for child <- [queue(), listener(), announcement(), discovery()], do: start_child(child)
 
     :ok
   end
@@ -186,7 +228,7 @@ defmodule PiFi.Plex.Companion do
   end
 
   defp stop_listener do
-    for id <- [:announcement, :listener, :queue] do
+    for id <- [:discovery, :announcement, :listener, :queue] do
       Supervisor.terminate_child(__MODULE__, id)
       Supervisor.delete_child(__MODULE__, id)
     end
@@ -204,6 +246,12 @@ defmodule PiFi.Plex.Companion do
 
   defp announcement do
     %{id: :announcement, start: {PiFi.Plex.Companion.Announcement, :start_link, [[]]}}
+  end
+
+  # It answers the controllers that look on the local network rather than in an
+  # account. See `PiFi.Plex.Companion.Gdm`.
+  defp discovery do
+    %{id: :discovery, start: {PiFi.Plex.Companion.Gdm, :start_link, [[]]}}
   end
 
   # It holds the play queue that a controller named, and the timeline reads it. See

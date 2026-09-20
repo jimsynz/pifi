@@ -427,8 +427,8 @@ defmodule PiFi.Source.Plex do
       name: "start_player",
       title: "Be a Plex player",
       description:
-        "Another Plex application can then control this device. " <>
-          "The device listens on port #{Companion.port()} of your network while it is on.",
+        "Another Plex application can then control this device, and finds it on your " <>
+          "network by itself. The device listens on port #{Companion.port()} while it is on.",
       icon: :radio
     }
   end
@@ -446,7 +446,7 @@ defmodule PiFi.Source.Plex do
     %{
       name: "stop_player",
       title: "Stop being a Plex player",
-      description: "The device closes the port and no other Plex application can control it.",
+      description: "The device closes its ports and no other Plex application can control it.",
       icon: :radio
     }
   end
