@@ -71,6 +71,14 @@
 
   --color-accent: #2fc6e8;
 
+  /* **An error has to be readable on the ground that it lands on.** The pale reds of
+     Tailwind are built for a dark ground, and this scheme is light by default, so
+     `text-red-200` on the beige shell was very nearly invisible: a person who pressed
+     a control and got a refusal read nothing at all. This one measures 5.9:1 against
+     `--color-shell`, and the dark scheme below borrows the coral of the palette,
+     which measures 6.8:1 there. Both clear the 4.5:1 that body text needs. */
+  --color-danger: #b3261e;
+
   /* The shadow is a colour of its own, because a black shadow on a dark ground is
      nothing at all. The dark scheme below borrows the cyan of the mark for it. */
   --color-shadow: #101010;
@@ -108,6 +116,8 @@
     --color-ink-faint: #7a766e;
 
     --color-shadow: #2fc6e8;
+
+    --color-danger: #ff6b6b;
   }
 }
 

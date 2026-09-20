@@ -16,6 +16,12 @@ defmodule PiFi.Plex.Companion.Announcement do
   - **The address.** A board takes its address from the network, and that address moves.
     This therefore publishes at each start as well, so a device that was given another
     address corrects the account when it comes back.
+  - **The network.** `PiFi.Application` starts this at the boot, and Wi-Fi is not up
+    then. `PiFi.Plex.Companion.addresses/0` reads the interfaces of the machine, so the
+    publish of a cold boot carried no address at all and the account then held a player
+    that a telephone could not reach. Nothing corrected it, because the two events above
+    are both rare. `PiFi.Event.Device.NetworkChanged` is the one that says an address
+    arrived, and this publishes again for it.
 
   A publish of the same address costs one request of plex.tv and it changes nothing, so
   a start that needed no correction is no worse for making one.
@@ -31,6 +37,7 @@ defmodule PiFi.Plex.Companion.Announcement do
 
   alias PiFi.Event
   alias PiFi.Event.Device.IdentityChanged
+  alias PiFi.Event.Device.NetworkChanged
   alias PiFi.Plex.Companion
   alias PiFi.Plex.Server
 
@@ -63,6 +70,14 @@ defmodule PiFi.Plex.Companion.Announcement do
   @doc false
   @impl GenServer
   def handle_info(%IdentityChanged{}, state) do
+    publish()
+
+    {:noreply, state}
+  end
+
+  # **An address that arrives after the boot is the common case, not the rare one.**
+  # See the module documentation.
+  def handle_info(%NetworkChanged{}, state) do
     publish()
 
     {:noreply, state}

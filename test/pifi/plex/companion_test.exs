@@ -550,6 +550,23 @@ defmodule PiFi.Plex.CompanionTest do
       assert_receive {:request, "PUT", "/devices/4242.xml", _params}, 2000
     end
 
+    # **`PiFi.Application` starts this at the boot and Wi-Fi is not up then**, so the
+    # first publish of a cold boot carried no address and the account held a player
+    # that a telephone could not reach. Nothing corrected it, because a rename is rare
+    # and a restart is rarer.
+    test "an address that arrives after the boot is published" do
+      Settings.put!("plex_device_id", "4242")
+
+      start_supervised!(PiFi.Plex.Companion.Announcement)
+      assert_receive {:request, "PUT", "/devices/4242.xml", _params}, 2000
+
+      Event.publish(:device, %PiFi.Event.Device.NetworkChanged{
+        interfaces: [%{name: "wlan0", addresses: ["192.168.3.142"]}]
+      })
+
+      assert_receive {:request, "PUT", "/devices/4242.xml", _params}, 2000
+    end
+
     # **A device that no person linked has no row of the account to publish to**, and
     # this asks plex.tv nothing to find that out.
     test "a device that no person made a player asks plex.tv nothing" do

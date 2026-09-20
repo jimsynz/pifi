@@ -181,6 +181,6 @@ defmodule PiFiWeb.CinderTheme do
   set :loading_spinner_circle_class, "opacity-25"
   set :loading_spinner_path_class, "opacity-75"
   set :empty_class, "py-10 text-center text-sm text-ink-dim"
-  set :error_container_class, "glass rounded-xl p-4 text-sm text-red-300"
+  set :error_container_class, "glass rounded-xl p-4 text-sm text-danger"
   set :error_message_class, ""
 end

@@ -337,7 +337,7 @@ defmodule PiFiWeb.PlayerLive do
             <p
               :if={second_line(assigns)}
               id="station"
-              class={["truncate text-xs", if(@status == :failed, do: "text-red-300", else: "text-ink-dim")]}
+              class={["truncate text-xs", if(@status == :failed, do: "text-danger", else: "text-ink-dim")]}
             >
               {second_line(assigns)}
             </p>
@@ -417,7 +417,7 @@ defmodule PiFiWeb.PlayerLive do
             disabled={:skip not in @capabilities or @status not in [:playing, :paused]}
           />
 
-          <p :if={@status == :failed} id="reason" class="mt-3 text-sm text-red-300">
+          <p :if={@status == :failed} id="reason" class="mt-3 text-sm text-danger">
             {Events.Failed.message(@reason)}
           </p>
 

@@ -26,6 +26,19 @@ defmodule PiFi.Plex.Companion.Gdm do
   the socket again without it and answers the searches that arrive by broadcast. A
   player that answers half of the controllers is better than one that will not start.
 
+  ## It opens the socket again when an address arrives
+
+  **`PiFi.Application` starts the player at the boot, and Wi-Fi is not up then.**
+  `add_membership` on a machine with no interface but the loopback fails, the fallback
+  above then opens a socket that joined no group, and the responder hears nothing for
+  as long as it runs: a controller sends the search to 239.0.0.250 and this player is
+  not listening to it. That is the state a cold boot used to leave, and the only way
+  out of it was turning the player off and on again once the network was up.
+
+  `PiFi.Event.Device.NetworkChanged` is the one that says an address arrived, so this
+  closes the socket and opens it again for each one. An interface that comes back on
+  another address rejoins the group for the same reason.
+
   ## What the headers say
 
   They are the fields of `/resources` under other names, and
@@ -40,6 +53,8 @@ defmodule PiFi.Plex.Companion.Gdm do
 
   require Logger
 
+  alias PiFi.Event
+  alias PiFi.Event.Device.NetworkChanged
   alias PiFi.Plex.Companion
   alias PiFi.Plex.Server
 
@@ -104,6 +119,8 @@ defmodule PiFi.Plex.Companion.Gdm do
     # `PiFi.Plex.Companion.Announcement` follows, and for the same reason.
     Process.flag(:trap_exit, true)
 
+    :ok = Event.subscribe(:device)
+
     case open() do
       {:ok, socket} -> {:ok, socket, {:continue, :hello}}
       {:error, reason} -> {:stop, reason}
@@ -124,6 +141,25 @@ defmodule PiFi.Plex.Companion.Gdm do
     if search?(packet), do: send_to(socket, address, port, message("HTTP/1.0 200 OK"))
 
     {:noreply, socket}
+  end
+
+  # **A socket that joined no group hears nothing**, and that is what a boot with no
+  # network leaves behind. See the module documentation.
+  def handle_info(%NetworkChanged{}, socket) do
+    :gen_udp.close(socket)
+
+    case open() do
+      {:ok, opened} ->
+        send_to(opened, @group, @hello_port, message("HELLO * HTTP/1.0"))
+
+        {:noreply, opened}
+
+      # The port is the one thing here that another program can hold, and a player
+      # that cannot open it is one that a person turns off and on again. Stopping
+      # says so, where carrying on with a closed socket would look like working.
+      {:error, reason} ->
+        {:stop, reason, socket}
+    end
   end
 
   def handle_info(_message, socket), do: {:noreply, socket}

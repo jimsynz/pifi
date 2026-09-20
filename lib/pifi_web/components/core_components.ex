@@ -74,7 +74,7 @@ defmodule PiFiWeb.CoreComponents do
       class={[
         "glass sheen pointer-events-auto cursor-pointer rounded-xl px-4 py-3 text-sm shadow-2xl",
         @kind == :info && "text-ink",
-        @kind == :error && "text-red-200 border-red-400/40"
+        @kind == :error && "text-danger border-danger/40"
       ]}
       {@rest}
     >
@@ -231,7 +231,7 @@ defmodule PiFiWeb.CoreComponents do
 
   defp error(assigns) do
     ~H"""
-    <p class="mt-1 text-sm text-red-300">{render_slot(@inner_block)}</p>
+    <p class="mt-1 text-sm text-danger">{render_slot(@inner_block)}</p>
     """
   end
 

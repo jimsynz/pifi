@@ -465,7 +465,7 @@ defmodule PiFiWeb.SettingsLive do
 
           <p
             :for={error <- upload_errors(@uploads.splash)}
-            class="mt-1 text-sm text-red-300"
+            class="mt-1 text-sm text-danger"
           >
             {upload_message(error)}
           </p>
@@ -475,7 +475,7 @@ defmodule PiFiWeb.SettingsLive do
 
             <p
               :for={error <- upload_errors(@uploads.splash, entry)}
-              class="text-red-300"
+              class="text-danger"
             >
               {upload_message(error)}
             </p>
@@ -962,7 +962,7 @@ defmodule PiFiWeb.SettingsLive do
         </div>
       </dl>
 
-      <p :if={@storage.full?} id="storage-warning" class="mt-3 text-sm text-red-300">
+      <p :if={@storage.full?} id="storage-warning" class="mt-3 text-sm text-danger">
         This partition is nearly full.
       </p>
     </.section>
@@ -1012,7 +1012,7 @@ defmodule PiFiWeb.SettingsLive do
         The firmware is written. PiFi is restarting.
       </p>
 
-      <p :if={@upgrade.state == :failed} id="upgrade-failed" class="mt-3 text-sm text-red-300">
+      <p :if={@upgrade.state == :failed} id="upgrade-failed" class="mt-3 text-sm text-danger">
         That upgrade didn't finish, and the firmware you have is untouched. {@upgrade.reason}
       </p>
 

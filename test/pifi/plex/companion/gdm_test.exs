@@ -2,6 +2,7 @@ defmodule PiFi.Plex.Companion.GdmTest do
   use PiFi.DataCase, async: false
 
   alias PiFi.Device.Identity
+  alias PiFi.Event
   alias PiFi.Plex.Companion
   alias PiFi.Plex.Companion.Gdm
   alias PiFi.Plex.Server
@@ -82,10 +83,43 @@ defmodule PiFi.Plex.Companion.GdmTest do
       assert headers(answer)["Name"] == "Kitchen"
     end
 
+    # **A boot with no network joins no multicast group**, and the fallback that keeps
+    # the responder alive then leaves it listening to nothing. `NetworkChanged` is the
+    # one event that says an address arrived, so the socket opens again for it.
+    test "an address that arrives after the boot opens the socket again", %{socket: socket} do
+      assert {:ok, {_address, port, _answer}} = search(socket)
+      assert port == Gdm.search_port()
+
+      Event.publish(:device, %Event.Device.NetworkChanged{
+        interfaces: [%{name: "wlan0", addresses: ["192.168.3.142"]}]
+      })
+
+      # The responder still answers, and it answers from the same port, so the socket
+      # that replaced the old one is bound the way the first one was.
+      assert eventually(fn -> match?({:ok, {_a, _p, _answer}}, search(socket)) end)
+      assert {:ok, {_address, port, _answer}} = search(socket)
+      assert port == Gdm.search_port()
+    end
+
     # Anything else on this port belongs to another program, and a player that answered
     # it would be talking to something that never asked.
     test "a datagram that is no search gets no answer", %{socket: socket} do
       assert {:error, :timeout} = search(socket, "HELLO * HTTP/1.0\r\n\r\n")
+    end
+  end
+
+  # The socket is replaced in another process, so a test waits for it rather than
+  # sleeping for a period that a slow machine makes wrong.
+  defp eventually(check, attempts \\ 100)
+
+  defp eventually(_check, 0), do: false
+
+  defp eventually(check, attempts) do
+    if check.() do
+      true
+    else
+      Process.sleep(20)
+      eventually(check, attempts - 1)
     end
   end
 end
