@@ -36,6 +36,10 @@ defmodule PiFi.Application do
         # `PiFi.Output.APlayPort`.
         PiFi.Output.APlayPort,
         PiFi.Player,
+        # An upgrade reads 30 MB and then writes a partition, and the state process must
+        # answer a page while that happens. See `PiFi.Device.Upgrade.Server`.
+        {Task.Supervisor, name: PiFi.Device.Upgrade.Tasks},
+        PiFi.Device.Upgrade.Server,
         PiFi.Peripheral.Supervisor,
         # It starts with no child, in the way that the peripherals do, and
         # `start_enabled/0` below starts the listener. A port that another program holds
@@ -111,9 +115,11 @@ defmodule PiFi.Application do
   defp without_auto_sync({Oban.Plugins.Cron, options}) do
     workers = PiFi.AutoSync.workers()
 
+    # An entry of a crontab names a worker with no options or with them, so this reads
+    # the second element and never the shape of the whole tuple.
     {Oban.Plugins.Cron,
      Keyword.update!(options, :crontab, fn crontab ->
-       Enum.reject(crontab, fn {_cron, worker, _opts} -> worker in workers end)
+       Enum.reject(crontab, &(elem(&1, 1) in workers))
      end)}
   end
 

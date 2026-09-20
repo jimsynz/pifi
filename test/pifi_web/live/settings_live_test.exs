@@ -5,6 +5,9 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias Nerves.Runtime.KV
   alias PiFi.Artwork
   alias PiFi.Device.Identity
+  alias PiFi.Device.Upgrade
+  alias PiFi.Device.Upgrade.Forge
+  alias PiFi.Device.Upgrade.Server, as: UpgradeServer
   alias PiFi.Event
   alias PiFi.Event.Device, as: Events
   alias PiFi.Output.Volume
@@ -1067,6 +1070,86 @@ defmodule PiFiWeb.SettingsLiveTest do
       # alone is no good here, because `econnrefused` holds it.
       refute html =~ "refused that key"
       assert Index.configured?()
+    end
+  end
+
+  describe "the firmware section" do
+    test "it names the version that runs", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
+
+      assert has_element?(view, "#running-version", Upgrade.running_version())
+      assert has_element?(view, "#up-to-date")
+      refute has_element?(view, "#install-upgrade")
+    end
+
+    # A version that lands while a person has the page open must reach them, in the way
+    # that the storage and the network do.
+    test "a version that the forge names reaches the page", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
+
+      Event.publish(:device, %Events.UpgradeChanged{
+        running: "0.1.0",
+        available: "9.9.9",
+        notes: "What changed.",
+        checked_at: DateTime.utc_now(),
+        state: :idle,
+        percent: 0
+      })
+
+      html = render(view)
+
+      assert html =~ "Version 9.9.9 is ready."
+      assert html =~ "What changed."
+      assert has_element?(view, "#install-upgrade")
+      refute has_element?(view, "#up-to-date")
+    end
+
+    # **An upgrade takes minutes and a person watches it.** The bar moves on the events
+    # of the topic, so the page asks the device nothing while it runs.
+    test "the bar of a download moves with the events", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
+
+      Event.publish(:device, %Events.UpgradeChanged{
+        running: "0.1.0",
+        available: "9.9.9",
+        state: :installing,
+        percent: 42
+      })
+
+      assert render(view) =~ "42%"
+      assert has_element?(view, "#installing")
+    end
+
+    test "an upgrade that failed says so, and says the firmware is untouched", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
+
+      Event.publish(:device, %Events.UpgradeChanged{
+        running: "0.1.0",
+        available: "9.9.9",
+        state: :failed,
+        reason: ":wrong_digest"
+      })
+
+      html = render(view)
+
+      assert html =~ "didn&#39;t finish"
+      assert html =~ "untouched"
+    end
+
+    # **A person pressed a control, so the page owes them an answer.** A forge that a
+    # device cannot reach is the common case here: a board in a house with no network
+    # still draws this page.
+    test "a forge that will not answer says so", %{conn: conn} do
+      Req.Test.stub(Forge, fn conn -> Req.Test.transport_error(conn, :econnrefused) end)
+      Req.Test.allow(Forge, self(), Process.whereis(UpgradeServer))
+
+      Application.put_env(:pifi, Forge, plug: {Req.Test, Forge}, retry: false)
+      on_exit(fn -> Application.delete_env(:pifi, Forge) end)
+
+      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
+
+      assert view |> element("#check-for-upgrade") |> render_click() =~
+               "Couldn&#39;t reach the forge"
     end
   end
 end

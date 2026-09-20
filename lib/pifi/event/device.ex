@@ -107,6 +107,36 @@ defmodule PiFi.Event.Device do
     defstruct devices: [], selected: nil, in_use: nil
   end
 
+  defmodule UpgradeChanged do
+    @moduledoc """
+    What this device knows about the newest firmware moved.
+
+    The fields are what `PiFi.Device.upgrade!/0` gives. A check publishes one of these,
+    and so does each whole percentage of a download, so a page draws a bar with no
+    interval of its own. See `PiFi.Device.Upgrade`.
+    """
+
+    @type t :: %__MODULE__{
+            running: String.t(),
+            available: String.t() | nil,
+            notes: String.t(),
+            checked_at: DateTime.t() | nil,
+            state: :idle | :installing | :installed | :failed,
+            percent: non_neg_integer(),
+            reason: String.t() | nil
+          }
+
+    defstruct [
+      :available,
+      :checked_at,
+      :reason,
+      :running,
+      notes: "",
+      percent: 0,
+      state: :idle
+    ]
+  end
+
   defmodule StorageChanged do
     @moduledoc """
     The free space of the writable partition moved.

@@ -26,3 +26,8 @@ config :nerves_uevent, manage_udev: true
 # server. A target makes its own and keeps it under `/root`. See
 # `PiFi.DeviceSecrets`.
 config :pifi, PiFiWeb.Endpoint, live_view: [signing_salt: "EhXdl2qH"]
+
+# `/root` is the writable partition of a target and the home of another person on a
+# host, so a host writes somewhere that it may. A host applies no firmware in any case:
+# see `PiFi.Device.Upgrade.Install`.
+config :pifi, PiFi.Device.Upgrade, download_path: System.tmp_dir!()

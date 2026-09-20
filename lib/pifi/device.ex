@@ -3,7 +3,8 @@ defmodule PiFi.Device do
   What the machine under the firmware is doing.
 
   The network state and the storage state are reports. A caller reads them, and
-  no caller changes them here. The Wi-Fi details belong to the setup wizard, and
+  no caller changes them here. The upgrade is the one thing here that a person starts,
+  and it sits with them because the firmware of the machine is what it changes. The Wi-Fi details belong to the setup wizard, and
   the free space belongs to the partition.
 
   Each report is a generic action and not a plain function, so an API extension
@@ -21,6 +22,12 @@ defmodule PiFi.Device do
     resource PiFi.Device.Storage do
       define :storage, action: :report
       define :storage_usage, action: :usage
+    end
+
+    resource PiFi.Device.Upgrade do
+      define :upgrade, action: :report
+      define :check_for_upgrade, action: :check
+      define :install_upgrade, action: :install
     end
   end
 end

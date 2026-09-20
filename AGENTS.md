@@ -261,6 +261,14 @@ Licence: Apache-2.0.
 
     **A screen draws no name over the mark of the product**, because the mark carries
     that name already. A device that a person named draws a card with the name in it.
+- **A device upgrades itself from the releases of the forge.** A tag of the form
+  `v1.2.3` builds a production firmware for each target and the shared CI workflow
+  attaches it to a release with a `.sha256` beside it, so the forge is the whole of the
+  release channel and this firmware needs no service of its own.
+  `PiFi.Device.Upgrade.Check` asks once a day, the settings page holds the control, and
+  `PiFi.Device.Upgrade.Install` writes the file to `/root`, checks the digest, and hands
+  it to `fwup --task upgrade`. **A device never upgrades by itself**: a stereo that
+  restarted in the middle of a record is one that a person stops trusting.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `PiFi.Application` calls

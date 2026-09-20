@@ -73,7 +73,9 @@ defmodule PiFi.AutoSyncTest do
           _other -> nil
         end)
 
-      scheduled = Enum.map(crontab, fn {_cron, worker, _options} -> worker end)
+      # An entry names a worker with no options or with them, so this reads the second
+      # element and never the shape of the whole tuple.
+      scheduled = Enum.map(crontab, &elem(&1, 1))
 
       for worker <- AutoSync.workers(), do: assert(worker in scheduled)
     end

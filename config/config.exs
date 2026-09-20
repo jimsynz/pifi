@@ -17,7 +17,13 @@ config :pifi, Oban,
   # A job that finished stays in the table until something removes it, and this device
   # runs for years on an SD card. A week is long enough to read what happened and short
   # enough that the table never grows.
-  plugins: [{Oban.Plugins.Cron, []}, {Oban.Plugins.Pruner, max_age: 604_800}],
+  # **The hour is not midnight.** Every device of this product would ask the forge in
+  # the same minute, and a person who upgrades at 3 in the morning is asleep beside a
+  # stereo that reboots.
+  plugins: [
+    {Oban.Plugins.Cron, crontab: [{"17 4 * * *", PiFi.Device.Upgrade.Check}]},
+    {Oban.Plugins.Pruner, max_age: 604_800}
+  ],
   # **A device that stops in the middle of a job leaves that job `executing` for ever.**
   # This device stops often: it goes into standby, a person takes the power away, and a
   # new firmware restarts it. Nothing moves such a job back, and a scheduled action is
@@ -37,6 +43,16 @@ config :pifi, Oban,
 # for the wrong one its measurement. `AshSqlite.Repo` gives `Ecto.Repo` the OTP
 # application and the adapter and no other option, so this cannot sit beside `use`.
 config :pifi, PiFi.Repo, telemetry_prefix: [:pifi, :repo]
+
+# **The forge is the whole of the release channel.** A tag of the form `v1.2.3` builds a
+# production firmware for each target and attaches it to a release, so a device needs no
+# service of its own to learn that a version landed. See `PiFi.Device.Upgrade`.
+#
+# `download_path` is the writable partition, which mounts at `/root` on a target.
+# `config/host.exs` names somewhere that a person may write instead.
+config :pifi, PiFi.Device.Upgrade,
+  download_path: "/root",
+  releases_url: "https://harton.dev/api/v1/repos/mypihifiguy/pifi/releases/latest"
 
 config :pifi,
   ecto_repos: [PiFi.Repo],

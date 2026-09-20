@@ -15,6 +15,7 @@ defmodule PiFiWeb.SettingsLive do
       /settings/standby                the period of quiet, and the switch off
       /settings/network                a report
       /settings/storage                a report
+      /settings/firmware               the version that runs, and the one that could
 
   **This page needs no knowledge of any source.** A source names its own settings
   with `c:PiFi.Source.settings/0`, and its own controls with
@@ -137,10 +138,42 @@ defmodule PiFiWeb.SettingsLive do
     {:noreply, socket |> assign(:storage, Map.take(event, fields)) |> assign_usage()}
   end
 
+  @impl Phoenix.LiveView
+  def handle_info(%Events.UpgradeChanged{} = event, socket) do
+    fields = [:running, :available, :notes, :checked_at, :state, :percent, :reason]
+
+    {:noreply, assign(socket, :upgrade, Map.take(event, fields))}
+  end
+
   # The player publishes on this topic as well, and no report of this page changes with
   # it.
   @impl Phoenix.LiveView
   def handle_info(_message, socket), do: {:noreply, socket}
+
+  # **A check answers when the forge does**, and a person pressed a control, so this
+  # waits for it and says what happened. A daily job asks the same question with nobody
+  # watching. See `PiFi.Device.Upgrade.Check`.
+  @impl Phoenix.LiveView
+  def handle_event("check_for_upgrade", _params, socket) do
+    case Device.check_for_upgrade() do
+      {:ok, report} ->
+        {:noreply, socket |> assign(:upgrade, report) |> put_flash(:info, check_message(report))}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Couldn't reach the forge. Try again in a moment.")}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("install_upgrade", _params, socket) do
+    case Device.install_upgrade() do
+      {:ok, _result} ->
+        {:noreply, assign(socket, :upgrade, Device.upgrade!())}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "There's nothing to install.")}
+    end
+  end
 
   @impl Phoenix.LiveView
   def handle_event("save_device_name", %{"device" => %{"name" => name}}, socket) do
@@ -350,6 +383,15 @@ defmodule PiFiWeb.SettingsLive do
         title="Storage"
       >
         {size(@storage.free_bytes)} free of {size(@storage.total_bytes)}
+      </.row>
+
+      <.row
+        id="firmware-row"
+        to={~p"/settings/firmware"}
+        icon="ph-arrow-circle-up"
+        title="Firmware"
+      >
+        {firmware_summary(@upgrade)}
       </.row>
     </div>
     """
@@ -903,6 +945,80 @@ defmodule PiFiWeb.SettingsLive do
     """
   end
 
+  # **An upgrade takes minutes and it restarts the device**, so this page says what is
+  # happening the whole way through rather than go quiet. The state arrives on the
+  # `:device` topic, so the bar moves with no interval of its own. See
+  # `PiFi.Device.Upgrade`.
+  @impl Phoenix.LiveView
+  def render(%{live_action: :firmware} = assigns) do
+    ~H"""
+    <.section id="settings-firmware" title="Firmware" back={~p"/settings"}>
+      <dl class="text-sm">
+        <div class="flex justify-between gap-4 border-b border-edge py-2 first:pt-0">
+          <dt class="text-ink-faint">Running</dt>
+          <dd id="running-version" class="numerals text-ink-dim">{@upgrade.running}</dd>
+        </div>
+        <div class="flex justify-between gap-4 py-2 last:pb-0">
+          <dt class="text-ink-faint">Checked</dt>
+          <dd id="checked-at" class="text-ink-dim">{checked_text(@upgrade.checked_at)}</dd>
+        </div>
+      </dl>
+
+      <p :if={is_nil(@upgrade.available)} id="up-to-date" class="mt-3 text-sm text-ink-dim">
+        This is the newest firmware.
+      </p>
+
+      <div :if={@upgrade.available} id="available" class="mt-3">
+        <p class="display text-ink">Version {@upgrade.available} is ready.</p>
+        <pre
+          :if={@upgrade.notes != ""}
+          id="release-notes"
+          class="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-sm text-ink-dim"
+        >{@upgrade.notes}</pre>
+      </div>
+
+      <div :if={@upgrade.state == :installing} id="installing" class="mt-3">
+        <p class="text-sm text-ink-dim">Reading the firmware. {@upgrade.percent}%</p>
+        <div class="mt-2 h-3 w-full overflow-hidden rounded-full bg-shell">
+          <div class="h-full bg-accent" style={"width: #{@upgrade.percent}%"}></div>
+        </div>
+      </div>
+
+      <p :if={@upgrade.state == :installed} id="installed" class="mt-3 text-sm text-ink-dim">
+        The firmware is written. PiFi is restarting.
+      </p>
+
+      <p :if={@upgrade.state == :failed} id="upgrade-failed" class="mt-3 text-sm text-red-300">
+        That upgrade didn't finish, and the firmware you have is untouched. {@upgrade.reason}
+      </p>
+
+      <div class="mt-4 flex gap-2">
+        <button
+          id="check-for-upgrade"
+          type="button"
+          phx-click="check_for_upgrade"
+          disabled={@upgrade.state == :installing}
+          class="control rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+        >
+          Check now
+        </button>
+
+        <button
+          :if={@upgrade.available}
+          id="install-upgrade"
+          type="button"
+          phx-click="install_upgrade"
+          disabled={@upgrade.state in [:installing, :installed]}
+          data-confirm="PiFi will restart once the firmware is written."
+          class="control control-on rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+        >
+          Install {@upgrade.available}
+        </button>
+      </div>
+    </.section>
+    """
+  end
+
   attr(:usage, :list, required: true)
   attr(:used_bytes, :integer, required: true)
 
@@ -1161,6 +1277,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:output, PiFi.Playback.output!())
     |> assign(:interfaces, Device.network!())
     |> assign(:storage, Device.storage!())
+    |> assign(:upgrade, Device.upgrade!())
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())
@@ -1178,6 +1295,16 @@ defmodule PiFiWeb.SettingsLive do
     do: assign(socket, :usage, Device.storage_usage!())
 
   defp assign_usage(socket), do: socket
+
+  defp firmware_summary(%{state: :installing, percent: percent}), do: "Installing, #{percent}%"
+  defp firmware_summary(%{available: nil, running: running}), do: "#{running}, up to date"
+  defp firmware_summary(%{available: available}), do: "Version #{available} is ready"
+
+  defp check_message(%{available: nil}), do: "This is the newest firmware."
+  defp check_message(%{available: version}), do: "Version #{version} is ready to install."
+
+  defp checked_text(nil), do: "Not yet"
+  defp checked_text(at), do: Calendar.strftime(at, "%d %B, %H:%M UTC")
 
   # The periods that a person can pick. A free number would need a check of its own on
   # this page, and no person of a stereo wants 37 minutes.
