@@ -516,6 +516,10 @@ defmodule PiFi.Plex.CompanionTest do
         conn = Plug.Conn.fetch_query_params(conn)
         send(test, {:request, conn.method, conn.request_path, conn.params})
 
+        # The token of the account is a header and not a parameter, and a request that
+        # carries none is the bug that this describe block exists to catch.
+        send(test, {:headers, Map.new(conn.req_headers)})
+
         body =
           if conn.request_path == "/api/v2/devices",
             do: [%{"clientIdentifier" => Server.client_id(), "id" => 4242}],
@@ -527,8 +531,43 @@ defmodule PiFi.Plex.CompanionTest do
       :ok
     end
 
+    # **Every call of plex.tv carries the token of the account, and two of them did
+    # not.** `headers/2` writes `x-plex-token` as the empty string for a `nil`, so the
+    # publish asked plex.tv anonymously and plex.tv answered 401: the device published
+    # no address and Plexamp listed no player. A measurement on the board on 2026-09-21
+    # gave 401 without it and 200 with it.
+    test "the publish carries the token of the account" do
+      Settings.put!("plex_device_id", "4242")
+      Settings.put!("plex_account_token", "a-real-token")
+
+      start_supervised!(PiFi.Plex.Companion.Announcement)
+
+      assert_receive {:request, "PUT", "/devices/4242.xml", _params}, 2000
+      assert_receive {:headers, headers}, 2000
+      assert headers["x-plex-token"] == "a-real-token"
+    end
+
+    # A device that a person never linked has no token, and asking plex.tv anonymously
+    # is how this failed silently in the first place.
+    test "a device with no token publishes nothing" do
+      Settings.put!("plex_device_id", "4242")
+
+      case Settings.fetch("plex_account_token") do
+        {:ok, setting} -> Settings.delete!(setting)
+        {:error, _reason} -> :ok
+      end
+
+      pid = start_supervised!(PiFi.Plex.Companion.Announcement)
+
+      Process.sleep(50)
+
+      refute_received {:request, "PUT", _path, _params}
+      assert Process.alive?(pid)
+    end
+
     test "it publishes the address when it starts, so a device that moved corrects it" do
       Settings.put!("plex_device_id", "4242")
+      Settings.put!("plex_account_token", "a-real-token")
 
       start_supervised!(PiFi.Plex.Companion.Announcement)
 
@@ -538,6 +577,7 @@ defmodule PiFi.Plex.CompanionTest do
     # A person renames their device, and plex.tv holds the name of the last publish.
     test "a device that a person renames says so" do
       Settings.put!("plex_device_id", "4242")
+      Settings.put!("plex_account_token", "a-real-token")
 
       start_supervised!(PiFi.Plex.Companion.Announcement)
       assert_receive {:request, "PUT", "/devices/4242.xml", _params}, 2000
@@ -556,6 +596,7 @@ defmodule PiFi.Plex.CompanionTest do
     # and a restart is rarer.
     test "an address that arrives after the boot is published" do
       Settings.put!("plex_device_id", "4242")
+      Settings.put!("plex_account_token", "a-real-token")
 
       start_supervised!(PiFi.Plex.Companion.Announcement)
       assert_receive {:request, "PUT", "/devices/4242.xml", _params}, 2000

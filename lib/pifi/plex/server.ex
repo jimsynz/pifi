@@ -817,6 +817,17 @@ defmodule PiFi.Plex.Server do
     end
   end
 
+  # **Every call of plex.tv carries the token of the account, and two of them did
+  # not.** `headers/2` writes `x-plex-token` as the empty string for a `nil`, so a
+  # request that named none asked plex.tv anonymously and plex.tv answered 401. The
+  # device published no address for that reason, `/api/v2/resources` then held nothing
+  # for it, and Plexamp on a telephone listed no player. A measurement on the board on
+  # 2026-09-21 gave 401 without the token and 200 with it, against the same device and
+  # the same address.
+  #
+  # `PiFi.Plex.Companion.Announcement` logs a failure and carries on, which is right —
+  # a publish that fails must not stop the player — and it is also why this went
+  # unnoticed: the only sign was one line of the log.
   @doc """
   Tell plex.tv where a controller reaches this player.
 
@@ -834,10 +845,11 @@ defmodule PiFi.Plex.Server do
   def publish_player([]), do: {:error, :no_address}
 
   def publish_player(addresses) do
-    with {:ok, id} <- player_device_id() do
+    with {:ok, token} <- account_token(),
+         {:ok, id} <- player_device_id() do
       query = Enum.map(addresses, &{"Connection[][uri]", &1})
 
-      case request(:put, @account, nil, "/devices/#{id}.xml", query, player_headers()) do
+      case request(:put, @account, token, "/devices/#{id}.xml", query, player_headers()) do
         {:ok, _body} -> :ok
         {:error, reason} -> {:error, reason}
       end
@@ -870,7 +882,8 @@ defmodule PiFi.Plex.Server do
   end
 
   defp read_player_device_id do
-    with {:ok, body} <- request(:get, @account, nil, "/api/v2/devices", [], player_headers()),
+    with {:ok, token} <- account_token(),
+         {:ok, body} <- request(:get, @account, token, "/api/v2/devices", [], player_headers()),
          %{"id" => id} <- device_of(body) do
       Settings.put!(@device_id_setting, to_string(id))
 
