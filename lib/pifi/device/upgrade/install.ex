@@ -2,7 +2,7 @@ defmodule PiFi.Device.Upgrade.Install do
   @moduledoc """
   Puts one firmware on the card and restarts the device.
 
-  Three steps, and each one can stop the upgrade with nothing lost.
+  Four steps, and each one can stop the upgrade with nothing lost.
 
   1. **Write the firmware to `/root`.** It arrives at whatever rate the network gives,
      and `fwup` reads a file and not a socket, so the bytes land on the card first. That
@@ -12,7 +12,14 @@ defmodule PiFi.Device.Upgrade.Install do
      half way is the failure to expect, and it must be caught before anything reaches
      the boot partition. `fwup` would also refuse a broken archive, but by then it has
      written the partition that the device is about to boot from.
-  3. **Apply it, and reboot.** `fwup --task upgrade` writes the partition that is not
+  3. **Read what built it, and refuse anything but a production firmware.** A
+     development image carries an SSH daemon, because `config/target.exs` gives
+     `nerves_ssh` an application environment only for `MIX_ENV=dev`. This device
+     applies what it is given without asking a person twice, so one attached to a
+     release by mistake would put a shell on every device that took it. See
+     `stamp_environment/1` of `mix.exs`, which writes the environment into the
+     metadata.
+  4. **Apply it, and reboot.** `fwup --task upgrade` writes the partition that is not
      running, and the bootloader takes it at the next start. A device that loses power
      in the middle of that still boots the partition that it has.
 
@@ -62,7 +69,8 @@ defmodule PiFi.Device.Upgrade.Install do
 
       try do
         with :ok <- download(release.url, path, progress),
-             :ok <- verify(path, release.sha256_url) do
+             :ok <- verify(path, release.sha256_url),
+             :ok <- production?(path) do
           apply_firmware(path)
         end
       after
@@ -134,6 +142,30 @@ defmodule PiFi.Device.Upgrade.Install do
     end
 
     defp hash(chunk, state), do: :crypto.hash_update(state, chunk)
+
+    # **A development firmware carries an SSH daemon, and this device applies what it
+    # is given without asking a person twice.** `config/target.exs` gives `nerves_ssh`
+    # an application environment only for `MIX_ENV=dev`, so one attached to a release
+    # by mistake would put a shell on every device that took it. The release step
+    # `stamp_environment/1` of `mix.exs` writes the environment into the metadata for
+    # this to read.
+    #
+    # **A firmware that names no environment is refused as well.** It was built before
+    # that stamp existed, or by something that is not this project, and neither is a
+    # thing to apply to a device that nobody is holding.
+    defp production?(path) do
+      case System.cmd("fwup", ["--metadata", "-i", path], stderr_to_stdout: true) do
+        {output, 0} ->
+          if output =~ ~s(meta-misc="env=prod"),
+            do: :ok,
+            else: {:error, :not_a_production_firmware}
+
+        {output, code} ->
+          Logger.error("fwup would not read the firmware (#{code}): #{output}")
+
+          {:error, :unreadable_firmware}
+      end
+    end
 
     defp request(options) do
       options

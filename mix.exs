@@ -273,9 +273,47 @@ defmodule PiFi.MixProject do
       # See https://nerves-pack.hexdocs.pm/readme.html#erlang-distribution
       cookie: "#{@app}_cookie",
       include_erts: &Nerves.Release.erts/0,
-      steps: [&Nerves.Release.init/1, &prune_foreign_precompiled/1, :assemble],
+      steps: [
+        &Nerves.Release.init/1,
+        &stamp_environment/1,
+        &prune_foreign_precompiled/1,
+        :assemble
+      ],
       strip_beams: Mix.env() == :prod or [keep: ["Docs"]]
     ]
+  end
+
+  # **A firmware says which `MIX_ENV` built it, and nothing else does.** The two
+  # builds differ in a way that matters: `config/target.exs` gives `nerves_ssh` an
+  # application environment only when `Mix.env()` is `:dev`, so a development image
+  # carries an SSH daemon and a production one carries none. A `.fw` file carries no
+  # sign of which it is, and neither does a running device.
+  #
+  # That was tolerable while a person wrote every card by hand. `PiFi.Device.Upgrade`
+  # takes a firmware from the releases of the forge now and applies it without asking,
+  # so a development image attached to a release would put a shell on every device
+  # that took it.
+  #
+  # `NERVES_FW_MISC` is the field for this, and Nerves sets four others and not this
+  # one. `fwup.conf` of the system writes it into the u-boot environment, so
+  # `fwup -m -i <file>.fw` reads it before a device applies anything and
+  # `Nerves.Runtime.KV.get_active("nerves_fw_misc")` reads it after.
+  #
+  # A release step runs inside `mix firmware` and before fwup does, in the one
+  # operating system process, so the variable reaches it.
+  defp stamp_environment(release) do
+    System.put_env("NERVES_FW_MISC", "env=#{Mix.env()}")
+
+    unless Mix.env() == :prod or Mix.target() == :host do
+      Mix.shell().info([
+        :yellow,
+        "\nThis is a #{Mix.env()} firmware for #{Mix.target()}, and it holds an SSH ",
+        "daemon.\nBuild it with MIX_ENV=prod for a device that a hand cannot reach.\n",
+        :reset
+      ])
+    end
+
+    release
   end
 
   # Uncomment the following line if using Phoenix > 1.8.

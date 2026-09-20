@@ -274,6 +274,14 @@ Licence: Apache-2.0.
     `nerves_time`, `vintage_net` and `nbpr` all name `~> 1.0`. Nothing here reaches the
     code that needs the newer one: `homex` uses `muontrap` for its `:system` mDNS
     responder alone, and this firmware names `:mdns_lite`.
+  - **A firmware says which `MIX_ENV` built it, and nothing else does.** The two
+    builds differ in a way that matters, because `config/target.exs` gives
+    `nerves_ssh` an application environment only for `dev`. `stamp_environment/1` of
+    `mix.exs` writes `env=<mix env>` into `NERVES_FW_MISC`, which Nerves does not set
+    and the `fwup.conf` of the system does write, so `fwup -m -i <file>.fw` reads it
+    before a device applies anything. **`PiFi.Device.Upgrade.Install` refuses a
+    firmware that does not say `env=prod`**, and one that says nothing at all, because
+    a device applies what it is given without asking a person twice.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `PiFi.Application` calls
