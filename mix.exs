@@ -202,17 +202,6 @@ defmodule PiFi.MixProject do
       {:usage_rules, "~> 1.0", only: [:dev]},
       {:nerves_runtime, "~> 0.13.12"},
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
-      # A production firmware holds no SSH daemon, so a board in a case is a board
-      # that no person can reach. NervesCloud gives the one way back: it pushes a
-      # firmware and it opens a console over a channel that the device starts
-      # itself. See the NervesCloud section of `config/target.exs`.
-      #
-      # Every dependency of this package is Elixir or Erlang, so the custom system
-      # needs nothing. The three optional ones that this firmware holds already are
-      # `nerves_runtime`, `nerves_time` and `vintage_net`. It asks for `nerves_key`
-      # and `tpm` as well, and this board holds neither, so the shared secret is
-      # what it uses.
-      {:nerves_hub_link, "~> 2.12", targets: @all_targets},
       # These two arrive through `nerves_pack`, and this firmware calls each one
       # itself, so naming them here means that a change there cannot take them
       # away. `req` is named for the same reason.

@@ -98,28 +98,19 @@ Licence: Apache-2.0.
     registry.** `config/target.exs` names `registry`, and `NBPR.OCI.Client` reads
     `NBPR_REGISTRY_USERNAME` and `NBPR_REGISTRY_TOKEN`. `mix nbpr.fetch` finishes a
     package and then stops with `registry_credentials_required` when it finds neither
-    one, so `publish_after_build` reads the two variables. This is the rule that
-    `nerves_hub_link` follows as well: an absent secret turns the feature off, and it
-    does not stop the build.
+    one, so `publish_after_build` reads the two variables. An absent secret turns the
+    feature off, and it does not stop the build.
 - **A production firmware holds no SSH daemon, and `mix upload` needs one.**
   `config/target.exs` gives `nerves_ssh` an application environment only when
-  `Mix.env()` is `dev`. A `MIX_ENV=prod` image on a board that a hand cannot reach
-  is therefore one way, and the SD card is the only way back. **NervesCloud is what
-  makes a production image safe to send.** `nerves_hub_link` connects out to
-  `devices.nervescloud.com`, so it opens no port, and it carries a firmware and a
-  console. `.envrc` reads the two secrets from 1Password, and a build that holds
-  neither one writes `connect: false`. Two traps, and the NervesCloud section of
-  `config/target.exs` holds the reasons.
-  - **`data_path` must not keep its default of `/data/nerves-hub`**, because this
-    system has no `/data`. It holds the archives and the files that a person sends
-    to the console. A firmware update streams into `fwup` and needs no file.
-  - **An absent secret needs `connect: false`.** This is the opposite of
-    `nerves_ssh`. `NervesHubLink.Application.start/2` starts its supervisor unless a
-    person says not to, and `host` then becomes `localhost`.
-  - **A credential trims to what it is.** A field of a password manager can hold a
-    space at its end that no person sees. Such a key makes the wrong HMAC, and the
-    socket upgrade answers 401 with no body and no reason. Read the length of the
-    key on the device before you look anywhere else.
+  `Mix.env()` is `dev`. A `MIX_ENV=prod` image on a board that a hand cannot reach is
+  therefore one way, and the SD card is the way back. **A device that is running takes
+  its next firmware from the releases of the forge**, which is the bullet above, so the
+  card is for a board that will not boot and for nothing else.
+
+  This firmware held `nerves_hub_link` and reached NervesCloud, which carried a console
+  as well as a firmware. That console reached every device of the product from one
+  account, and a device that a person bought is not one that this project should be able
+  to open a shell on. Do not restore it.
 - **A skip moves the reader, and it does not start a pipeline again.**
   `PiFi.Output.APlaySink` starts `aplay` for each pipeline, `aplay` opens the sound
   card, and the card is the part of this board that fails. A start also holds a silence

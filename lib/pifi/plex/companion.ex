@@ -12,9 +12,9 @@ defmodule PiFi.Plex.Companion do
   ## A person turns this on, and a device that no person asked leaves it off
 
   **This is the first part of the firmware that listens for anything.** Every other
-  part connects out: the web interface answers on the local network, and
-  `nerves_hub_link` opens no port at all. A player must listen, because a controller
-  sends the commands to it.
+  part connects out: the web interface answers on the local network, and the check for a
+  new firmware reaches the forge and opens nothing. A player must listen, because a
+  controller sends the commands to it.
 
   `enabled?/0` is therefore the rule, and it follows `PiFi.Peripheral.enabled?/1`:
   the setting decides, and a device that no person changed holds the port closed. The
