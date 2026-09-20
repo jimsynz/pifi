@@ -145,7 +145,7 @@ defmodule PiFi.MixProject do
       # and it holds no native code of its own: `wafer` is the layer that talks to
       # `circuits_i2c`. See `PiFi.Peripheral.Battery`.
       {:max1704x, "~> 0.1.1"},
-      {:membrane_aac_fdk_plugin, "~> 0.18"},
+      {:membrane_aac_fdk_plugin, "~> 0.19"},
       {:membrane_aac_plugin, "~> 0.19"},
       {:membrane_core, "~> 1.0"},
       {:membrane_hls_plugin, "~> 3.0"},
