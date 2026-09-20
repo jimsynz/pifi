@@ -17,6 +17,7 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias PiFi.Radio.Sync.FromRemote
   alias PiFi.Settings
   alias PiFi.Source
+  alias PiFi.Spotify
   alias PiFi.Test.Lamp
   alias PiFi.Test.NoCardOutput
   alias PiFi.Test.Panel
@@ -1196,6 +1197,60 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings")
 
       assert has_element?(view, "#home-assistant-row", "Off")
+    end
+  end
+
+  # **A person reads the licence question on this page and nowhere else**, because
+  # they are the one taking the risk. See `PiFi.Spotify`.
+  describe "the Spotify section" do
+    setup do
+      on_exit(fn ->
+        Spotify.enable(false)
+
+        case Settings.fetch(Spotify.enabled_key()) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "it says what librespot is before a person turns it on", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/spotify")
+
+      assert has_element?(view, "#toggle-spotify[aria-pressed='false']")
+      assert html =~ "Premium"
+      assert html =~ "librespot"
+      assert html =~ "against their terms"
+    end
+
+    # The card plays one thing at a time, and a person meeting that with no warning
+    # would read it as the feature being broken.
+    test "it says that the card plays one thing at a time", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/settings/spotify")
+
+      assert html =~ "one thing at a time"
+    end
+
+    test "a person turns it on and off again", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/spotify")
+
+      html = view |> element("#toggle-spotify") |> render_click()
+
+      assert html =~ "can cast Spotify to this device now"
+      assert Spotify.enabled?()
+
+      html = view |> element("#toggle-spotify") |> render_click()
+
+      assert html =~ "can no longer reach this device"
+      refute Spotify.enabled?()
+    end
+
+    test "the menu says whether it is on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings")
+
+      assert has_element?(view, "#spotify-row", "Off")
     end
   end
 end

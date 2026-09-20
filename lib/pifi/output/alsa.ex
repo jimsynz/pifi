@@ -84,7 +84,26 @@ defmodule PiFi.Output.Alsa do
   """
   @impl PiFi.Output
   def sink_spec(device_id) do
-    %PiFi.Output.APlaySink{device: String.replace_prefix(device_id, "hw:", plug(device_id))}
+    %PiFi.Output.APlaySink{device: pcm_name(device_id)}
+  end
+
+  @doc """
+  The name that ALSA takes for one card.
+
+  `sink_spec/1` wraps this in a Membrane sink, and a program that is not Membrane
+  needs the name on its own: `PiFi.Spotify` hands it to librespot, which opens ALSA
+  itself and knows nothing about the pipeline of this firmware.
+
+  **It carries the `rate48` of a USB card**, which this board needs and which
+  `plug/1` explains, so a program that takes this name plays at the rate that the
+  card is held at rather than the rate that the audio arrived at.
+
+      iex> PiFi.Output.Alsa.pcm_name("hw:CARD=Audio,DEV=0")
+      "plughw:CARD=Audio,DEV=0"
+  """
+  @spec pcm_name(String.t()) :: String.t()
+  def pcm_name(device_id) do
+    String.replace_prefix(device_id, "hw:", plug(device_id))
   end
 
   # `plughw:` is a device of ALSA itself, so it needs no definition and a host has it

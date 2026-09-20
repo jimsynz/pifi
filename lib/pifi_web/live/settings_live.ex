@@ -17,6 +17,7 @@ defmodule PiFiWeb.SettingsLive do
       /settings/storage                a report
       /settings/firmware               the version that runs, and the one that could
       /settings/home-assistant         whether a house can see this device
+      /settings/spotify                whether a person can cast Spotify here
 
   **This page needs no knowledge of any source.** A source names its own settings
   with `c:PiFi.Source.settings/0`, and its own controls with
@@ -64,6 +65,7 @@ defmodule PiFiWeb.SettingsLive do
   alias PiFi.HomeAssistant
   alias PiFi.Peripheral
   alias PiFi.Source
+  alias PiFi.Spotify
   alias PiFi.SwitchOff
 
   @impl Phoenix.LiveView
@@ -175,6 +177,19 @@ defmodule PiFiWeb.SettingsLive do
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "There's nothing to install.")}
     end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("toggle_spotify", _params, socket) do
+    enabled? = not socket.assigns.spotify?
+    :ok = Spotify.enable(enabled?)
+
+    message =
+      if enabled?,
+        do: "You can cast Spotify to this device now.",
+        else: "Spotify can no longer reach this device."
+
+    {:noreply, socket |> assign(:spotify?, enabled?) |> put_flash(:info, message)}
   end
 
   @impl Phoenix.LiveView
@@ -416,6 +431,10 @@ defmodule PiFiWeb.SettingsLive do
         title="Home Assistant"
       >
         {if @home_assistant?, do: "On", else: "Off"}
+      </.row>
+
+      <.row id="spotify-row" to={~p"/settings/spotify"} icon="ph-spotify-logo" title="Spotify">
+        {if @spotify?, do: "On", else: "Off"}
       </.row>
     </div>
     """
@@ -1077,6 +1096,46 @@ defmodule PiFiWeb.SettingsLive do
     """
   end
 
+  # **A person reads the licence question here and nowhere else.** The moduledoc of
+  # `PiFi.Spotify` carries it for whoever changes the code, and this carries it for
+  # whoever presses the control, because they are the one taking the risk.
+  @impl Phoenix.LiveView
+  def render(%{live_action: :spotify} = assigns) do
+    ~H"""
+    <.section id="settings-spotify" title="Spotify" back={~p"/settings"}>
+      <p class="text-sm text-ink-dim">
+        This device appears in the Spotify app beside the speakers of your house, and
+        Spotify sends the music straight here.
+      </p>
+
+      <p class="mt-2 text-sm text-ink-dim">
+        It needs a Spotify Premium account.
+      </p>
+
+      <p class="mt-2 text-sm text-danger">
+        This uses librespot, which is not made by Spotify. That project says connecting
+        to Spotify this way is probably against their terms. Turning it on is your call.
+      </p>
+
+      <p class="mt-2 text-sm text-ink-dim">
+        The sound card plays one thing at a time, so stop the music here before you cast.
+      </p>
+
+      <div class="mt-4">
+        <button
+          id="toggle-spotify"
+          type="button"
+          phx-click="toggle_spotify"
+          aria-pressed={to_string(@spotify?)}
+          class={["control rounded-lg px-3 py-2 text-sm", if(@spotify?, do: "control-on", else: "")]}
+        >
+          {if @spotify?, do: "Disable", else: "Enable"}
+        </button>
+      </div>
+    </.section>
+    """
+  end
+
   attr(:usage, :list, required: true)
   attr(:used_bytes, :integer, required: true)
 
@@ -1337,6 +1396,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:storage, Device.storage!())
     |> assign(:upgrade, Device.upgrade!())
     |> assign(:home_assistant?, HomeAssistant.enabled?())
+    |> assign(:spotify?, Spotify.enabled?())
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())

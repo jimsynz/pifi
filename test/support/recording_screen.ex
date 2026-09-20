@@ -42,7 +42,8 @@ defmodule PiFi.Test.RecordingScreen do
   """
   @spec use_it(keyword()) :: :ok
   def use_it(opts \\ []) do
-    start_link([])
+    ensure_recorder()
+
     Agent.update(__MODULE__, fn state -> %{state | config: Keyword.merge(@pi_tft, opts)} end)
 
     Application.put_env(:circuits_spi, :default_backend, __MODULE__.Spi)
@@ -58,6 +59,35 @@ defmodule PiFi.Test.RecordingScreen do
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(_opts),
     do: Agent.start_link(fn -> %{entries: [], config: @pi_tft} end, name: __MODULE__)
+
+  # **The recorder belongs to the test that asked for it, and to no other.**
+  # `Agent.start_link/2` linked it to whichever test process called `use_it/1` first,
+  # and every test after that in the same file borrowed it. A first test that ended
+  # badly took the recorder down with it, and the rest of the file then failed on
+  # `no process` from a GPIO write — a flake that shows up on a loaded runner and
+  # nowhere else.
+  #
+  # `Agent.start/2` rather than `start_link/2`, so no test process can take it, and a
+  # stop of its own at the end of each test, so the next one begins with nothing of
+  # this one left. A name is one for the whole node, so a recorder that outlived its
+  # test would meet the next `use_it/1` as `already_started`.
+  defp ensure_recorder do
+    pid =
+      case Agent.start(fn -> %{entries: [], config: @pi_tft} end, name: __MODULE__) do
+        {:ok, pid} -> pid
+        {:error, {:already_started, pid}} -> pid
+      end
+
+    ExUnit.Callbacks.on_exit(fn -> halt(pid) end)
+  end
+
+  # The test that started it is gone by the time this runs, and another one may have
+  # stopped it already.
+  defp halt(pid) do
+    if Process.alive?(pid), do: Agent.stop(pid)
+  catch
+    :exit, _reason -> :ok
+  end
 
   @typedoc "One thing that the driver did."
   @type entry :: {:spi, String.t(), binary()} | {:gpio, 0 | 1} | {:backlight, 0 | 1}

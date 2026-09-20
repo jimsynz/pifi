@@ -282,6 +282,22 @@ Licence: Apache-2.0.
     before a device applies anything. **`PiFi.Device.Upgrade.Install` refuses a
     firmware that does not say `env=prod`**, and one that says nothing at all, because
     a device applies what it is given without asking a person twice.
+- **Spotify is librespot, and it is a push input and not a source.** `PiFi.Spotify`
+  supervises the daemon of `nbpr_librespot`. A telephone decides what plays, so
+  nothing here resolves a track or knows its length, and it appears in no browse tree.
+  Three things follow.
+  - **It listens**, so it follows the rule that `PiFi.Plex.Companion` follows: a
+    person turns it on and a device that no person asked opens nothing. The licence
+    question is on the settings page, in front of the person taking the risk.
+  - **The sound card holds one program at a time**, and nothing hands it over yet.
+    librespot says what it is doing through `--onevent`, which runs a program, and
+    busybox here has no `wget` and no `nc`, so a shell cannot reach the BEAM. Stopping
+    the music before casting is the rule until that mechanism exists.
+  - **librespot reads its name and its card once**, as arguments, so
+    `PiFi.Spotify.Monitor` starts it again when either changes. It asks
+    `PiFi.Output.Alsa.pcm_name/1` for the card and not `PiFi.Output.module/0`, because
+    librespot opens ALSA itself: the behaviour promises a Membrane sink and an output
+    that is not ALSA has no name to give.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `PiFi.Application` calls

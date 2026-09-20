@@ -48,6 +48,9 @@ defmodule PiFi.Application do
         # It listens on a port as well, and it starts with no child for the same
         # reason. See `PiFi.HomeAssistant`.
         PiFi.HomeAssistant,
+        # It listens as well, and it starts with no daemon for the same reason. See
+        # `PiFi.Spotify`.
+        PiFi.Spotify,
         PiFiWeb.Endpoint
       ] ++ listening_children() ++ target_children()
 
@@ -62,6 +65,7 @@ defmodule PiFi.Application do
       # `PiFi.Plex.Companion`.
       Companion.start_enabled()
       PiFi.HomeAssistant.start_enabled()
+      PiFi.Spotify.start_enabled()
 
       # The mDNS advertisement lives in memory, and the name of the device lives on the
       # card, so each boot says the name again. See `PiFi.Device.Identity`.
