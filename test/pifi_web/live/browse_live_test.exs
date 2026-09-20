@@ -182,6 +182,39 @@ defmodule PiFiWeb.BrowseLiveTest do
     Enum.find(Playback.list_items!(), &(&1.source_ref == "album-1"))
   end
 
+  defp jellyfin_tracks do
+    JellyfinFill.tracks([
+      %{
+        ref: "track-2",
+        title: "Risingson",
+        parent_ref: "album-1",
+        artwork_url: nil,
+        subtitle: nil,
+        duration_ms: 1000,
+        byte_size: 100,
+        number: 2,
+        format: :flac
+      },
+      %{
+        ref: "track-1",
+        title: "Angel",
+        parent_ref: "album-1",
+        artwork_url: nil,
+        subtitle: nil,
+        duration_ms: 1000,
+        byte_size: 100,
+        number: 1,
+        format: :flac
+      }
+    ])
+
+    items = Playback.list_items!()
+
+    Enum.map(["track-1", "track-2"], fn ref ->
+      Enum.find(items, &(&1.source_ref == ref))
+    end)
+  end
+
   describe "the branches of a source" do
     test "the page draws what the source names, in that order", %{conn: conn} do
       {:ok, _view, html} = live(conn, @radio)
@@ -571,6 +604,36 @@ defmodule PiFiWeb.BrowseLiveTest do
 
       assert html =~ "Playing"
       assert_receive %Events.Failed{reason: {:unsupported_format, _title}}, 2000
+    end
+
+    # **A container is no row of its own list.** A list of albums holds albums, so the
+    # queue of the visible list holds no track and a press used to reach the player with
+    # a container in it. See `PiFiWeb.ItemList`.
+    test "an album plays the tracks inside it, in the order of the album", %{conn: conn} do
+      PlayingPipeline.use_it()
+      SilentOutput.use_it()
+      album = jellyfin_album()
+      [one, two] = jellyfin_tracks()
+
+      {:ok, view, _html} = live(conn, "#{@jellyfin}/albums")
+      render_async(view, @async_wait)
+
+      html = view |> element("#play-#{album.id}") |> render_click()
+
+      assert html =~ "Playing Mezzanine."
+      assert Enum.map(Playback.queue!(), & &1.item_id) == [one.id, two.id]
+      assert Playback.queue_playing!().item_id == one.id
+    end
+
+    test "an album with no track says so", %{conn: conn} do
+      album = jellyfin_album()
+
+      {:ok, view, _html} = live(conn, "#{@jellyfin}/albums")
+      render_async(view, @async_wait)
+
+      html = view |> element("#play-#{album.id}") |> render_click()
+
+      assert html =~ "Nothing in Mezzanine to play."
     end
 
     test "a stop takes the marker off", %{conn: conn} do

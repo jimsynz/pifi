@@ -66,6 +66,7 @@ defmodule PiFiWeb.ItemList do
   alias PiFi.Event.Player, as: Events
   alias PiFi.Playback
   alias PiFi.Playback.Item
+  alias PiFi.Source
 
   import Phoenix.LiveView,
     only: [attach_hook: 4, connected?: 1, put_flash: 3]
@@ -1010,15 +1011,13 @@ defmodule PiFiWeb.ItemList do
   # A person means "play this, and then the rest of the list", so the list that they see
   # goes in the queue and the row that they pressed takes the mark.
   defp event("play", %{"id" => id}, socket) do
-    ids = queue_ids(socket, id)
+    case Playback.get_item(id) do
+      {:ok, %Item{kind: :container} = item} ->
+        play_from(socket, item, tracks_of(item))
 
-    with {:ok, item} <- Playback.get_item(id),
-         {:ok, :ok} <- Playback.play(ids, %{playing_index: Enum.find_index(ids, &(&1 == id))}) do
-      {:halt,
-       socket
-       |> Phoenix.Component.assign(:playing, %{item_id: item.id, status: :buffering})
-       |> put_flash(:info, "Playing #{item.title}.")}
-    else
+      {:ok, item} ->
+        play_from(socket, item, queue_ids(socket, item.id))
+
       {:error, reason} ->
         {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
     end
@@ -1042,12 +1041,13 @@ defmodule PiFiWeb.ItemList do
   # **Adding to the queue plays nothing and changes nothing that is playing.** A person
   # who presses this wants to hear the track after what is on now, so the row goes on
   # the end of the queue and the player carries on. It takes the one row that they
-  # pressed, and not the list around it: they chose a track, not a list.
+  # pressed, and not the list around it: they chose a track, not a list. A container
+  # is the exception, and it adds the tracks that are inside it.
   defp event("queue", %{"id" => id}, socket) do
-    with {:ok, item} <- Playback.get_item(id),
-         {:ok, _rows} <- Playback.append_to_queue([id]) do
-      {:halt, put_flash(socket, :info, "#{item.title} is next in the queue.")}
-    else
+    case Playback.get_item(id) do
+      {:ok, item} ->
+        queue_from(socket, item, tracks_of(item))
+
       {:error, reason} ->
         {:halt, put_flash(socket, :error, "Couldn't add that to the queue: #{inspect(reason)}")}
     end
@@ -1156,6 +1156,68 @@ defmodule PiFiWeb.ItemList do
     else
       {:error, reason} ->
         {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
+    end
+  end
+
+  defp play_from(socket, item, []) do
+    {:halt, put_flash(socket, :error, "Nothing in #{item.title} to play.")}
+  end
+
+  defp play_from(socket, item, ids) do
+    index = Enum.find_index(ids, &(&1 == item.id)) || 0
+
+    case Playback.play(ids, %{playing_index: index}) do
+      {:ok, :ok} ->
+        {:halt,
+         socket
+         |> Phoenix.Component.assign(:playing, %{item_id: Enum.at(ids, index), status: :buffering})
+         |> put_flash(:info, "Playing #{item.title}.")}
+
+      {:error, reason} ->
+        {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
+    end
+  end
+
+  defp queue_from(socket, item, []) do
+    {:halt, put_flash(socket, :error, "Nothing in #{item.title} to add.")}
+  end
+
+  defp queue_from(socket, item, ids) do
+    case Playback.append_to_queue(ids) do
+      {:ok, _rows} ->
+        {:halt, put_flash(socket, :info, "#{item.title} is next in the queue.")}
+
+      {:error, reason} ->
+        {:halt, put_flash(socket, :error, "Couldn't add that to the queue: #{inspect(reason)}")}
+    end
+  end
+
+  # **A container is no row of its own list, so it gives what is inside it.** A genre
+  # lists albums, and the tracks of an album are a level below: the visible list holds
+  # no track at all, so the queue used to be the album itself and the player answered
+  # with an error that named a container.
+  #
+  # The tracks read in the order that the source names, which is the order that a
+  # person sees when they open it. See `c:PiFi.Source.listing/1`.
+  #
+  # A container of containers gives nothing, and an artist therefore plays no
+  # discography. That is the rule that the head of a collection follows as well: see
+  # `collection_header/1` of `PiFiWeb.BrowseLive`.
+  defp tracks_of(%Item{kind: :container} = item) do
+    Item
+    |> Ash.Query.filter(parent_id == ^item.id and kind == :track)
+    |> Ash.Query.sort(inside_sort(item))
+    |> Ash.Query.limit(@queue_limit)
+    |> Ash.read!()
+    |> Enum.map(& &1.id)
+  end
+
+  defp tracks_of(item), do: [item.id]
+
+  defp inside_sort(item) do
+    case Source.from_slug(item.source) do
+      {:ok, module} -> Source.inside(module, item)[:sort] || []
+      {:error, _reason} -> []
     end
   end
 
