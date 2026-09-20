@@ -16,6 +16,7 @@ defmodule PiFiWeb.SettingsLive do
       /settings/network                a report
       /settings/storage                a report
       /settings/firmware               the version that runs, and the one that could
+      /settings/home-assistant         whether a house can see this device
 
   **This page needs no knowledge of any source.** A source names its own settings
   with `c:PiFi.Source.settings/0`, and its own controls with
@@ -60,6 +61,7 @@ defmodule PiFiWeb.SettingsLive do
   alias PiFi.Event
   alias PiFi.Event.Device, as: Events
   alias PiFi.Hardware
+  alias PiFi.HomeAssistant
   alias PiFi.Peripheral
   alias PiFi.Source
   alias PiFi.SwitchOff
@@ -173,6 +175,19 @@ defmodule PiFiWeb.SettingsLive do
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "There's nothing to install.")}
     end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("toggle_home_assistant", _params, socket) do
+    enabled? = not socket.assigns.home_assistant?
+    :ok = HomeAssistant.enable(enabled?)
+
+    message =
+      if enabled?,
+        do: "Home Assistant can see this device now.",
+        else: "Home Assistant can no longer see this device."
+
+    {:noreply, socket |> assign(:home_assistant?, enabled?) |> put_flash(:info, message)}
   end
 
   @impl Phoenix.LiveView
@@ -392,6 +407,15 @@ defmodule PiFiWeb.SettingsLive do
         title="Firmware"
       >
         {firmware_summary(@upgrade)}
+      </.row>
+
+      <.row
+        id="home-assistant-row"
+        to={~p"/settings/home-assistant"}
+        icon="ph-house-line"
+        title="Home Assistant"
+      >
+        {if @home_assistant?, do: "On", else: "Off"}
       </.row>
     </div>
     """
@@ -1019,6 +1043,40 @@ defmodule PiFiWeb.SettingsLive do
     """
   end
 
+  # **This opens a port**, so the page says which one and what a person gets for it.
+  # See `PiFi.HomeAssistant`.
+  @impl Phoenix.LiveView
+  def render(%{live_action: :home_assistant} = assigns) do
+    ~H"""
+    <.section id="settings-home-assistant" title="Home Assistant" back={~p"/settings"}>
+      <p class="text-sm text-ink-dim">
+        Home Assistant finds this device on your network and draws it as a media player,
+        so it can go on a dashboard and an automation can pause the music.
+      </p>
+
+      <p class="mt-2 text-sm text-ink-dim">
+        The device listens on port {HomeAssistant.port()} while this is on, and on no
+        port at all while it is off.
+      </p>
+
+      <div class="mt-4">
+        <button
+          id="toggle-home-assistant"
+          type="button"
+          phx-click="toggle_home_assistant"
+          aria-pressed={to_string(@home_assistant?)}
+          class={[
+            "control rounded-lg px-3 py-2 text-sm",
+            if(@home_assistant?, do: "control-on", else: "")
+          ]}
+        >
+          {if @home_assistant?, do: "Disable", else: "Enable"}
+        </button>
+      </div>
+    </.section>
+    """
+  end
+
   attr(:usage, :list, required: true)
   attr(:used_bytes, :integer, required: true)
 
@@ -1278,6 +1336,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:interfaces, Device.network!())
     |> assign(:storage, Device.storage!())
     |> assign(:upgrade, Device.upgrade!())
+    |> assign(:home_assistant?, HomeAssistant.enabled?())
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())

@@ -45,6 +45,9 @@ defmodule PiFi.Application do
         # `start_enabled/0` below starts the listener. A port that another program holds
         # must not stop the boot. See `PiFi.Plex.Companion`.
         Companion,
+        # It listens on a port as well, and it starts with no child for the same
+        # reason. See `PiFi.HomeAssistant`.
+        PiFi.HomeAssistant,
         PiFiWeb.Endpoint
       ] ++ listening_children() ++ target_children()
 
@@ -58,6 +61,7 @@ defmodule PiFi.Application do
       # turns it on, so a device that no person asked holds the port closed. See
       # `PiFi.Plex.Companion`.
       Companion.start_enabled()
+      PiFi.HomeAssistant.start_enabled()
 
       # The mDNS advertisement lives in memory, and the name of the device lives on the
       # card, so each boot says the name again. See `PiFi.Device.Identity`.

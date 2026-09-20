@@ -10,6 +10,7 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias PiFi.Device.Upgrade.Server, as: UpgradeServer
   alias PiFi.Event
   alias PiFi.Event.Device, as: Events
+  alias PiFi.HomeAssistant
   alias PiFi.Output.Volume
   alias PiFi.Peripheral
   alias PiFi.Podcast.Index
@@ -1150,6 +1151,51 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       assert view |> element("#check-for-upgrade") |> render_click() =~
                "Couldn&#39;t reach the forge"
+    end
+  end
+
+  # **This opens a port**, so it follows the rule that the Plex player follows: a
+  # device that no person changed holds it closed. See `PiFi.HomeAssistant`.
+  describe "the Home Assistant section" do
+    setup do
+      on_exit(fn ->
+        HomeAssistant.enable(false)
+
+        case Settings.fetch(HomeAssistant.enabled_key()) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "a device that no person changed says off", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/home-assistant")
+
+      assert has_element?(view, "#toggle-home-assistant[aria-pressed='false']")
+      assert render(view) =~ to_string(HomeAssistant.port())
+    end
+
+    test "a person turns it on and off again", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/home-assistant")
+
+      html = view |> element("#toggle-home-assistant") |> render_click()
+
+      assert html =~ "can see this device now"
+      assert HomeAssistant.enabled?()
+      assert has_element?(view, "#toggle-home-assistant[aria-pressed='true']")
+
+      html = view |> element("#toggle-home-assistant") |> render_click()
+
+      assert html =~ "can no longer see this device"
+      refute HomeAssistant.enabled?()
+    end
+
+    test "the menu says whether it is on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings")
+
+      assert has_element?(view, "#home-assistant-row", "Off")
     end
   end
 end

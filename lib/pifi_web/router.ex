@@ -64,6 +64,7 @@ defmodule PiFiWeb.Router do
     live("/settings/network", SettingsLive, :network)
     live("/settings/storage", SettingsLive, :storage)
     live("/settings/firmware", SettingsLive, :firmware)
+    live("/settings/home-assistant", SettingsLive, :home_assistant)
     get("/artwork/:name", ArtworkController, :show)
     get("/artwork/:name/thumbnail", ArtworkController, :thumbnail)
   end

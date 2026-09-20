@@ -260,6 +260,20 @@ Licence: Apache-2.0.
   `PiFi.Device.Upgrade.Install` writes the file to `/root`, checks the digest, and hands
   it to `fwup --task upgrade`. **A device never upgrades by itself**: a stereo that
   restarted in the middle of a record is one that a person stops trusting.
+- **Home Assistant sees this device over the ESPHome protocol, and not over MQTT.**
+  Home Assistant has no MQTT media player: its MQTT integration serves lights, switches
+  and two dozen other platforms, and a player is not one of them. Its ESPHome
+  integration does serve one, so `PiFi.HomeAssistant` answers the native API and Home
+  Assistant discovers the device as a node. Three things follow.
+  - **`homex` comes from a branch of a fork**, because the media player entity is ours
+    and it is not upstream yet. See <https://github.com/jimsynz/homex>.
+  - **It listens on TCP 6053**, so it is the second listener of this firmware and it
+    follows the rule that `PiFi.Plex.Companion` follows: a person turns it on, and a
+    device that no person asked holds the port closed.
+  - **`muontrap` is overridden to `~> 1.8`.** `homex` names `~> 2.0` and
+    `nerves_time`, `vintage_net` and `nbpr` all name `~> 1.0`. Nothing here reaches the
+    code that needs the newer one: `homex` uses `muontrap` for its `:system` mDNS
+    responder alone, and this firmware names `:mdns_lite`.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `PiFi.Application` calls

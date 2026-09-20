@@ -118,6 +118,23 @@ defmodule PiFi.MixProject do
       # is the project that must ask for it.
       {:circuits_gpio, "~> 2.1"},
       {:circuits_i2c, "~> 2.1"},
+      # Home Assistant discovers this device as an ESPHome node and talks to it over
+      # the native API. **Not over MQTT**: Home Assistant has no MQTT media player, so
+      # a player has to speak the other protocol. `PiFi.HomeAssistant` says more.
+      #
+      # `homex` points at a branch of a fork, because the media player entity is ours
+      # and it is not upstream yet. Both packages are Elixir alone: `espex` needs
+      # `protobuf` and `thousand_island`, and this firmware already holds the second
+      # through Bandit. `emqtt` of `homex` is optional and this project asks for none
+      # of it, which matters because that one holds native code.
+      {:espex, "~> 0.9"},
+      {:homex, github: "jimsynz/homex", branch: "feat/media-player-entity"},
+      # **`homex` names `muontrap ~> 2.0` and this firmware is on 1.8**, because
+      # `nerves_time`, `vintage_net` and `nbpr` all name `~> 1.0`. The override is safe
+      # because nothing here reaches the code that needs it: `homex` uses `muontrap` for
+      # its `:system` mDNS responder alone, and `PiFi.HomeAssistant` names `:mdns_lite`,
+      # which is the responder that a Nerves device wants in any case.
+      {:muontrap, "~> 1.8", override: true},
       {:circuits_spi, "~> 2.1"},
       # `membrane_core` needs `ratio`, and `ratio` names
       # `decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`, so the
