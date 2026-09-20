@@ -103,6 +103,25 @@ defmodule PiFi.Device.UpgradeTest do
       assert Device.upgrade!().checked_at
     end
 
+    # **The read has to finish inside the call that `PiFi.Device.Upgrade.Server`
+    # makes.** `Req` retries a transient fault three times by default, and at the 20
+    # seconds an attempt that this used to allow the worst case was 87 seconds against
+    # a call that waits 30. The forge went quiet, the call timed out, and the caller
+    # died: the page of the person who pressed the control, or the job of the schedule.
+    test "a forge that will not answer gives up rather than outlast the caller" do
+      counter = :counters.new(1, [])
+
+      forge(fn conn ->
+        :counters.add(counter, 1, 1)
+        Req.Test.transport_error(conn, :econnrefused)
+      end)
+
+      assert {:error, _reason} = Device.check_for_upgrade()
+
+      # One attempt and one retry, and no more.
+      assert :counters.get(counter, 1) == 2
+    end
+
     test "a check tells every open page" do
       Event.subscribe(:device)
       version = later_than_running()

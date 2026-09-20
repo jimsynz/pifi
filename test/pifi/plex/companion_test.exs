@@ -736,9 +736,12 @@ defmodule PiFi.Plex.CompanionTest do
     # A person names their device, and a name holds whatever they typed. An attribute
     # of XML holds neither a quotation mark nor an ampersand.
     test "a name that holds an ampersand does not break the XML" do
+      was = Identity.name()
       Identity.put_name("Tea & Toast")
 
-      on_exit(fn -> Identity.put_name("") end)
+      # `put_name("")` is refused, because a device needs a name, so a test that reset
+      # it that way left its own name behind for every test after it.
+      on_exit(fn -> Identity.put_name(was) end)
 
       body = call("/resources").resp_body
 

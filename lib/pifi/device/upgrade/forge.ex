@@ -19,7 +19,16 @@ defmodule PiFi.Device.Upgrade.Forge do
 
   alias PiFi.Device.Upgrade
 
-  @timeout :timer.seconds(20)
+  # **The whole read has to finish inside the call that `PiFi.Device.Upgrade.Server`
+  # makes**, which waits 30 seconds. `Req` retries a transient fault three times by
+  # default and backs off between them, so 20 seconds an attempt came to 87 seconds in
+  # the worst case: the forge went quiet, the call timed out, and the **caller** died —
+  # the page of the person who pressed the control, or the job of the schedule. One
+  # retry of 8 seconds with a second between them is 17, and a forge that cannot answer
+  # in 8 seconds is one to ask again tomorrow.
+  @timeout :timer.seconds(8)
+  @retries 1
+  @retry_delay :timer.seconds(1)
 
   @typedoc """
   What the forge says about the newest release.
@@ -109,7 +118,12 @@ defmodule PiFi.Device.Upgrade.Forge do
   # it, and the settings page would then answer nothing at all.
   defp request(options) do
     options
-    |> Keyword.merge(receive_timeout: @timeout, retry: :transient)
+    |> Keyword.merge(
+      receive_timeout: @timeout,
+      retry: :transient,
+      max_retries: @retries,
+      retry_delay: @retry_delay
+    )
     |> Keyword.merge(Application.get_env(:pifi, __MODULE__, []))
     |> Req.new()
     |> Req.get()

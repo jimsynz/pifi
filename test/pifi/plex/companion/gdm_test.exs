@@ -68,9 +68,14 @@ defmodule PiFi.Plex.Companion.GdmTest do
       assert headers(answer)["Protocol-Capabilities"] == Companion.capabilities()
     end
 
+    # **The name is in `Nerves.Runtime.KV` and no sandbox rolls that back**, so a test
+    # that changes it has to put the old one back. `put_name("")` does not do that: a
+    # device needs a name, so the empty string is refused and the name of this test
+    # leaks into every test that runs after it.
     test "the name is the one that a person gave the device", %{socket: socket} do
+      was = Identity.name()
       Identity.put_name("Kitchen")
-      on_exit(fn -> Identity.put_name("") end)
+      on_exit(fn -> Identity.put_name(was) end)
 
       {:ok, {_address, _port, answer}} = search(socket)
 
