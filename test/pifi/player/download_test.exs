@@ -21,11 +21,38 @@ defmodule PiFi.Player.DownloadTest do
     clean.()
 
     on_exit(fn ->
+      drained()
       Application.delete_env(:pifi, Download)
       clean.()
     end)
 
     :ok
+  end
+
+  # **A download outlives the test that started it**, because it answers its watchers
+  # before it stops and because a read that was refused waits and asks again. A process
+  # left over from one test is the process that the next one joins, and the requests it
+  # makes are counted against that test. Two tests here failed that way, and only in a
+  # full run.
+  # **It waits and it does not kill.** The request runs in a process of its own that
+  # nothing links to, so a download that is killed leaves that request in flight, and it
+  # answers the stub of whichever test is running by then. A download that stops of its
+  # own accord has already had its answer.
+  defp drained(tries \\ 400)
+
+  defp drained(0) do
+    flunk("a download was still running when the test ended")
+  end
+
+  defp drained(tries) do
+    case Registry.lookup(PiFi.Player.Download.Registry, @id) do
+      [] ->
+        :ok
+
+      _running ->
+        Process.sleep(5)
+        drained(tries - 1)
+    end
   end
 
   defp serve(body, options \\ []) do
@@ -195,6 +222,90 @@ defmodule PiFi.Player.DownloadTest do
       await({:error, {:short_read, 99, 5}})
 
       assert File.read!(Path.join(Download.directory(), @id)) == "short"
+    end
+  end
+
+  # **A Plex server closes a connection when it has too many at once**, and this device
+  # gives it several: a person plays a track while a mark reads a whole discography. The
+  # read of the track died for that, and the pipeline with it, so the music stopped.
+  describe "a connection that closes part way" do
+    setup do
+      # The wait between attempts is real time, so these keep it short.
+      Application.put_env(:pifi, :download_backoff_ms, 10)
+      on_exit(fn -> Application.delete_env(:pifi, :download_backoff_ms) end)
+
+      :ok
+    end
+
+    # **Each attempt runs in a process of its own**, because the request is spawned, so
+    # the count of them lives outside all of them.
+    #
+    # The request that resumes from part of a file is what `a read that continues`
+    # covers. This one is about the asking again at all: the read used to end here and
+    # take the pipeline with it.
+    test "it asks again, and the file ends up whole" do
+      attempts = :counters.new(1, [])
+      test = self()
+
+      Req.Test.stub(Download, fn conn ->
+        send(test, :asked)
+
+        case :counters.get(attempts, 1) do
+          0 ->
+            :counters.add(attempts, 1, 1)
+            Req.Test.transport_error(conn, :closed)
+
+          _later ->
+            Plug.Conn.send_resp(conn, 200, "the whole thing")
+        end
+      end)
+
+      start()
+      await(:done, 5_000)
+
+      assert asks() == 2
+
+      assert {:ok, entry} = Cache.fetch(Download.namespace(), @id)
+      assert File.read!(Path.join(Cache.directory(), entry.key)) == "the whole thing"
+    end
+
+    # **A fault that is about the thing and not the connection gives the same answer
+    # however many times it is asked**, so asking again only makes a person wait.
+    test "a status that this device did not expect is not asked again" do
+      test = self()
+
+      Req.Test.stub(Download, fn conn ->
+        send(test, :asked)
+        Plug.Conn.send_resp(conn, 403, "go away")
+      end)
+
+      start()
+      await({:error, {:unexpected_status, 403}})
+
+      assert_received :asked
+      refute_received :asked
+    end
+
+    test "it gives up rather than asking for ever" do
+      test = self()
+
+      Req.Test.stub(Download, fn conn ->
+        send(test, :asked)
+        Req.Test.transport_error(conn, :closed)
+      end)
+
+      start()
+      await({:error, %Req.TransportError{reason: :closed}}, 5_000)
+
+      assert asks() <= 5
+    end
+  end
+
+  defp asks(counted \\ 0) do
+    receive do
+      :asked -> asks(counted + 1)
+    after
+      0 -> counted
     end
   end
 

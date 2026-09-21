@@ -43,6 +43,19 @@ defmodule PiFi.Player.Download do
   A watcher gets `{:download, {:bytes, count}}` as the file grows,
   `{:download, :done}` when the file is whole and in the cache, and
   `{:download, {:error, reason}}` when it is not.
+
+  ## A connection that closes is not a read that failed
+
+  **The request carries a range, so a read resumes.** A server that closes the
+  connection part way through costs the bytes it had not sent and nothing else: the next
+  request asks for the rest, and the file grows from where it stopped.
+
+  A Plex server closes one when it has too many at once, and this device gives it
+  several — a person plays a track while a mark reads a whole discography. The read of
+  the track used to end there, `PiFi.Player.FileSource` raised on the error, and the
+  music stopped. `resumable?/1` names the faults that are worth asking again for: a
+  transport fault says something about the connection, and a status, a short read and a
+  card that will not take the bytes all say something about the thing itself.
   """
 
   use GenServer, restart: :temporary
@@ -66,6 +79,20 @@ defmodule PiFi.Player.Download do
   @registry PiFi.Player.Download.Registry
   @supervisor PiFi.Player.Download.Supervisor
   @timeout :timer.seconds(60)
+
+  # **A range request is what makes a read resumable, and this file already makes one.**
+  # A server that closes the connection part way through therefore costs the bytes it
+  # had not sent and nothing else: the next request asks for the rest.
+  #
+  # A Plex server closes one when it has too many at once, and this device gives it
+  # several — a person plays a track while a mark reads a whole discography. The read of
+  # the track used to die for that, and the pipeline with it, so the music stopped.
+  #
+  # Four attempts, and the wait grows by one step each time, so a server that is busy
+  # gets 2, 4 and 6 seconds to recover. The audio does not stop while this waits: the
+  # card holds what has already arrived and `aplay` holds about half a second more.
+  @attempts 4
+  @backoff_ms 2_000
   @user_agent "PiFi/0.1 (+https://harton.dev/mypihifiguy/myhifi)"
 
   defmodule State do
@@ -79,10 +106,21 @@ defmodule PiFi.Player.Download do
             written: non_neg_integer(),
             watchers: [pid()],
             told_at: integer() | nil,
+            attempts: non_neg_integer(),
             done?: boolean()
           }
 
-    defstruct [:id, :uri, :path, :request, :told_at, written: 0, watchers: [], done?: false]
+    defstruct [
+      :id,
+      :uri,
+      :path,
+      :request,
+      :told_at,
+      written: 0,
+      attempts: 0,
+      watchers: [],
+      done?: false
+    ]
   end
 
   @doc """
@@ -205,7 +243,16 @@ defmodule PiFi.Player.Download do
     written = state.written + count
     tell(state, {:bytes, written})
 
-    {:noreply, announce(%State{state | written: written})}
+    # Bytes arriving mean the server is answering again, so a later fault gets a fresh
+    # count of attempts and a long read over a poor link is not cut off by an early one.
+    {:noreply, announce(%State{state | written: written, attempts: 0})}
+  end
+
+  # The wait after a connection that closed. `written` is what the card holds, so the
+  # new request asks for the rest and the file grows from where it stopped.
+  @impl GenServer
+  def handle_info(:again, %State{} = state) do
+    {:noreply, %State{state | request: request(state, state.written)}}
   end
 
   # The request truncated the file and began again, because the server ignored the
@@ -381,7 +428,36 @@ defmodule PiFi.Player.Download do
   end
 
   defp finish({:error, reason}, %State{} = state) do
-    {:stop, {:shutdown, reason}, fail(state, reason)}
+    if resumable?(reason) and state.attempts < @attempts do
+      again(state, reason)
+    else
+      {:stop, {:shutdown, reason}, fail(state, reason)}
+    end
+  end
+
+  # **A transport fault says nothing about the file, only about the connection.** A
+  # status that this device did not expect, a short read and a card that will not take
+  # the bytes are all answers about the thing itself, and asking again would give the
+  # same one.
+  # A test gives a small number, because the wait is real time and the suite is not.
+  defp backoff(attempts) do
+    Application.get_env(:pifi, :download_backoff_ms, @backoff_ms) * attempts
+  end
+
+  defp resumable?(%Req.TransportError{}), do: true
+  defp resumable?(_reason), do: false
+
+  defp again(%State{} = state, reason) do
+    attempts = state.attempts + 1
+
+    Logger.info(
+      "The read of #{state.uri} stopped at #{state.written} bytes: #{inspect(reason)}. " <>
+        "Asking for the rest in #{backoff(attempts)} ms."
+    )
+
+    Process.send_after(self(), :again, backoff(attempts))
+
+    {:noreply, %State{state | attempts: attempts}}
   end
 
   # The bytes that arrived against the bytes that the answer named. This is the
