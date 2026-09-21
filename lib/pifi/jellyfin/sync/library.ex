@@ -68,10 +68,16 @@ defmodule PiFi.Jellyfin.Sync.Library do
   alias PiFi.Jellyfin.Fill
   alias PiFi.Jellyfin.Server
   alias PiFi.Jellyfin.Sync.Checkpoint
+  alias PiFi.Jellyfin.Sync.Survey
   alias PiFi.Playback.Item
+  alias PiFi.Settings
   alias PiFi.Source
 
   @kinds [:artists, :albums, :tracks]
+
+  # When the last whole read finished, and how long a survey may stand in for one.
+  @whole_read_key "jellyfin.library.whole_read_at"
+  @whole_read_after 7 * 24 * 60 * 60
 
   # How old a point may be and still serve. A read takes about 88 minutes, and
   # `PiFi.AutoSync` runs the work again within the hour, so a point of any use is
@@ -90,13 +96,59 @@ defmodule PiFi.Jellyfin.Sync.Library do
     end
   end
 
+  # **Most days a library gained nothing**, and a read of the whole of one is 88 minutes
+  # and tens of thousands of writes that everything else on this device queues behind.
+  # `PiFi.Jellyfin.Sync.Survey` asks three cheap questions first and says which of these
+  # three is needed. See that module for what a count cannot see.
   defp sync do
+    with {:ok, link} <- Server.link() do
+      case survey(link) do
+        :nothing -> unchanged()
+        {:added, entries} -> added(entries)
+        :everything -> whole(link)
+      end
+    end
+  end
+
+  # **A whole read happens on a clock of its own whatever the survey says.** A library
+  # that gained one record and lost another counts the same, and an edit changes no
+  # count at all, so a survey that was always trusted would let those drift for ever.
+  defp survey(link) do
+    if due_for_a_whole_read?(), do: :everything, else: Survey.take(link)
+  end
+
+  defp unchanged do
+    Logger.info("The Jellyfin library is as this device last read it.")
+
+    {:ok, empty(%{})}
+  end
+
+  # An addition is the one case that needs no removal: the survey saw the server holding
+  # at least as many of every kind, so nothing went.
+  defp added(entries) do
+    counts = Map.new(@kinds, &{&1, fill(&1, Map.get(entries, &1, []))})
+
+    Logger.info(
+      "The Jellyfin library gained #{counts.artists} artists, #{counts.albums} albums " <>
+        "and #{counts.tracks} tracks."
+    )
+
+    announce()
+
+    {:ok, empty(counts)}
+  end
+
+  defp empty(counts) do
+    Map.merge(%{artists: 0, albums: 0, tracks: 0, removed: 0, skipped?: false}, counts)
+  end
+
+  defp whole(link) do
     %{started_at: started_at, kind: kind, offset: offset} = start_point()
 
-    with {:ok, link} <- Server.link(),
-         {:ok, counts} <- read_from(kind, offset, started_at, link) do
+    with {:ok, counts} <- read_from(kind, offset, started_at, link) do
       gone = remove_unseen(started_at)
       forget_point()
+      whole_read_done()
       announce()
 
       Logger.info(
@@ -104,8 +156,31 @@ defmodule PiFi.Jellyfin.Sync.Library do
           "and #{counts.tracks} tracks, and #{gone} items are no longer on the server."
       )
 
-      {:ok, Map.merge(counts, %{removed: gone, skipped?: false})}
+      {:ok, empty(Map.put(counts, :removed, gone))}
     end
+  end
+
+  # A survey is an optimisation and a whole read is the truth, so one happens on a clock
+  # however quiet the library looks. A week is long enough that the saving is nearly all
+  # of it, and short enough that a rename is not wrong for a month.
+  defp due_for_a_whole_read? do
+    case Settings.fetch(@whole_read_key) do
+      {:ok, %{value: value}} -> older_than_a_week?(value)
+      {:error, _reason} -> true
+    end
+  end
+
+  defp older_than_a_week?(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, at, _offset} -> DateTime.diff(DateTime.utc_now(), at, :second) >= @whole_read_after
+      {:error, _reason} -> true
+    end
+  end
+
+  defp whole_read_done do
+    Settings.put(@whole_read_key, DateTime.to_iso8601(DateTime.utc_now()))
+
+    :ok
   end
 
   # **The time of the read carries over, and it must.** `remove_unseen/1` removes each

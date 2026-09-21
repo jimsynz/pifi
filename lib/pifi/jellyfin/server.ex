@@ -350,17 +350,26 @@ defmodule PiFi.Jellyfin.Server do
   A caller that read the link already passes it as the third argument, so a loop
   of many pages makes one read of the settings and not four for each one.
   """
-  @spec page(:artists | :albums | :tracks, non_neg_integer(), map() | nil) ::
+  @spec page(:artists | :albums | :tracks, non_neg_integer(), map() | nil, keyword()) ::
           {:ok, page()} | {:error, term()}
-  def page(kind, start, link \\ nil)
+  def page(kind, start, link \\ nil, options \\ [])
 
-  def page(kind, start, nil) do
-    with {:ok, link} <- link(), do: page(kind, start, link)
+  def page(kind, start, nil, options) do
+    with {:ok, link} <- link(), do: page(kind, start, link, options)
   end
 
-  def page(kind, start, %{address: address, token: token, user_id: user_id, device_id: device_id}) do
+  def page(kind, start, link, options) do
+    %{address: address, token: token, user_id: user_id, device_id: device_id} = link
+
     with {:ok, body} <-
-           request(:get, address, token, device_id, "/Items", params(kind, user_id, start)) do
+           request(
+             :get,
+             address,
+             token,
+             device_id,
+             "/Items",
+             params(kind, user_id, start, options)
+           ) do
       items = Map.get(body, "Items", [])
 
       {:ok,
@@ -370,6 +379,20 @@ defmodule PiFi.Jellyfin.Server do
          total: Map.get(body, "TotalRecordCount", 0)
        }}
     end
+  end
+
+  @doc """
+  How many of one kind the server holds, and nothing else.
+
+  **This is the cheapest question a sync can ask.** It reads one entry so that the
+  answer carries `TotalRecordCount`, and a library of tens of thousands costs the same
+  as a library of one. `PiFi.Jellyfin.Sync.Survey` compares it with what this device
+  holds to decide whether there is any work at all.
+  """
+  @spec count(:artists | :albums | :tracks, map() | nil) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def count(kind, link \\ nil) do
+    with {:ok, %{total: total}} <- page(kind, 0, link, size: 1), do: {:ok, total}
   end
 
   @doc "How many entries one page of `page/2` carries."
@@ -561,15 +584,23 @@ defmodule PiFi.Jellyfin.Server do
     end
   end
 
-  defp params(kind, user_id, start) do
+  # `newest: true` asks for the order that a survey walks: what the server took in last,
+  # first. `SortName` is what a whole read wants, because it is stable and a read that
+  # resumes must not find the list reordered under it.
+  defp params(kind, user_id, start, options) do
+    {sort, order} =
+      if Keyword.get(options, :newest, false),
+        do: {"DateCreated", "Descending"},
+        else: {"SortName", "Ascending"}
+
     [
       {"UserId", user_id},
       {"IncludeItemTypes", item_type(kind)},
       {"Recursive", "true"},
-      {"SortBy", "SortName"},
-      {"SortOrder", "Ascending"},
+      {"SortBy", sort},
+      {"SortOrder", order},
       {"StartIndex", start},
-      {"Limit", @page}
+      {"Limit", Keyword.get(options, :size, @page)}
     ] ++ fields(kind)
   end
 

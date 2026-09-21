@@ -54,6 +54,9 @@ defmodule PiFi.Jellyfin.SyncTest do
     }
   end
 
+  defp newest_first(items, "DateCreated"), do: Enum.reverse(items)
+  defp newest_first(items, _sort), do: items
+
   # The server answers each listing from its own list, and it reads `StartIndex` and
   # `Limit` in the way that Jellyfin does, so a test can measure the paging.
   defp stub_library(library) do
@@ -63,7 +66,15 @@ defmodule PiFi.Jellyfin.SyncTest do
       conn = Plug.Conn.fetch_query_params(conn)
       send(test, {:request, conn.params["IncludeItemTypes"], conn.params["StartIndex"]})
 
-      items = Map.get(library, conn.params["IncludeItemTypes"], [])
+      # **The listing of a test is in the order that things were added**, so the newest
+      # is last. A survey asks for `DateCreated` descending and reads until it meets
+      # something it knows, and a stub that ignored the sort would hand it the oldest
+      # first and it would stop at once. See `PiFi.Jellyfin.Sync.Survey`.
+      items =
+        library
+        |> Map.get(conn.params["IncludeItemTypes"], [])
+        |> newest_first(conn.params["SortBy"])
+
       start = String.to_integer(conn.params["StartIndex"])
       limit = String.to_integer(conn.params["Limit"])
 
@@ -89,6 +100,92 @@ defmodule PiFi.Jellyfin.SyncTest do
     |> Ash.Query.filter(^filter)
     |> Ash.Query.sort(title: :asc)
     |> Ash.read!()
+  end
+
+  # **A read of 67,508 items took 88 minutes**, and it ran every day whether a person
+  # had added a record or not. These cover the three answers of
+  # `PiFi.Jellyfin.Sync.Survey` and the one it must never get wrong, which is removing
+  # a library that is still there.
+  describe "a library that a person did not change" do
+    setup do
+      on_exit(fn ->
+        case PiFi.Settings.fetch("jellyfin.library.whole_read_at") do
+          {:ok, setting} -> PiFi.Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "is read once and then left alone" do
+      library = %{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1)]
+      }
+
+      stub_library(library)
+      assert {:ok, first} = Jellyfin.sync_library()
+      assert first.tracks == 1
+
+      stub_library(library)
+      assert {:ok, second} = Jellyfin.sync_library()
+
+      assert second.artists == 0
+      assert second.tracks == 0
+      assert second.removed == 0
+
+      # Everything is still here. A survey that removed what it did not read would have
+      # emptied the catalogue.
+      assert length(items(expr(kind == :track))) == 1
+    end
+
+    test "and gaining a record writes that one alone" do
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1)]
+      })
+
+      assert {:ok, _first} = Jellyfin.sync_library()
+
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1), track(2, 1)]
+      })
+
+      assert {:ok, second} = Jellyfin.sync_library()
+
+      assert second.tracks == 1
+      assert second.removed == 0
+      assert length(items(expr(kind == :track))) == 2
+    end
+
+    # **This is the one a survey must never get wrong.** A count smaller than the card
+    # holds means something went, and only a whole read can say what.
+    test "and losing one is read in full, so the one that went is removed" do
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1), track(2, 1)]
+      })
+
+      assert {:ok, _first} = Jellyfin.sync_library()
+      assert length(items(expr(kind == :track))) == 2
+
+      stub_library(%{
+        "MusicArtist" => [artist(1)],
+        "MusicAlbum" => [album(1, 1)],
+        "Audio" => [track(1, 1)]
+      })
+
+      assert {:ok, second} = Jellyfin.sync_library()
+
+      assert second.removed >= 1
+      assert length(items(expr(kind == :track))) == 1
+    end
   end
 
   describe "the genres of a record" do
