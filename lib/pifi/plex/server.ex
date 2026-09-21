@@ -491,19 +491,23 @@ defmodule PiFi.Plex.Server do
   A caller that read the link already passes it as the fourth argument, so a loop of
   many pages makes one read of the settings and not three for each one.
   """
-  @spec page(:artists | :albums | :tracks, String.t(), non_neg_integer(), map() | nil) ::
+  @spec page(:artists | :albums | :tracks, String.t(), non_neg_integer(), map() | nil, keyword()) ::
           {:ok, page()} | {:error, term()}
-  def page(kind, section, start, link \\ nil)
+  def page(kind, section, start, link \\ nil, options \\ [])
 
-  def page(kind, section, start, nil) do
-    with {:ok, link} <- link(), do: page(kind, section, start, link)
+  def page(kind, section, start, nil, options) do
+    with {:ok, link} <- link(), do: page(kind, section, start, link, options)
   end
 
-  def page(kind, section, start, %{address: address, token: token, client_id: client_id}) do
+  def page(kind, section, start, %{address: address, token: token, client_id: client_id}, options) do
+    size = Keyword.get(options, :size, @page)
+
     paging = [
       {"x-plex-container-start", to_string(start)},
-      {"x-plex-container-size", to_string(@page)}
+      {"x-plex-container-size", to_string(size)}
     ]
+
+    query = [{"type", item_type(kind)}] ++ sort(Keyword.get(options, :sort))
 
     with {:ok, body} <-
            request(
@@ -511,7 +515,7 @@ defmodule PiFi.Plex.Server do
              address,
              token,
              "/library/sections/#{section}/all",
-             [{"type", item_type(kind)}],
+             query,
              paging,
              client_id
            ) do
@@ -603,6 +607,25 @@ defmodule PiFi.Plex.Server do
        }}
     end
   end
+
+  @doc """
+  How many of one kind the server holds in one section, and nothing else.
+
+  **This is the cheapest question a sync can ask.** It reads one entry so that the
+  answer carries `totalSize`, and a listing of tens of thousands costs the same as a
+  listing of one. `PiFi.Plex.Sync.Library` compares it with what this device holds to
+  decide whether there is any work at all.
+  """
+  @spec count(:artists | :albums | :tracks, String.t(), map() | nil) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def count(kind, section, link \\ nil) do
+    with {:ok, %{total: total}} <- page(kind, section, 0, link, size: 1), do: {:ok, total}
+  end
+
+  # `addedAt:desc` is what puts the newest first, which is what an incremental read
+  # walks. A caller that names no order gets the order of the server, which is by title.
+  defp sort(nil), do: []
+  defp sort(order) when is_binary(order), do: [{"sort", order}]
 
   @doc "How many entries one page of `page/4` carries."
   @spec page_size() :: pos_integer()

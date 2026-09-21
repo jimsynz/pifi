@@ -11,6 +11,7 @@ defmodule PiFi.Plex.SyncTest do
   alias PiFi.Plex.Fill
   alias PiFi.Plex.Server
   alias PiFi.Plex.Sync.Checkpoint
+  alias PiFi.Plex.Sync.Survey
   alias PiFi.Settings
   alias PiFi.Source
 
@@ -131,7 +132,15 @@ defmodule PiFi.Plex.SyncTest do
 
           send(test, {:request, :page, {section, type}, start})
 
-          items = library |> Map.get(section, %{}) |> Map.get(type, [])
+          # **The listing of a test is in the order that things were added**, so the
+          # newest is last. A survey asks for `addedAt:desc` and reads until it meets
+          # something it knows, and a stub that ignored the sort would hand it the
+          # oldest first and it would stop at once. See `PiFi.Plex.Sync.Survey`.
+          items =
+            library
+            |> Map.get(section, %{})
+            |> Map.get(type, [])
+            |> newest_first(conn.params["sort"])
 
           Req.Test.json(conn, %{
             "MediaContainer" => %{
@@ -142,6 +151,28 @@ defmodule PiFi.Plex.SyncTest do
       end
     end)
   end
+
+  defp drain_requests do
+    receive do
+      {:request, _what, _which, _start} -> drain_requests()
+    after
+      0 -> :ok
+    end
+  end
+
+  # A survey asks for one entry to learn a count, and a page to reach something known.
+  # A walk of the library asks for pages of 50.
+  defp pages_read(counted \\ 0) do
+    receive do
+      {:request, :page, _which, _start} -> pages_read(counted + 1)
+      {:request, _what, _which, _start} -> pages_read(counted)
+    after
+      0 -> counted
+    end
+  end
+
+  defp newest_first(items, "addedAt:desc"), do: Enum.reverse(items)
+  defp newest_first(items, _sort), do: items
 
   defp header(conn, name) do
     conn.req_headers |> Map.new() |> Map.fetch!(name) |> String.to_integer()
@@ -322,6 +353,114 @@ defmodule PiFi.Plex.SyncTest do
       assert {:ok, _counts} = Plex.sync_library()
 
       assert entry_refs(hd(playlists_here())) == ["track-1", "track-9"]
+    end
+  end
+
+  # **A read of a whole library is 80 minutes and tens of thousands of writes**, and it
+  # ran every day whether a person had added a record or not. These cover the three
+  # answers of `PiFi.Plex.Sync.Survey` and the one thing it must never get wrong, which
+  # is removing a library that is still there.
+  describe "a library that a person did not change" do
+    setup do
+      # The whole read happens on a clock of its own, and these tests are about what
+      # happens between two of them.
+      on_exit(fn ->
+        case Settings.fetch("plex.library.whole_read_at") do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "is read once and then left alone" do
+      library = one_section([artist(1)], [album(1, 1)], [track(1, 1)])
+
+      stub_library(library)
+      assert {:ok, first} = Plex.sync_library()
+      assert first.tracks == 1
+
+      stub_library(library)
+      assert {:ok, second} = Plex.sync_library()
+
+      assert second.artists == 0
+      assert second.albums == 0
+      assert second.tracks == 0
+      refute second.skipped?
+
+      # Everything is still here. A survey that removed what it did not read would have
+      # emptied the catalogue.
+      assert length(items_of(:track)) == 1
+      assert second.removed == 0
+    end
+
+    # The whole point: a quiet library costs a handful of requests and no pages at all.
+    test "costs no page of any listing" do
+      library = one_section([artist(1)], [album(1, 1)], [track(1, 1)])
+
+      stub_library(library)
+      assert {:ok, _first} = Plex.sync_library()
+
+      stub_library(library)
+      drain_requests()
+      assert {:ok, _second} = Plex.sync_library()
+
+      # A survey reads one entry of each kind to learn the count, and one page of each
+      # to reach something it knows. Nothing walks the library.
+      assert pages_read() <= length(Survey.kinds()) * 2
+    end
+  end
+
+  describe "a library that gained a record" do
+    setup do
+      on_exit(fn ->
+        case Settings.fetch("plex.library.whole_read_at") do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "writes the new one and leaves the rest where they are" do
+      stub_library(one_section([artist(1)], [album(1, 1)], [track(1, 1)]))
+      assert {:ok, _first} = Plex.sync_library()
+
+      stub_library(one_section([artist(1)], [album(1, 1)], [track(1, 1), track(2, 1)]))
+      assert {:ok, second} = Plex.sync_library()
+
+      assert second.tracks == 1
+      assert second.removed == 0
+      assert length(items_of(:track)) == 2
+    end
+  end
+
+  # **This is the one a survey must never get wrong.** A count that came back smaller
+  # than the card holds means something went, and only a whole read can say what.
+  describe "a library that lost a record" do
+    setup do
+      on_exit(fn ->
+        case Settings.fetch("plex.library.whole_read_at") do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "is read in full, and the one that went is removed" do
+      stub_library(one_section([artist(1)], [album(1, 1)], [track(1, 1), track(2, 1)]))
+      assert {:ok, _first} = Plex.sync_library()
+      assert length(items_of(:track)) == 2
+
+      stub_library(one_section([artist(1)], [album(1, 1)], [track(1, 1)]))
+      assert {:ok, second} = Plex.sync_library()
+
+      assert second.removed >= 1
+      assert length(items_of(:track)) == 1
     end
   end
 

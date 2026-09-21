@@ -82,9 +82,15 @@ defmodule PiFi.Plex.Sync.Library do
   alias PiFi.Plex.Fill
   alias PiFi.Plex.Server
   alias PiFi.Plex.Sync.Checkpoint
+  alias PiFi.Plex.Sync.Survey
+  alias PiFi.Settings
   alias PiFi.Source
 
   @kinds [:artists, :albums, :tracks]
+
+  # When the last whole read finished, and how long a survey may stand in for one.
+  @whole_read_key "plex.library.whole_read_at"
+  @whole_read_after 7 * 24 * 60 * 60
 
   # How old a point may be and still serve. A read takes about an hour, and
   # `PiFi.AutoSync` runs the work again within the hour, so a point of any use is
@@ -99,44 +105,89 @@ defmodule PiFi.Plex.Sync.Library do
     if Source.enabled?(Source.Plex) and Server.configured?() do
       sync()
     else
-      {:ok,
-       %{
-         artists: 0,
-         albums: 0,
-         tracks: 0,
-         playlists: 0,
-         removed: 0,
-         forgotten: 0,
-         skipped?: true
-       }}
+      {:ok, Map.merge(empty(%{playlists: 0, forgotten: 0}), %{skipped?: true})}
     end
   end
 
+  # **Most days a library gained nothing**, and a read of the whole of one is 80 minutes
+  # and tens of thousands of writes that everything else on this device queues behind.
+  # `PiFi.Plex.Sync.Survey` asks three cheap questions first and says which of these
+  # three is needed. See that module for what a count cannot see.
   defp sync do
     with {:ok, link} <- Server.link(),
          {:ok, sections} <- Server.sections(link),
          {:ok, sections} <- music(sections),
-         point = start_point(sections),
-         {:ok, counts} <- read_from(point, sections, link),
-         {:ok, playlists} <- read_playlists(point.started_at, link) do
-      gone = remove_unseen(point.started_at)
-      forgotten = forget_unseen_playlists(point.started_at)
-      Checkpoint.forget()
+         {:ok, library} <- library(survey(sections, link), sections, link),
+         {:ok, playlists} <- playlists(link) do
       announce()
 
+      {:ok, Map.merge(library, playlists) |> Map.put(:skipped?, false)}
+    end
+  end
+
+  # **The playlists are read whatever the library did.** A person makes one out of
+  # records that this device already holds, so the counts of a survey do not move and
+  # the library looks untouched. It costs one request, because the tracks of a playlist
+  # are read only when the server says that playlist changed.
+  #
+  # The removal is safe on every path, unlike the one for items: this read lists every
+  # playlist of the server, so one that it did not see is one that went.
+  defp playlists(link) do
+    started_at = DateTime.utc_now()
+
+    with {:ok, count} <- read_playlists(started_at, link) do
+      {:ok, %{playlists: count, forgotten: forget_unseen_playlists(started_at)}}
+    end
+  end
+
+  # **A full read happens on a clock of its own whatever the survey says.** A library
+  # that gained one record and lost another counts the same, and an edit changes no
+  # count at all, so a survey that was always trusted would let those drift for ever.
+  defp survey(sections, link) do
+    if due_for_a_whole_read?(), do: :everything, else: Survey.take(sections, link)
+  end
+
+  defp library(:nothing, _sections, _link) do
+    Logger.info("The Plex library is as this device last read it.")
+
+    {:ok, empty(%{})}
+  end
+
+  defp library({:added, entries}, _sections, _link), do: added(entries)
+  defp library(:everything, sections, link), do: whole(sections, link)
+
+  # An addition is the one case that needs no removal: the survey saw the server holding
+  # at least as many of every kind, so nothing went. `last_seen_at` of every other row
+  # is therefore left where it is, and the next whole read is what moves it.
+  defp added(entries) do
+    counts = Map.new(@kinds, &{&1, fill(&1, Map.get(entries, &1, []))})
+
+    Logger.info(
+      "The Plex library gained #{counts.artists} artists, #{counts.albums} albums " <>
+        "and #{counts.tracks} tracks."
+    )
+
+    {:ok, empty(counts)}
+  end
+
+  defp empty(counts) do
+    Map.merge(%{artists: 0, albums: 0, tracks: 0, removed: 0}, counts)
+  end
+
+  defp whole(sections, link) do
+    point = start_point(sections)
+
+    with {:ok, counts} <- read_from(point, sections, link) do
+      gone = remove_unseen(point.started_at)
+      Checkpoint.forget()
+      whole_read_done()
+
       Logger.info(
-        "The Plex library gave #{counts.artists} artists, #{counts.albums} albums, " <>
-          "#{counts.tracks} tracks and #{playlists} playlists, and #{gone} items and " <>
-          "#{forgotten} playlists are no longer on the server."
+        "The Plex library gave #{counts.artists} artists, #{counts.albums} albums " <>
+          "and #{counts.tracks} tracks, and #{gone} items are no longer on the server."
       )
 
-      {:ok,
-       Map.merge(counts, %{
-         playlists: playlists,
-         removed: gone,
-         forgotten: forgotten,
-         skipped?: false
-       })}
+      {:ok, empty(Map.put(counts, :removed, gone))}
     end
   end
 
@@ -329,6 +380,30 @@ defmodule PiFi.Plex.Sync.Library do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # **A survey is an optimisation and a whole read is the truth**, so one happens on a
+  # clock however quiet the library looks. A week is long enough that the saving is
+  # nearly all of it, and short enough that a rename or a swap of one record for another
+  # is not wrong for a month.
+  defp due_for_a_whole_read? do
+    case Settings.fetch(@whole_read_key) do
+      {:ok, %{value: value}} -> older_than_a_week?(value)
+      {:error, _reason} -> true
+    end
+  end
+
+  defp older_than_a_week?(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, at, _offset} -> DateTime.diff(DateTime.utc_now(), at, :second) >= @whole_read_after
+      {:error, _reason} -> true
+    end
+  end
+
+  defp whole_read_done do
+    Settings.put(@whole_read_key, DateTime.to_iso8601(DateTime.utc_now()))
+
+    :ok
   end
 
   defp fill(:artists, entries), do: Fill.artists(entries)
