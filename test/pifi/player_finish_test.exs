@@ -252,6 +252,40 @@ defmodule PiFi.PlayerFinishTest do
       assert position_ms < 305_000
     end
 
+    # **A reboot is a stop that no person pressed.** `PiFi.Player` did not trap exits,
+    # so it had no `terminate/2` at all and a shutdown killed it outright: a person who
+    # took a new firmware half way through an episode came back to the start of it.
+    #
+    # It calls the callback rather than stopping the real player, which is one process
+    # for the whole node and every other test needs it.
+    test "a shutdown writes where the person had reached" do
+      one = Recorder.episode()
+
+      state = %PiFi.Player.State{
+        source: Recorder,
+        item: one,
+        started_at: System.monotonic_time(),
+        offset_ms: 90_000,
+        position_bytes: 4_096
+      }
+
+      assert :ok = PiFi.Player.terminate(:shutdown, state)
+
+      written = Playback.get_item!(one.id)
+      assert written.position_ms >= 90_000
+      assert written.position_bytes == 4_096
+    end
+
+    # A Plex controller, the screens and Home Assistant all draw what the player says,
+    # and none of them could tell a device that stopped from one whose network went.
+    test "a shutdown says that the music stopped" do
+      state = %PiFi.Player.State{item: Recorder.episode(), started_at: System.monotonic_time()}
+
+      assert :ok = PiFi.Player.terminate(:shutdown, state)
+
+      assert_receive %Events.Stopped{reason: :shutting_down}
+    end
+
     test "a track that never began writes no place" do
       # Nothing played, so there is no place, and writing 0 would lose the place that
       # the person already had. `position_bytes` is nil until a write.

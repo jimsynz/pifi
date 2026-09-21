@@ -7,6 +7,7 @@ defmodule PiFi.Plex.CompanionTest do
   alias PiFi.Event
   alias PiFi.Playback
   alias PiFi.Plex.Companion
+  alias PiFi.Plex.Companion.Farewell
   alias PiFi.Plex.Companion.Router
   alias PiFi.Plex.Server
   alias PiFi.Settings
@@ -21,6 +22,13 @@ defmodule PiFi.Plex.CompanionTest do
   import Plug.Conn
 
   setup do
+    # **The farewell flag outlives the process that sets it**, which is the point of it:
+    # a poll has to read it after that process has gone. ExUnit stops a supervised
+    # process after the `on_exit` callbacks have run, so a reset there is undone again
+    # and the next test reads a device that is still leaving. Every test therefore
+    # starts from one that is staying put. See `PiFi.Plex.Companion.Farewell`.
+    :persistent_term.put({Farewell, :saying_goodbye?}, false)
+
     # `PiFi.Player` is one process for the whole node, so a track that one test plays
     # is a track that the next one reads. See `PiFiWeb.BrowseLiveTest`.
     #
@@ -420,6 +428,46 @@ defmodule PiFi.Plex.CompanionTest do
 
       assert conn.status == 200
       assert microseconds < 4_000_000
+    end
+  end
+
+  # **A reboot left Plexamp drawing a track that had stopped**, because the poll it was
+  # holding died with the listener and it kept the last answer it got.
+  describe "a device that is going down" do
+    setup do
+      {:ok, _pid} = start_supervised(Farewell)
+
+      :ok
+    end
+
+    test "a poll answers stopped, even while the player is still playing" do
+      :ok = stop_supervised(Farewell)
+
+      conn = poll(101)
+
+      assert conn.status == 200
+      assert attribute(conn.resp_body, "Timeline", "state") == "stopped"
+    end
+
+    # The poll is what carries the answer, so it has to wake, and nothing else in the
+    # shutdown publishes on that topic while the listener is still up.
+    test "it says so on the topic that a waiting poll listens to" do
+      :ok = Event.subscribe(:player)
+
+      :ok = stop_supervised(Farewell)
+
+      assert_receive %PiFi.Event.Player.Stopped{reason: :shutting_down}
+    end
+
+    # A person who turns the Plex player off and on again has a device that is not
+    # going anywhere, and a flag that stayed set would answer `stopped` for ever.
+    test "a player that starts again reports the player as it is" do
+      :ok = stop_supervised(Farewell)
+      assert Farewell.saying_goodbye?()
+
+      {:ok, _pid} = start_supervised(Farewell)
+
+      refute Farewell.saying_goodbye?()
     end
   end
 

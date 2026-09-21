@@ -204,7 +204,8 @@ defmodule PiFi.Plex.Companion do
   # before the port answered would meet nothing. See
   # `PiFi.Plex.Companion.Announcement` and `PiFi.Plex.Companion.Gdm`.
   defp start_listener do
-    for child <- [queue(), listener(), announcement(), discovery()], do: start_child(child)
+    for child <- [queue(), listener(), announcement(), discovery(), farewell()],
+        do: start_child(child)
 
     :ok
   end
@@ -228,7 +229,7 @@ defmodule PiFi.Plex.Companion do
   end
 
   defp stop_listener do
-    for id <- [:discovery, :announcement, :listener, :queue] do
+    for id <- [:farewell, :discovery, :announcement, :listener, :queue] do
       Supervisor.terminate_child(__MODULE__, id)
       Supervisor.delete_child(__MODULE__, id)
     end
@@ -258,5 +259,12 @@ defmodule PiFi.Plex.Companion do
   # `PiFi.Plex.Companion.Queue`.
   defp queue do
     %{id: :queue, start: {PiFi.Plex.Companion.Queue, :start_link, [[]]}}
+  end
+
+  # **It is last on purpose, so that it stops first.** A supervisor stops its children
+  # in reverse order, and this one answers the poll that a controller is holding open
+  # while the listener behind it is still up. See `PiFi.Plex.Companion.Farewell`.
+  defp farewell do
+    %{id: :farewell, start: {PiFi.Plex.Companion.Farewell, :start_link, [[]]}}
   end
 end

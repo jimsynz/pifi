@@ -297,7 +297,38 @@ defmodule PiFi.Player do
 
   @impl GenServer
   def init(_options) do
+    # **A shutdown must reach `terminate/2`**, and a process that does not trap exits
+    # never gets there: the supervisor sends an exit signal and the process goes. That
+    # cost a person the place in their episode on every reboot, and it left a Plex
+    # controller drawing a track that had stopped.
+    Process.flag(:trap_exit, true)
+
     {:ok, %State{}, {:continue, :restore}}
+  end
+
+  @doc """
+  Write the place and say that the music stopped, on the way out.
+
+  **A reboot is a stop that no person pressed**, and every other stop of this player
+  writes the place before it. One that did not cost a person the middle of an episode
+  each time the device took a new firmware.
+
+  The event matters as much as the write. `PiFi.Plex.Companion` draws what this says,
+  and so do the screens and Home Assistant, and none of them could tell a device that
+  stopped from one whose network went. See `PiFi.Plex.Companion.Farewell` for the part
+  of that which needs an order of its own.
+
+  **It ends no pipeline.** `PiFi.Output.APlayPort` holds the sound card and it has a
+  `terminate/2` of its own, so the program that owns the card is already answered for,
+  and a `Membrane.Pipeline.terminate/2` here would spend five seconds of the shutdown
+  waiting for a graph that the BEAM is about to take anyway.
+  """
+  @impl GenServer
+  def terminate(_reason, %State{} = state) do
+    store_position(state)
+    Event.publish(:player, %Events.Stopped{reason: :shutting_down})
+
+    :ok
   end
 
   # The settings hold the last station and the standby state, so both survive a

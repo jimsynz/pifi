@@ -56,6 +56,7 @@ defmodule PiFi.Plex.Companion.Router do
   alias PiFi.Playback
   alias PiFi.Playback.Item
   alias PiFi.Plex.Companion
+  alias PiFi.Plex.Companion.Farewell
   alias PiFi.Plex.Companion.Queue
   alias PiFi.Plex.Server
   alias PiFi.Source
@@ -264,10 +265,18 @@ defmodule PiFi.Plex.Companion.Router do
 
     Event.unsubscribe(:player)
 
-    Playback.state!()
+    now()
   end
 
-  defp state_of(_wait), do: Playback.state!()
+  defp state_of(_wait), do: now()
+
+  # **A device that is going down answers `stopped`, whatever the player says.** The
+  # player is still playing at that moment, because it stops later in the shutdown than
+  # the listener does, and a controller that was told `playing` kept drawing the track
+  # after the device had gone. See `PiFi.Plex.Companion.Farewell`.
+  defp now do
+    if Farewell.saying_goodbye?(), do: Playback.Player.idle(), else: Playback.state!()
+  end
 
   # The container names the `commandID` of the request and no size, which is what a real
   # player answers.
