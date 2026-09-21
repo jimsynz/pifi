@@ -345,7 +345,17 @@ defmodule PiFi.MixProject do
       # that the repository keeps, and the release copies `priv` as it finds it.
       # It also runs before `nbpr.fetch`, so a fault in the assets stops the build
       # before the 10 minutes that a source build of the NBPR packages needs.
-      firmware: ["assets.deploy", "nbpr.fetch", "firmware"]
+      #
+      # **`deps.compile` comes before `nbpr.fetch` because a source build reads a
+      # dependency's `priv`.** A vendored Buildroot package such as the one in
+      # `nbpr_librespot` lives at `priv/buildroot`, and `_build/<target>/lib/<dep>/priv`
+      # is a symbolic link that Mix makes when it compiles that dependency. A fetch that
+      # ran first met no link and Buildroot stopped with
+      # `'…/nbpr_librespot/priv/buildroot': no such file or directory`.
+      #
+      # It only shows when no prebuilt artefact exists, which is every package after a
+      # new version of the Nerves system, so it hid until 0.2.0 landed.
+      firmware: ["assets.deploy", "deps.compile", "nbpr.fetch", "firmware"]
     ]
   end
 
