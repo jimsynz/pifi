@@ -79,9 +79,24 @@ config :pifi, Oban,
 # so a writer waits its turn rather than failing. The cost is that a transaction that
 # only reads still queues behind a writer, and on this device a transaction is almost
 # always a write.
+# **`busy_timeout` belongs here and not only on the device.** It used to sit in
+# `config/target.exs` alone, so a laptop ran on the 2 seconds that exqlite gives by
+# default. With the mode above every transaction waits for the write lock, and two
+# seconds of waiting is not much when a library sync, `Oban.Stager` and `Oban.Met` are
+# all writing: the three of them fell over with `database is locked` on `BEGIN IMMEDIATE
+# TRANSACTION`, which is the lock being asked for and refused.
+#
+# **10 seconds, and not more.** An Ecto call gives up at 15 seconds by default, and a
+# handler that waited longer than its caller would turn one error into another.
+#
+# exqlite installs its own busy handler through a NIF rather than `PRAGMA busy_timeout`,
+# because the pragma calls `sqlite3_busy_timeout()` and that destroys the custom
+# handler. So `PRAGMA busy_timeout` reads 0 on a live connection and that is correct —
+# do not read it and conclude the setting is being ignored.
 config :pifi, PiFi.Repo,
   telemetry_prefix: [:pifi, :repo],
-  default_transaction_mode: :immediate
+  default_transaction_mode: :immediate,
+  busy_timeout: 10_000
 
 # **The forge is the whole of the release channel.** A tag of the form `v1.2.3` builds a
 # production firmware for each target and attaches it to a release, so a device needs no
