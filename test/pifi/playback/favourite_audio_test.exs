@@ -362,15 +362,20 @@ defmodule PiFi.Playback.FavouriteAudioTest do
     # `PiFi.Player.Download.ensure/2` answers that a file is already whole when a
     # run joins the download of another run that ends while it joins. That answer
     # released nothing before, and the file then held `keep?` for ever.
+    # **It reads the entries of its own three tracks and not every entry of the
+    # namespace.** A download left running by another test writes one there too, and it
+    # holds `keep?` while it is in play, so the global read failed this test for
+    # somebody else's row. It cost a CI run before it was understood.
     test "every track of a run ends with no mark to keep" do
       serve(100)
       one = album()
-      Enum.each(["track-1", "track-2", "track-3"], &track/1)
+      refs = ["track-1", "track-2", "track-3"]
+      tracks = Enum.map(refs, &track/1)
 
       assert FavouriteAudio.read(%{one | favourite?: true}) == 3
 
-      for entry <- Cache.entries_in!(Download.namespace()) do
-        assert entry.keep? == false
+      for %{id: id} <- tracks do
+        assert %{keep?: false} = held(id)
       end
     end
 
