@@ -153,10 +153,13 @@ defmodule PiFi.Player.DownloadTest do
         end)
       end)
 
+      # **It reads the process of this episode and not the count of every download.** A
+      # download left running by an earlier test makes that count 2 or 3, and says
+      # nothing about whether this call started a second one. CI read 3.
       assert {:ok, _first} = Download.ensure(@id, @uri)
-      assert Registry.count(Download.Registry) == 1
+      assert [{holder, _value}] = Registry.lookup(Download.Registry, @id)
       assert {:ok, _second} = Download.ensure(@id, @uri)
-      assert Registry.count(Download.Registry) == 1
+      assert [{^holder, _value}] = Registry.lookup(Download.Registry, @id)
 
       await(:done)
     end
