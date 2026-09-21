@@ -12,6 +12,7 @@ defmodule PiFiWeb.SettingsLive do
       /settings/sources                the sources, and which ones are in use
       /settings/sources/internet-radio one source
       /settings/peripherals            the screens and the controls of the board
+      /settings/crossfade              how long one track plays under the next
       /settings/standby                the period of quiet, and the switch off
       /settings/network                a report
       /settings/storage                a report
@@ -64,6 +65,7 @@ defmodule PiFiWeb.SettingsLive do
   alias PiFi.Hardware
   alias PiFi.HomeAssistant
   alias PiFi.Peripheral
+  alias PiFi.Player.Crossfade
   alias PiFi.Source
   alias PiFi.Spotify
   alias PiFi.SwitchOff
@@ -341,6 +343,17 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("set_crossfade_seconds", %{"seconds" => seconds}, socket) do
+    case PiFi.Playback.set_crossfade_seconds(String.to_integer(seconds)) do
+      {:ok, :ok} ->
+        {:noreply, socket |> put_flash(:info, crossfade_flash(seconds)) |> refresh()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Couldn't change the crossfade: #{inspect(reason)}")}
+    end
+  end
+
+  @impl Phoenix.LiveView
   def handle_event("set_screen_blank_seconds", %{"seconds" => seconds}, socket) do
     case PiFi.Playback.set_screen_blank_seconds(String.to_integer(seconds)) do
       {:ok, :ok} ->
@@ -372,6 +385,15 @@ defmodule PiFiWeb.SettingsLive do
 
       <.row id="output-row" to={~p"/settings/output"} icon="ph-speaker-high" title="Output device">
         {output_summary(@output)}
+      </.row>
+
+      <.row
+        id="crossfade-row"
+        to={~p"/settings/crossfade"}
+        icon="ph-wave-triangle"
+        title="Crossfade"
+      >
+        {crossfade_summary(@crossfade_seconds)}
       </.row>
 
       <.row id="sources-row" to={~p"/settings/sources"} icon="ph-queue" title="Sources">
@@ -806,6 +828,53 @@ defmodule PiFiWeb.SettingsLive do
             ]}
           >
             {if peripheral.enabled?, do: "Disable", else: "Enable"}
+          </button>
+        </li>
+      </ul>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
+  def render(%{live_action: :crossfade} = assigns) do
+    ~H"""
+    <.section id="settings-crossfade" title="Crossfade" back={~p"/settings"}>
+      <p class="mb-3 text-sm text-ink-dim">
+        The end of one track plays under the start of the next, the first getting
+        quieter while the second gets louder. It suits a playlist of songs. Leave it off
+        for podcasts and live recordings, where it talks over the first word and takes
+        the silence off the end.
+      </p>
+
+      <p class="mb-4 text-sm text-ink-dim">
+        It applies between two tracks of the queue. A radio station never ends, so it
+        never fades, and two tracks recorded at different sample rates play one after
+        the other as they always did.
+      </p>
+
+      <ul class="divide-y divide-edge">
+        <li :for={seconds <- Crossfade.lengths()}>
+          <button
+            type="button"
+            id={"crossfade-length-#{seconds}"}
+            phx-click="set_crossfade_seconds"
+            phx-value-seconds={seconds}
+            class={[
+              "flex w-full items-center gap-3 py-2 text-left",
+              seconds == @crossfade_seconds && "text-accent"
+            ]}
+          >
+            <span class={[
+              "flex size-5 shrink-0 items-center justify-center rounded-full",
+              if(seconds == @crossfade_seconds,
+                do: "bg-accent/15 shadow-[inset_0_0_0_1px_var(--color-accent)]",
+                else: "shadow-[inset_0_0_0_1px_var(--color-edge)]"
+              )
+            ]}>
+              <span :if={seconds == @crossfade_seconds} class="size-2 rounded-full bg-accent" />
+            </span>
+
+            <span class="min-w-0 grow truncate">{crossfade_title(seconds)}</span>
           </button>
         </li>
       </ul>
@@ -1400,6 +1469,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())
+    |> assign(:crossfade_seconds, PiFi.Playback.crossfade_seconds!())
     |> assign(:screen_blank_seconds, PiFi.Playback.screen_blank_seconds!())
     |> assign(:screen?, Peripheral.any_screen?())
     |> assign(:switch_off?, SwitchOff.enabled?())
@@ -1442,6 +1512,18 @@ defmodule PiFiWeb.SettingsLive do
   # The hours that a person can choose for one job of `PiFi.AutoSync`. A station list
   # moves slowly and a feed of a podcast moves each day, so the list reaches a week.
   defp sync_periods, do: [0, 1, 6, 12, 24, 72, 168]
+
+  defp crossfade_summary(0), do: "Off"
+  defp crossfade_summary(seconds), do: crossfade_title(seconds)
+
+  defp crossfade_title(0), do: "Off"
+  defp crossfade_title(1), do: "1 second"
+  defp crossfade_title(seconds), do: "#{seconds} seconds"
+
+  defp crossfade_flash("0"), do: "One track stops before the next one starts."
+
+  defp crossfade_flash(seconds),
+    do: "Tracks cross over for #{String.downcase(crossfade_title(String.to_integer(seconds)))}."
 
   defp sync_period_title(0), do: "Never"
   defp sync_period_title(1), do: "Hourly"

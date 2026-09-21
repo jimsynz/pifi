@@ -91,11 +91,36 @@ defmodule PiFi.Player.Pipeline do
     {[reply: :ok, notify_child: {:source, {:skip, ms}}], state}
   end
 
+  # **The reply says that the sink was told, and not that the fade started.** Only the
+  # sink knows whether the output can sum two streams of this shape, and it answers with
+  # `{:fading, _}` below.
+  @impl true
+  def handle_call({:fade_out, milliseconds}, _ctx, state) do
+    {[reply: :ok, notify_child: {:sink, {:fade_out, milliseconds}}], state}
+  end
+
+  @impl true
+  def handle_call(:fade_in, _ctx, state) do
+    {[reply: :ok, notify_child: {:sink, :fade_in}], state}
+  end
+
   # The sink says when sound starts, and not the source. Every transport reaches
   # the sink, and only the sink knows that samples arrived.
   @impl true
   def handle_child_notification(:playing, :sink, _ctx, state) do
     send(state.parent, {:pipeline_playing, self()})
+    {[], state}
+  end
+
+  @impl true
+  def handle_child_notification({:fading, answer}, :sink, _ctx, state) do
+    send(state.parent, {:pipeline_fading, self(), answer})
+    {[], state}
+  end
+
+  @impl true
+  def handle_child_notification(:faded, :sink, _ctx, state) do
+    send(state.parent, {:pipeline_faded, self()})
     {[], state}
   end
 

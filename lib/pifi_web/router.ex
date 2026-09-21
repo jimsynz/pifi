@@ -59,6 +59,7 @@ defmodule PiFiWeb.Router do
     live("/settings/sources", SettingsLive, :sources)
     live("/settings/sources/:source", SettingsLive, :source)
     live("/settings/peripherals", SettingsLive, :peripherals)
+    live("/settings/crossfade", SettingsLive, :crossfade)
     live("/settings/standby", SettingsLive, :standby)
     live("/settings/screen", SettingsLive, :screen)
     live("/settings/network", SettingsLive, :network)

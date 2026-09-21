@@ -31,6 +31,15 @@ defmodule PiFi.Output.APlaySink do
   A process that does not own a port may write to it, and the busy limits of that
   process still suspend whoever writes, so the pacing above is unchanged.
 
+  ## During a crossfade it writes to nothing
+
+  A fade needs two tracks playing at once, and a sound card takes one stream, so the
+  two sinks cannot both write to the port. `PiFi.Player` tells one of them `:fade_out`
+  and the other `:fade_in`, and each then gives its samples to
+  `PiFi.Output.APlayPort.blend/2`, which pairs them, sums them on the ramp and writes
+  the answer. The call waits until the bytes are used, so the pacing is what it always
+  was and the slower of the two decoders sets the speed of both.
+
   ## It writes whole frames, and that is what keeps the next track clean
 
   **A track that leaves a part of a frame in the port turns every sample after it into
@@ -87,7 +96,9 @@ defmodule PiFi.Output.APlaySink do
             format: RawAudio.t() | nil,
             sounded?: boolean(),
             silent?: boolean(),
-            part: binary()
+            part: binary(),
+            role: APlayPort.role() | :only,
+            registered?: boolean()
           }
 
     defstruct device: "default",
@@ -95,7 +106,9 @@ defmodule PiFi.Output.APlaySink do
               format: nil,
               sounded?: false,
               silent?: false,
-              part: <<>>
+              part: <<>>,
+              role: :only,
+              registered?: false
   end
 
   @impl true
@@ -124,7 +137,7 @@ defmodule PiFi.Output.APlaySink do
 
     case APlayPort.hold(program(), arguments(state, format)) do
       {:ok, port} ->
-        {[], %State{state | port: port, format: format}}
+        {[], registered(%State{state | port: port, format: format})}
 
       {:error, reason} ->
         raise "Could not start aplay: #{inspect(reason)}"
@@ -138,9 +151,11 @@ defmodule PiFi.Output.APlaySink do
   @impl true
   def handle_buffer(:input, buffer, _ctx, %State{port: port} = state) when is_port(port) do
     {whole, part} = frames(state.part <> buffer.payload, state.format)
+    state = %State{state | part: part}
 
-    case write(port, whole) do
-      :ok -> sounded(%State{state | part: part}, whole)
+    case sent(state, whole) do
+      {:ok, state} -> sounded(state, whole)
+      {:faded, role, state} -> faded(role, state, whole)
       :closed -> stopped(state)
     end
   end
@@ -157,32 +172,35 @@ defmodule PiFi.Output.APlaySink do
   # `PiFi.Output.APlayPort` keeps the card open, so that half second plays and the
   # pipeline of the next track writes to the same port. This element only stops writing.
   @impl true
-  def handle_end_of_stream(:input, _ctx, %State{port: port, part: part} = state)
-      when is_port(port) and part != <<>> do
-    _result = write(port, pad(part, state.format))
-    APlayPort.wrote_last()
-
-    {[], %State{state | port: nil, part: <<>>}}
-  end
-
-  @impl true
   def handle_end_of_stream(:input, _ctx, %State{port: port} = state) when is_port(port) do
-    APlayPort.wrote_last()
+    _result = flush(state)
+    ended(state)
 
-    {[], %State{state | port: nil, part: <<>>}}
+    {[], quiet(state)}
   end
 
   @impl true
   def handle_end_of_stream(:input, _ctx, %State{} = state) do
-    {[], %State{state | port: nil, part: <<>>}}
+    {[], quiet(state)}
   end
 
   @doc """
-  Stop the sound now, and let the pipeline stop later.
+  What `PiFi.Player` tells this element about the sound.
 
-  `aplay` owns the sound card and it reads at the rate of the clock of the DAC, so
-  ending the program is what makes the room quiet. `PiFi.Output.APlayPort.close/0`
-  does that, and a measurement on 2026-08-21 gave 35 to 245 ms from a stop to silence.
+  `:silence` stops the sound now, and lets the pipeline stop later. `aplay` owns the
+  sound card and it reads at the rate of the clock of the DAC, so ending the program is
+  what makes the room quiet. `PiFi.Output.APlayPort.close/0` does that, and a
+  measurement on 2026-08-21 gave 35 to 245 ms from a stop to silence.
+
+  `:fade_out` and `:fade_in` name the two sides of a crossfade. From then on this
+  element gives its samples to `PiFi.Output.APlayPort.blend/2` in the place of writing
+  them to the port, and that process sums the two streams, because a sound card takes
+  one.
+
+  **The incoming sink has no format when it gets the notification**, because nothing has
+  reached it yet, so it registers with the port at whichever of the two comes last. A
+  fade that the port refuses leaves this element writing to the port as it always did,
+  and a person hears the gap that they would have heard with the setting turned off.
   """
   @impl true
   def handle_parent_notification(:silence, _ctx, %State{port: nil} = state) do
@@ -193,7 +211,22 @@ defmodule PiFi.Output.APlaySink do
   def handle_parent_notification(:silence, _ctx, %State{} = state) do
     APlayPort.close()
 
-    {[], %State{state | port: nil, format: nil, silent?: true, part: <<>>}}
+    {[], quiet(%State{state | port: nil, format: nil, silent?: true})}
+  end
+
+  @impl true
+  def handle_parent_notification({:fade_out, milliseconds}, _ctx, %State{} = state) do
+    # **The track that is ending is the one that opens the fade**, because it is the one
+    # already writing to the port, and the port cannot fade without a program.
+    case APlayPort.fade(milliseconds) do
+      :ok -> answered(registered(%State{state | role: :outgoing, registered?: false}))
+      {:error, _reason} -> answered(state)
+    end
+  end
+
+  @impl true
+  def handle_parent_notification(:fade_in, _ctx, %State{} = state) do
+    {[], registered(%State{state | role: :incoming, registered?: false})}
   end
 
   @impl true
@@ -208,8 +241,18 @@ defmodule PiFi.Output.APlaySink do
   # The port belongs to `PiFi.Output.APlayPort` and the next pipeline wants it, so
   # this ends nothing. A person who asked for silence already got it above.
   @impl true
-  def handle_terminate_request(_ctx, %State{} = state) do
+  def handle_terminate_request(_ctx, %State{role: :only} = state) do
     {[terminate: :normal], %State{state | port: nil}}
+  end
+
+  # **A pipeline that stops in the middle of a fade takes one side of it with it.** The
+  # other side would then wait in `blend/2` for frames that no process is going to send,
+  # so the fade ends here and the track that is left plays on its own.
+  @impl true
+  def handle_terminate_request(_ctx, %State{} = state) do
+    APlayPort.cancel_fade()
+
+    {[terminate: :normal], quiet(state)}
   end
 
   @doc """
@@ -231,6 +274,83 @@ defmodule PiFi.Output.APlaySink do
       "--quiet",
       "-"
     ]
+  end
+
+  # **`PiFi.Player` needs to know whether the fade took before it starts the second
+  # pipeline.** A sink of another output ignores the notification above and answers
+  # nothing, and a player that never hears `:ok` starts no second pipeline, so an output
+  # that cannot fade plays one track at a time in the way that it always did.
+  defp answered(%State{role: :outgoing} = state), do: {[notify_parent: {:fading, :ok}], state}
+  defp answered(%State{} = state), do: {[notify_parent: {:fading, :error}], state}
+
+  # The port needs the shape of the audio before it can sum two streams of it, and it
+  # decides there whether the sum is possible at all.
+  defp registered(%State{role: :only} = state), do: state
+  defp registered(%State{registered?: true} = state), do: state
+  defp registered(%State{format: nil} = state), do: state
+
+  defp registered(%State{} = state) do
+    case APlayPort.fading(state.role, state.format) do
+      :ok ->
+        %State{state | registered?: true}
+
+      {:error, reason} ->
+        Membrane.Logger.info("This track plays with no crossfade: #{inspect(reason)}")
+
+        %State{state | role: :only, registered?: false}
+    end
+  end
+
+  # Outside a fade this writes to the port itself, and the busy limits of that port are
+  # what pace the pipeline. Inside one it hands the samples to the process that owns the
+  # port, which waits for the other stream and sums the two.
+  defp sent(%State{role: :only, port: port} = state, whole) do
+    case write(port, whole) do
+      :ok -> {:ok, state}
+      :closed -> :closed
+    end
+  end
+
+  defp sent(%State{role: role} = state, whole) do
+    case APlayPort.blend(role, whole) do
+      :ok -> {:ok, state}
+      :finished -> {:faded, role, %State{state | role: :only, registered?: false}}
+      :cancelled -> {:faded, :cancelled, %State{state | role: :only, registered?: false}}
+      :closed -> :closed
+    end
+  end
+
+  # **The fade is over, and what that means depends on how it ended.** A fade that ran
+  # to its length leaves the track that was ending at no volume at all, so this element
+  # takes its samples and drops them until `PiFi.Player` stops the pipeline. Every other
+  # side of it is a track that is still playing, and it goes back to writing to the port.
+  defp faded(:outgoing, %State{} = state, _whole) do
+    {[notify_parent: :faded], %State{state | port: nil}}
+  end
+
+  defp faded(_role, %State{} = state, whole) do
+    {actions, state} = sounded(state, whole)
+
+    {actions ++ [notify_parent: :faded], state}
+  end
+
+  defp flush(%State{part: <<>>}), do: :ok
+
+  defp flush(%State{role: :only, port: port} = state) do
+    write(port, pad(state.part, state.format))
+  end
+
+  defp flush(%State{role: role} = state) do
+    APlayPort.blend(role, pad(state.part, state.format))
+  end
+
+  # **A crossfade means that there was no gap**, so nothing measures one: the next track
+  # was already playing when this one stopped.
+  defp ended(%State{role: :only}), do: APlayPort.wrote_last()
+  defp ended(%State{role: role}), do: APlayPort.fade_ended(role)
+
+  defp quiet(%State{} = state) do
+    %State{state | port: nil, part: <<>>, role: :only, registered?: false}
   end
 
   # The first write says that sound started, and a write of no bytes says nothing: a
@@ -292,7 +412,7 @@ defmodule PiFi.Output.APlaySink do
   defp stopped(%State{} = state) do
     Membrane.Logger.error("aplay is gone, so this pipeline ends.")
 
-    {[terminate: :normal], %State{state | port: nil, format: nil}}
+    {[terminate: :normal], quiet(%State{state | format: nil})}
   end
 
   @doc """

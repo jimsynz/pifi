@@ -92,6 +92,8 @@ defmodule PiFi.Playback do
       define :standby, action: :standby, args: [:entered?]
       define :standby_minutes, action: :standby_minutes
       define :set_standby_minutes, action: :set_standby_minutes, args: [:minutes]
+      define :crossfade_seconds, action: :crossfade_seconds
+      define :set_crossfade_seconds, action: :set_crossfade_seconds, args: [:seconds]
       define :screen_blank_seconds, action: :screen_blank_seconds
       define :set_screen_blank_seconds, action: :set_screen_blank_seconds, args: [:seconds]
       define :enable_source, action: :enable_source, args: [:source, :enabled?]

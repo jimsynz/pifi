@@ -180,6 +180,199 @@ defmodule PiFi.Output.APlayPortTest do
     end
   end
 
+  # **A fade needs two tracks playing at once, and one sound card takes one stream.**
+  # This process is where they meet. `PiFi.Output.Mixer` holds the arithmetic and a test
+  # of its own; these cover the pairing, the pacing and every way that a fade gives up.
+  describe "the crossfade" do
+    setup do
+      path = Path.join(System.tmp_dir!(), "a_play_fade_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(path) end)
+
+      {:ok, _port} = APlayPort.hold("sh", ["-c", "cat -u > #{path}"])
+
+      %{path: path}
+    end
+
+    test "both sides are summed on a ramp, and the fade ends at its length" do
+      :ok = APlayPort.fade(8)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      outgoing = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+      incoming = Task.async(fn -> APlayPort.blend(:incoming, samples(0, 8)) end)
+
+      assert Task.await(outgoing) == :finished
+      assert Task.await(incoming) == :finished
+    end
+
+    test "the ramp starts at the outgoing track and ends at the incoming one", %{path: path} do
+      :ok = APlayPort.fade(8)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      outgoing = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+      incoming = Task.async(fn -> APlayPort.blend(:incoming, samples(-1000, 8)) end)
+
+      Task.await(outgoing)
+      Task.await(incoming)
+
+      assert eventually(fn -> byte_size(read(path)) == 32 end)
+
+      values = for <<v::little-signed-16 <- read(path)>>, do: v
+
+      assert List.first(values) == 1000
+      assert List.last(values) < 0
+      assert values == Enum.sort(values, :desc)
+    end
+
+    # **This is the pacing.** Two pipelines decode at the speed of their own source, and
+    # the one that runs ahead has to stop until the other has frames to pair with.
+    test "a side that runs ahead waits for the other one" do
+      :ok = APlayPort.fade(80)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      ahead = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+
+      refute Task.yield(ahead, 200)
+
+      behind = Task.async(fn -> APlayPort.blend(:incoming, samples(0, 8)) end)
+
+      assert Task.await(ahead) == :ok
+      assert Task.await(behind) == :ok
+    end
+
+    # An outgoing track shorter than the fade leaves the rest of the ramp with nothing
+    # to take down, so the incoming one still arrives at full gain at the end of it.
+    test "an outgoing track that ends first leaves the fade running against silence" do
+      :ok = APlayPort.fade(8)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      :ok = APlayPort.fade_ended(:outgoing)
+
+      assert APlayPort.blend(:incoming, samples(1000, 8)) == :finished
+    end
+
+    test "an incoming track that ends inside the fade abandons it" do
+      :ok = APlayPort.fade(80)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      :ok = APlayPort.fade_ended(:incoming)
+
+      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :cancelled
+    end
+
+    # A person who presses next asked for the track after this one, and finishing a
+    # fade into a track that they no longer want is the wrong answer.
+    test "a person who presses next cancels it" do
+      :ok = APlayPort.fade(80)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      waiting = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+
+      refute Task.yield(waiting, 100)
+
+      :ok = APlayPort.cancel_fade()
+
+      assert Task.await(waiting) == :cancelled
+    end
+
+    # The format is on the command line of `aplay`, so two rates cannot share a card.
+    test "a format that the mixer cannot sum is refused" do
+      :ok = APlayPort.fade(80)
+
+      assert {:error, :unsupported_format} =
+               APlayPort.fading(:outgoing, format(sample_format: :u8))
+
+      assert APlayPort.blend(:incoming, samples(0, 8)) == :cancelled
+    end
+
+    test "two tracks of different shapes abandon it" do
+      :ok = APlayPort.fade(80)
+      :ok = APlayPort.fading(:outgoing, format())
+
+      assert {:error, :format_changed} =
+               APlayPort.fading(:incoming, format(sample_rate: 2_000, sample_format: :s24le))
+
+      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :cancelled
+    end
+
+    # A new program means a new card, and the fade has nothing left to write to.
+    test "a hold of other arguments abandons it" do
+      :ok = APlayPort.fade(80)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      {:ok, _other} = APlayPort.hold("cat", [])
+
+      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :cancelled
+    end
+
+    test "a stop abandons it" do
+      :ok = APlayPort.fade(80)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      assert :ok = APlayPort.close()
+
+      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :closed
+    end
+
+    # Nothing else notices a fade that both sides stopped calling, and a sink that
+    # waited for a side which never registers would wait for ever.
+    test "a side that never arrives gives up after the deadline" do
+      :ok = APlayPort.fade(60)
+      :ok = APlayPort.fading(:outgoing, format())
+
+      waiting = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+
+      assert Task.await(waiting, 5_000) == :cancelled
+    end
+
+    # **A fade that gives up must not silence a track that is still playing.** This is
+    # the whole reason that an abandoned fade answers differently from one that ran to
+    # its length: the sink reads the answer to decide whether it keeps its port.
+    test "a track that is still playing keeps writing after the fade gives up", %{path: path} do
+      :ok = APlayPort.fade(80)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      :ok = APlayPort.cancel_fade()
+
+      assert APlayPort.blend(:outgoing, samples(1000, 4)) == :cancelled
+      assert eventually(fn -> byte_size(read(path)) == 16 end)
+    end
+
+    test "a fade needs a program to write to" do
+      :ok = APlayPort.close()
+
+      assert {:error, :no_port} = APlayPort.fade(80)
+    end
+  end
+
+  defp format(opts \\ []) do
+    %Membrane.RawAudio{
+      sample_format: Keyword.get(opts, :sample_format, :s16le),
+      sample_rate: Keyword.get(opts, :sample_rate, 1_000),
+      channels: 2
+    }
+  end
+
+  # `frames` frames of stereo 16-bit audio, every sample the same value.
+  defp samples(value, frames) do
+    :binary.copy(<<value::little-signed-16, value::little-signed-16>>, frames)
+  end
+
+  defp read(path) do
+    case File.read(path) do
+      {:ok, bytes} -> bytes
+      {:error, _reason} -> <<>>
+    end
+  end
+
   defp eventually(check, attempts \\ 100)
 
   defp eventually(_check, 0), do: false

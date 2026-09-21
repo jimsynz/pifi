@@ -85,6 +85,7 @@ defmodule PiFi.Player do
   alias PiFi.Output
   alias PiFi.Playback
   alias PiFi.Playback.RemoveSourceCache
+  alias PiFi.Player.Crossfade
   alias PiFi.Player.Download
   alias PiFi.Player.Pipeline
   alias PiFi.Player.Prefetch
@@ -121,6 +122,8 @@ defmodule PiFi.Player do
             playable: map() | nil,
             pipeline: pid() | nil,
             monitor: reference() | nil,
+            previous: pid() | nil,
+            previous_monitor: reference() | nil,
             stream_title: String.t() | nil,
             artwork_path: String.t() | nil,
             started_at: integer() | nil,
@@ -131,7 +134,9 @@ defmodule PiFi.Player do
             restart_timer: reference() | nil,
             paused?: boolean(),
             standby?: boolean(),
-            prefetched?: boolean()
+            prefetched?: boolean(),
+            crossfade_ms: non_neg_integer(),
+            asked_fade?: boolean()
           }
 
     defstruct source: nil,
@@ -139,6 +144,8 @@ defmodule PiFi.Player do
               playable: nil,
               pipeline: nil,
               monitor: nil,
+              previous: nil,
+              previous_monitor: nil,
               stream_title: nil,
               artwork_path: nil,
               started_at: nil,
@@ -149,7 +156,9 @@ defmodule PiFi.Player do
               restart_timer: nil,
               paused?: false,
               standby?: false,
-              prefetched?: false
+              prefetched?: false,
+              crossfade_ms: 0,
+              asked_fade?: false
   end
 
   @doc false
@@ -301,9 +310,11 @@ defmodule PiFi.Player do
   # is the reason that `stop_pipeline/1` waits at all.
   @impl GenServer
   def handle_continue({:terminate, pipeline, monitor}, %State{} = state) do
-    stop_pipeline(%State{state | pipeline: pipeline, monitor: monitor})
+    # The answer of `stop_pipeline/1` is what carries on, because it is the one that
+    # knows that the pipeline under a crossfade went as well.
+    stopped = stop_pipeline(%State{state | pipeline: pipeline, monitor: monitor})
 
-    {:noreply, %State{cancel_restart(state) | pipeline: nil, monitor: nil, started_at: nil}}
+    {:noreply, %State{cancel_restart(stopped) | pipeline: nil, monitor: nil, started_at: nil}}
   end
 
   @impl GenServer
@@ -483,7 +494,8 @@ defmodule PiFi.Player do
        paused?: state.paused?,
        standby?: state.standby?,
        position_ms: position_ms(state),
-       live?: live?(state)
+       live?: live?(state),
+       crossfading?: state.previous != nil
      }, state}
   end
 
@@ -540,7 +552,7 @@ defmodule PiFi.Player do
     })
 
     schedule_progress()
-    {:noreply, prefetch(state)}
+    {:noreply, state |> prefetch() |> crossfade()}
   end
 
   @impl GenServer
@@ -625,6 +637,42 @@ defmodule PiFi.Player do
     end
   end
 
+  # The track that the fade took down has ended. The fade carries on against silence,
+  # so the incoming track still arrives at full gain, and `{:pipeline_faded, _}` below
+  # is what stops this pipeline.
+  @impl GenServer
+  def handle_info({:pipeline_finished, previous}, %State{previous: previous} = state) do
+    {:noreply, state}
+  end
+
+  # **Only the sink knows whether the output can sum two streams of this shape**, so the
+  # player asks and waits for this. A `:fade_out` that no sink answers leaves the track
+  # playing to its end in the way that it always did.
+  @impl GenServer
+  def handle_info({:pipeline_fading, pipeline, :ok}, %State{pipeline: pipeline} = state) do
+    {:noreply, handed_over(state)}
+  end
+
+  @impl GenServer
+  def handle_info({:pipeline_fading, _pipeline, _answer}, %State{} = state) do
+    {:noreply, state}
+  end
+
+  # The fade is over, however it ended, so the track underneath it goes.
+  @impl GenServer
+  def handle_info({:pipeline_faded, _pipeline}, %State{} = state) do
+    {:noreply, stop_previous(state)}
+  end
+
+  @impl GenServer
+  def handle_info(
+        {:DOWN, monitor, :process, previous, reason},
+        %State{previous: previous, previous_monitor: monitor} = state
+      ) do
+    Logger.warning("The pipeline under the fade stopped: #{inspect(reason)}")
+    {:noreply, %State{state | previous: nil, previous_monitor: nil}}
+  end
+
   @impl GenServer
   def handle_info(
         {:DOWN, monitor, :process, pipeline, reason},
@@ -698,7 +746,9 @@ defmodule PiFi.Player do
                offset_ms: playable.position_ms,
                position_bytes: playable[:position_bytes],
                paused?: false,
-               prefetched?: false
+               prefetched?: false,
+               crossfade_ms: Crossfade.length_ms(),
+               asked_fade?: false
            }}
 
         {:error, reason} ->
@@ -1014,7 +1064,25 @@ defmodule PiFi.Player do
       :ok
   end
 
-  defp stop_pipeline(%State{pipeline: nil} = state), do: state
+  defp stop_pipeline(%State{} = state), do: state |> stop_previous() |> stop_foreground()
+
+  # **The track under a crossfade is a pipeline that the state names as well**, and a
+  # start that left it running would give a person two tracks at once. Its sink cancels
+  # the fade as it stops, so the track that is left plays on alone.
+  defp stop_previous(%State{previous: nil} = state), do: state
+
+  defp stop_previous(%State{previous: previous, previous_monitor: monitor} = state) do
+    if monitor, do: Process.demonitor(monitor, [:flush])
+
+    case Membrane.Pipeline.terminate(previous, timeout: @terminate_timeout, force?: true) do
+      :ok -> :ok
+      {:error, :timeout} -> Logger.warning("The pipeline under the fade did not stop.")
+    end
+
+    %State{state | previous: nil, previous_monitor: nil}
+  end
+
+  defp stop_foreground(%State{pipeline: nil} = state), do: state
 
   # **This waits for the old pipeline, and the wait is what makes a change of track
   # work.** `PiFi.Output.APlayPort` keeps one port, and two sinks that write to it at
@@ -1030,7 +1098,7 @@ defmodule PiFi.Player do
   # The monitor goes first. Without that step this stop reaches `handle_info/2`
   # as the fault of a pipeline that no person stopped, and the player then starts
   # the old station again.
-  defp stop_pipeline(%State{pipeline: pipeline, monitor: monitor} = state) do
+  defp stop_foreground(%State{pipeline: pipeline, monitor: monitor} = state) do
     if monitor, do: Process.demonitor(monitor, [:flush])
 
     # `force?: true` ends a pipeline that does not answer. A stereo must play the
@@ -1251,6 +1319,85 @@ defmodule PiFi.Player do
   end
 
   defp prefetch(%State{} = state), do: state
+
+  # **A crossfade starts before the track ends, and both tracks then play.** The state
+  # moves to the next one at that moment, because that is the moment a person starts
+  # hearing it, and the track that is ending keeps playing as `previous` until the port
+  # says the fade is done.
+  #
+  # The player asks the sink and does not decide by itself. Only the sink knows the
+  # shape of the audio and whether the output can sum two streams of it, and a sink of
+  # an output that cannot answers nothing, which leaves the track playing to its end.
+  defp crossfade(%State{crossfade_ms: 0} = state), do: state
+  defp crossfade(%State{asked_fade?: true} = state), do: state
+  defp crossfade(%State{previous: previous} = state) when previous != nil, do: state
+
+  defp crossfade(%State{item: %{duration_ms: duration}} = state) when is_integer(duration) do
+    if duration - position_ms(state) <= state.crossfade_ms and not live?(state) and next_up?() do
+      ask_to_fade(state)
+    else
+      state
+    end
+  end
+
+  defp crossfade(%State{} = state), do: state
+
+  defp next_up?, do: match?({:ok, _row}, Playback.queue_next_up())
+
+  defp ask_to_fade(%State{pipeline: pipeline} = state) do
+    Membrane.Pipeline.call(pipeline, {:fade_out, state.crossfade_ms}, @silence_timeout)
+
+    %State{state | asked_fade?: true}
+  catch
+    # A pipeline that will not answer is one that is already stopping, and the track
+    # after it starts in the way that it always did.
+    :exit, _reason -> %State{state | asked_fade?: true}
+  end
+
+  # **The bookkeeping of the track that is ending happens here and not in `finish/1`**,
+  # because that track never reaches `finish/1`: it is `previous` from now on, and the
+  # clause that answers for it does nothing at all.
+  defp handed_over(%State{} = state) do
+    ending = state.item
+    outgoing = state.pipeline
+    monitor = state.monitor
+
+    with {:ok, item} <- moved(:next),
+         {:ok, source} <- Source.from_slug(item.source),
+         true <- Source.enabled?(source) do
+      store_position(state)
+      track_stopped(state, :finished)
+      Playback.mark_played(ending)
+
+      handed = %State{
+        state
+        | pipeline: nil,
+          monitor: nil,
+          playable: nil,
+          stream_title: nil,
+          artwork_path: nil,
+          offset_ms: 0,
+          position_bytes: nil
+      }
+
+      # `start/3` ends the pipeline that the state names, so the outgoing one is put
+      # back afterwards and not before.
+      case start(source, item, handed) do
+        {:ok, started} -> fading_in(started, outgoing, monitor)
+        {:error, _reason, failed} -> failed
+      end
+    else
+      _other -> state
+    end
+  end
+
+  defp fading_in(%State{pipeline: pipeline} = state, outgoing, monitor) do
+    Membrane.Pipeline.call(pipeline, :fade_in, @silence_timeout)
+
+    %State{state | previous: outgoing, previous_monitor: monitor}
+  catch
+    :exit, _reason -> %State{state | previous: outgoing, previous_monitor: monitor}
+  end
 
   defp ask_for_next do
     with {:ok, row} <- Playback.queue_next_up(),

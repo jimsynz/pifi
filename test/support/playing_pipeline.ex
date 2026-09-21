@@ -29,6 +29,7 @@ defmodule PiFi.Test.PlayingPipeline do
       Application.delete_env(:pifi, :pipeline)
       Application.delete_env(:pifi, :playing_pipeline_moves)
       Application.delete_env(:pifi, :playing_pipeline_fails)
+      Application.delete_env(:pifi, :playing_pipeline_fades)
     end)
   end
 
@@ -40,6 +41,16 @@ defmodule PiFi.Test.PlayingPipeline do
   """
   @spec fails(boolean()) :: :ok
   def fails(fails?), do: Application.put_env(:pifi, :playing_pipeline_fails, fails?)
+
+  @doc """
+  Make the sink of this pipeline answer a `:fade_out`, or answer nothing.
+
+  **A sink of an output that cannot sum two streams answers nothing**, and the player
+  then starts no second pipeline, so `fades(false)` is the shape of every output but
+  ALSA. See `PiFi.Output.APlaySink`.
+  """
+  @spec fades(boolean()) :: :ok
+  def fades(fades?), do: Application.put_env(:pifi, :playing_pipeline_fades, fades?)
 
   @doc "The time that the next skip reports, whatever the caller asks for."
   @spec moves(integer()) :: :ok
@@ -70,6 +81,22 @@ defmodule PiFi.Test.PlayingPipeline do
 
   @impl Membrane.Pipeline
   def handle_call(:silence, _ctx, state) do
+    {[reply: :ok], state}
+  end
+
+  @impl Membrane.Pipeline
+  def handle_call({:fade_out, _ms}, _ctx, state) do
+    if Application.get_env(:pifi, :playing_pipeline_fades, true) do
+      send(state.parent, {:pipeline_fading, self(), :ok})
+    end
+
+    {[reply: :ok], state}
+  end
+
+  @impl Membrane.Pipeline
+  def handle_call(:fade_in, _ctx, state) do
+    send(state.parent, {:pipeline_fade_in, self()})
+
     {[reply: :ok], state}
   end
 

@@ -13,6 +13,7 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias PiFi.HomeAssistant
   alias PiFi.Output.Volume
   alias PiFi.Peripheral
+  alias PiFi.Player.Crossfade
   alias PiFi.Podcast.Index
   alias PiFi.Radio.Sync.FromRemote
   alias PiFi.Settings
@@ -480,6 +481,51 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       assert html =~ "keeps working in standby"
       refute PiFi.SwitchOff.enabled?()
+    end
+  end
+
+  describe "the crossfade section" do
+    setup do
+      on_exit(fn -> Crossfade.set_seconds(0) end)
+
+      :ok
+    end
+
+    # A crossfade suits a playlist of songs and talks over the first word of a podcast,
+    # so a device that no person changed plays one track at a time.
+    test "a device that no person changed has it off", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/crossfade")
+
+      assert html =~ "Off"
+      assert has_element?(view, "#crossfade-length-0")
+      assert has_element?(view, "#crossfade-length-3")
+    end
+
+    test "a press of a length writes it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/crossfade")
+
+      html = view |> element("#crossfade-length-5") |> render_click()
+
+      assert html =~ "Tracks cross over for 5 seconds."
+      assert PiFi.Playback.crossfade_seconds!() == 5
+    end
+
+    test "a person turns it off again", %{conn: conn} do
+      :ok = Crossfade.set_seconds(5)
+
+      {:ok, view, _html} = live(conn, ~p"/settings/crossfade")
+      html = view |> element("#crossfade-length-0") |> render_click()
+
+      assert html =~ "One track stops before the next one starts."
+      assert PiFi.Playback.crossfade_seconds!() == 0
+    end
+
+    test "the menu says what it is set to", %{conn: conn} do
+      :ok = Crossfade.set_seconds(2)
+
+      {:ok, _view, html} = live(conn, ~p"/settings")
+
+      assert html =~ "2 seconds"
     end
   end
 

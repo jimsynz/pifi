@@ -26,6 +26,7 @@ defmodule PiFi.Playback.Player do
   require Logger
 
   alias PiFi.Output.Volume
+  alias PiFi.Player.Crossfade
 
   # A generic action does not cast what it returns. These fields therefore describe
   # the shape for a reader and for an API extension, and they enforce nothing.
@@ -202,6 +203,35 @@ defmodule PiFi.Playback.Player do
 
       run fn input, _context ->
         case PiFi.AutoStandby.set_minutes(input.arguments.minutes) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
+    action :crossfade_seconds, :integer do
+      description """
+      The seconds that the end of one track plays under the start of the next.
+
+      0 means that one track stops before the next one starts.
+      """
+
+      run fn _input, _context -> {:ok, Crossfade.seconds()} end
+    end
+
+    action :set_crossfade_seconds, :atom do
+      description """
+      Set the seconds that the end of one track plays under the start of the next.
+
+      0 turns the crossfade off. It applies between two tracks of a queue, and never to
+      a live stream or to a change of sample rate. A track that is already playing keeps
+      the length that it started with. See `PiFi.Player.Crossfade`.
+      """
+
+      argument :seconds, :integer, allow_nil?: false
+
+      run fn input, _context ->
+        case Crossfade.set_seconds(input.arguments.seconds) do
           :ok -> {:ok, :ok}
           {:error, reason} -> {:error, reason}
         end
@@ -405,7 +435,8 @@ defmodule PiFi.Playback.Player do
       paused?: false,
       standby?: PiFi.Player.stored_standby?(),
       position_ms: 0,
-      live?: false
+      live?: false,
+      crossfading?: false
     }
   end
 
