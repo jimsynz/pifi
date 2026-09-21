@@ -75,13 +75,26 @@ defmodule PiFi.Test.TwoCardOutput do
   @spec devices!() :: [map()]
   def devices!, do: @devices
 
-  @doc "Make this the output of the firmware for one test."
+  @doc """
+  Make this the output of the firmware for one test.
+
+  **It stops the player first, and it has to.** `sink_spec/1` raises, so anything that
+  starts a pipeline while this is the output raises with it — and `PiFi.Player` is one
+  process for the whole node, so a track left playing by an earlier test is still
+  playing when this takes over. `PiFi.Player.select_output/1` then restarts that
+  pipeline, reaches `sink_spec/1`, and the raise comes back to whichever test happened
+  to be running. CI failed `PiFi.DeviceUiTest` that way.
+
+  It puts the configuration back at the end of the test.
+  """
   @spec use_it() :: :ok
   def use_it do
+    PiFi.Player.stop()
     :persistent_term.erase({__MODULE__, :writes})
     Application.put_env(:pifi, :output, __MODULE__)
 
     ExUnit.Callbacks.on_exit(fn ->
+      PiFi.Player.stop()
       Application.delete_env(:pifi, :output)
       :persistent_term.erase({__MODULE__, :writes})
     end)
