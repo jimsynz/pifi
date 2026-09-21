@@ -333,6 +333,29 @@ defmodule PiFi.MixProject do
   defp listeners(:host, :dev), do: [Phoenix.CodeReloader]
   defp listeners(_, _), do: []
 
+  # **A source build of an NBPR package reads its Buildroot recipe from `priv`**, and
+  # `nbpr_librespot` is the one package here that carries one. `mix nbpr.fetch` looks in
+  # `_build/<target>/lib/<dep>/priv`, which is a symbolic link that Mix makes when it
+  # compiles that dependency, and the fetch runs before any of that happens. Buildroot
+  # then stopped with
+  # `'…/nbpr_librespot/priv/buildroot': no such file or directory`.
+  #
+  # **It only shows when no prebuilt artefact exists**, because a package that has one
+  # is unpacked and never built. The cache key holds the version of the Nerves system,
+  # so every package rebuilds after a new one, which is why this hid until 0.2.0.
+  defp vendored_priv(_args) do
+    source = Path.expand("deps/nbpr_librespot/priv")
+    target = Path.join([Mix.Project.build_path(), "lib", "nbpr_librespot", "priv"])
+
+    if File.dir?(source) and not File.dir?(Path.join(target, "buildroot")) do
+      File.rm_rf!(target)
+      File.mkdir_p!(Path.dirname(target))
+      File.ln_s!(source, target)
+    end
+
+    :ok
+  end
+
   defp aliases() do
     [
       "assets.setup": ["esbuild.install --if-missing", "tailwind.install --if-missing"],
@@ -356,15 +379,14 @@ defmodule PiFi.MixProject do
       # It only shows when no prebuilt artefact exists, which is every package after a
       # new version of the Nerves system, so it hid until 0.2.0 landed.
       #
-      # **It names the one package and not `deps.compile`.** Compiling everything
-      # rebuilt `nerves` itself part way through the alias, and Mix then answered
-      # `The task "firmware" could not be found` for the step after it.
-      firmware: [
-        "assets.deploy",
-        "deps.compile nbpr_librespot",
-        "nbpr.fetch",
-        "firmware"
-      ]
+      # **It makes the link rather than compiling the dependency.** `deps.compile` is
+      # what normally makes it, and running that inside this alias — for every
+      # dependency or for the one — left Mix answering `The task "firmware" could not
+      # be found` for the step after it, because compiling `nerves` again part way
+      # through takes the task with it.
+      # It comes **after** `assets.deploy`, because that step compiles the project and
+      # Mix replaces the link while it does.
+      firmware: ["assets.deploy", &vendored_priv/1, "nbpr.fetch", "firmware"]
     ]
   end
 
