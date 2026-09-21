@@ -1,33 +1,21 @@
 defmodule PiFi.Playback.Queue.NextUp do
   @moduledoc """
-  The row after the one that plays. It moves no mark.
+  The row that will play when this track ends. It moves no mark.
 
-  `PiFi.Playback.Queue.Move` answers which row is next by making it the one that
-  plays. The player needs the answer while a person is still in the middle of a
+  `PiFi.Playback.Queue.Advance` answers the same question by making that row the one
+  that plays. The player needs the answer while a person is still in the middle of a
   track, so that it can read the audio of that row before it is needed. See
   `PiFi.Player.Prefetch`.
+
+  **It answers what `advance` would**, which means a repeat of one gives the row that is
+  already playing. The audio of that row is already on the card, so the prefetch finds
+  nothing to do, which is the right answer.
   """
 
   use Ash.Resource.Actions.Implementation
 
-  require Ash.Query
-
-  alias PiFi.Playback.Queue
+  alias PiFi.Playback.Queue.Walk
 
   @impl true
-  def run(_input, _options, _context) do
-    with {:ok, playing} <- playing(),
-         [row] <- Ash.read!(Ash.Query.filter(Queue, position == ^(playing.position + 1))) do
-      {:ok, row}
-    else
-      _other -> {:error, :no_more}
-    end
-  end
-
-  defp playing do
-    case Ash.read_one!(Ash.Query.for_read(Queue, :playing)) do
-      nil -> {:error, :no_more}
-      row -> {:ok, row}
-    end
-  end
+  def run(_input, _options, _context), do: Walk.after_playing(true)
 end

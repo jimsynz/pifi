@@ -5,6 +5,7 @@ defmodule PiFiWeb.QueueLiveTest do
   use Oban.Testing, repo: PiFi.Repo
 
   alias PiFi.Playback
+  alias PiFi.Playback.Queue.Mode
 
   setup do
     PiFi.Player.stop()
@@ -221,6 +222,78 @@ defmodule PiFiWeb.QueueLiveTest do
     case Playback.queue_playing!() do
       nil -> nil
       row -> Playback.get_item!(row.item_id).title
+    end
+  end
+
+  # Two answers to one question, which is which row comes next. See
+  # `PiFi.Playback.Queue.Mode`.
+  describe "shuffle and repeat" do
+    setup do
+      on_exit(fn ->
+        Mode.put_shuffle(false)
+        Mode.put_repeat(:off)
+      end)
+
+      :ok
+    end
+
+    test "a queue with nothing in it offers neither", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/queue")
+
+      refute has_element?(view, "#shuffle-queue")
+      refute has_element?(view, "#repeat-queue")
+    end
+
+    test "a person turns shuffle on and the control says so", %{conn: conn} do
+      queue(["Alpha", "Bravo"])
+
+      {:ok, view, _html} = live(conn, ~p"/queue")
+
+      assert has_element?(view, "#shuffle-queue[aria-pressed=false]")
+
+      view |> element("#shuffle-queue") |> render_click()
+
+      assert has_element?(view, "#shuffle-queue[aria-pressed=true]")
+      assert Mode.shuffle?()
+    end
+
+    test "and turns it off again", %{conn: conn} do
+      queue(["Alpha", "Bravo"])
+      Mode.put_shuffle(true)
+
+      {:ok, view, _html} = live(conn, ~p"/queue")
+      view |> element("#shuffle-queue") |> render_click()
+
+      refute Mode.shuffle?()
+    end
+
+    # One control for the three, because a stereo has one button for this and a person
+    # presses it until it says what they want.
+    test "the repeat control steps through the three modes", %{conn: conn} do
+      queue(["Alpha", "Bravo"])
+
+      {:ok, view, _html} = live(conn, ~p"/queue")
+
+      view |> element("#repeat-queue") |> render_click()
+      assert Mode.repeat() == :all
+
+      view |> element("#repeat-queue") |> render_click()
+      assert Mode.repeat() == :one
+
+      view |> element("#repeat-queue") |> render_click()
+      assert Mode.repeat() == :off
+    end
+
+    # A person needs to read which of the three they pressed their way to without
+    # pressing again.
+    test "a repeat of one draws a different mark", %{conn: conn} do
+      queue(["Alpha", "Bravo"])
+      Mode.put_repeat(:one)
+
+      {:ok, view, _html} = live(conn, ~p"/queue")
+
+      assert has_element?(view, "#repeat-queue .ph-repeat-once")
+      refute has_element?(view, "#repeat-queue .ph-repeat")
     end
   end
 end

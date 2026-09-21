@@ -22,6 +22,11 @@ defmodule PiFi.Playback.Queue do
   `position` counts from 0. `replace` and `append` write it for a new row, and
   `PiFi.Playback.Queue.Order` writes it again when a row goes. A caller therefore
   cannot make two rows of one place, and it cannot leave a gap.
+
+  **A shuffle writes `shuffle_position` and leaves `position` alone**, so a person who
+  turns shuffle off gets back the order they made rather than the order a shuffle left
+  behind. `PiFi.Playback.Queue.Mode` decides which of the two the walk reads, and what
+  happens at the end of it.
   """
 
   use Ash.Resource,
@@ -30,6 +35,7 @@ defmodule PiFi.Playback.Queue do
     data_layer: AshSqlite.DataLayer
 
   alias PiFi.Playback.Item
+  alias PiFi.Playback.Queue.Mode
 
   sqlite do
     table "playback_queue"
@@ -97,6 +103,68 @@ defmodule PiFi.Playback.Queue do
       argument :direction, :atom, allow_nil?: false, constraints: [one_of: [:next, :previous]]
 
       run PiFi.Playback.Queue.Move
+    end
+
+    action :advance, :struct do
+      description """
+      Move the mark on because a track ended.
+
+      **`:move` is a person pressing next and this is a track running out**, and a
+      repeat of one is the difference between them. See `PiFi.Playback.Queue.Advance`.
+      """
+
+      constraints instance_of: __MODULE__
+
+      run PiFi.Playback.Queue.Advance
+    end
+
+    action :shuffle, :atom do
+      description """
+      Deal the queue a shuffled order, or take it away.
+
+      It writes `shuffle_position` and never `position`, so turning it off gives a
+      person back the order they made. See `PiFi.Playback.Queue.Mode`.
+      """
+
+      argument :shuffle?, :boolean, allow_nil?: false
+
+      run fn input, _context ->
+        Mode.put_shuffle(input.arguments.shuffle?)
+
+        {:ok, :ok}
+      end
+    end
+
+    action :repeat, :atom do
+      description """
+      Say what happens when the queue reaches its end.
+
+      `:off` stops, `:all` wraps to the start, and `:one` plays the track again. See
+      `PiFi.Playback.Queue.Mode`.
+      """
+
+      argument :repeat, :atom,
+        allow_nil?: false,
+        constraints: [one_of: [:off, :all, :one]]
+
+      run fn input, _context ->
+        case Mode.put_repeat(input.arguments.repeat) do
+          :ok -> {:ok, :ok}
+          {:error, reason} -> {:error, reason}
+        end
+      end
+    end
+
+    action :mode, :map do
+      description "Whether the queue is shuffled, and what happens at its end."
+
+      run fn _input, _context ->
+        {:ok,
+         %{
+           shuffle?: Mode.shuffle?(),
+           repeat: Mode.repeat()
+         }}
+      end
     end
 
     action :remove, :struct do
@@ -168,6 +236,11 @@ defmodule PiFi.Playback.Queue do
       accept [:playing?]
     end
 
+    update :set_shuffle_position do
+      description "Put this row at a place in the shuffled order."
+      accept [:shuffle_position]
+    end
+
     update :set_position do
       description """
       Move this row to another place.
@@ -190,6 +263,18 @@ defmodule PiFi.Playback.Queue do
     attribute :position, :integer do
       description "Where it comes in the order. It counts from 0."
       allow_nil? false
+      public? true
+    end
+
+    attribute :shuffle_position, :integer do
+      description """
+      Where it comes when the queue is shuffled. It counts from 0, and it is nil for a
+      queue that no person shuffled.
+
+      **A shuffle writes this and never touches `position`**, so turning shuffle off
+      gives a person back the order they made. See `PiFi.Playback.Queue.Mode`.
+      """
+
       public? true
     end
 

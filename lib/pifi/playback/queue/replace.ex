@@ -13,6 +13,8 @@ defmodule PiFi.Playback.Queue.Replace do
   use Ash.Resource.Actions.Implementation
 
   alias PiFi.Playback.Queue
+  alias PiFi.Playback.Queue.Mode
+  alias PiFi.Playback.Queue.Shuffle
 
   @impl true
   def run(input, _options, _context) do
@@ -28,6 +30,10 @@ defmodule PiFi.Playback.Queue.Replace do
         %{item_id: item_id, position: index, playing?: index == playing_index}
       end)
       |> Ash.bulk_create!(Queue, :create, return_records?: true, sorted?: true)
+
+    # **A new list wants a new hand.** The old shuffled order named rows that are gone,
+    # and a person who replaced the queue with shuffle on expects the new list shuffled.
+    if Mode.shuffle?(), do: Shuffle.deal()
 
     {:ok, rows}
   end

@@ -81,6 +81,10 @@ defmodule PiFi.Playback do
       define :append_to_queue, action: :append, args: [:item_ids]
       define :move_queue, action: :move, args: [:direction]
       define :queue_next_up, action: :next_up
+      define :advance_queue, action: :advance
+      define :shuffle_queue, action: :shuffle, args: [:shuffle?]
+      define :repeat_queue, action: :repeat, args: [:repeat]
+      define :queue_mode, action: :mode
       define :remove_from_queue, action: :remove, args: [:id]
       define :reorder_queue, action: :reorder, args: [:id, :position]
       define :clear_queue, action: :clear

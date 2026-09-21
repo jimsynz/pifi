@@ -44,6 +44,7 @@ defmodule PiFiWeb.QueueLive do
   alias PiFi.Event
   alias PiFi.Event.Player, as: Events
   alias PiFi.Playback
+  alias PiFi.Playback.Queue.Mode
 
   import PiFiWeb.ItemList, only: [cover: 1]
 
@@ -100,6 +101,20 @@ defmodule PiFiWeb.QueueLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("shuffle", _params, socket) do
+    {:ok, :ok} = Playback.shuffle_queue(not socket.assigns.mode.shuffle?)
+
+    {:noreply, refresh(socket)}
+  end
+
+  # **One control that steps through the three**, because a stereo has one button for
+  # this and a person presses it until it says what they want.
+  def handle_event("repeat", _params, socket) do
+    {:ok, :ok} = Playback.repeat_queue(Mode.after_this(socket.assigns.mode.repeat))
+
+    {:noreply, refresh(socket)}
+  end
+
   def handle_event("clear", _params, socket) do
     {:ok, _count} = Playback.clear_queue()
 
@@ -115,6 +130,29 @@ defmodule PiFiWeb.QueueLive do
           <.icon name="ph-caret-left" class="size-4" />
         </.link>
         <h2 class="grow text-xs uppercase tracking-[0.18em] text-ink-faint">Play queue</h2>
+
+        <button
+          :if={@rows != []}
+          type="button"
+          id="shuffle-queue"
+          phx-click="shuffle"
+          aria-pressed={to_string(@mode.shuffle?)}
+          aria-label={shuffle_label(@mode.shuffle?)}
+          class={["control rounded-lg p-1.5", @mode.shuffle? && "control-on"]}
+        >
+          <.icon name="ph-shuffle" class="size-4" />
+        </button>
+
+        <button
+          :if={@rows != []}
+          type="button"
+          id="repeat-queue"
+          phx-click="repeat"
+          aria-label={repeat_label(@mode.repeat)}
+          class={["control rounded-lg p-1.5", @mode.repeat != :off && "control-on"]}
+        >
+          <.icon name={repeat_icon(@mode.repeat)} class="size-4" />
+        </button>
 
         <button
           :if={@rows != []}
@@ -206,8 +244,25 @@ defmodule PiFiWeb.QueueLive do
   defp load(socket) do
     rows = Playback.queue!(load: [item: [:artwork]])
 
-    socket |> assign(:rows, rows) |> ask_for_pictures(rows)
+    socket
+    |> assign(:rows, rows)
+    |> assign(:mode, Playback.queue_mode!())
+    |> ask_for_pictures(rows)
   end
+
+  defp refresh(socket), do: load(socket)
+
+  defp shuffle_label(true), do: "Play in the order you made"
+  defp shuffle_label(false), do: "Shuffle"
+
+  # **A repeat of one and a repeat of all are different marks**, because a person needs
+  # to read which of the three they pressed their way to without pressing again.
+  defp repeat_icon(:one), do: "ph-repeat-once"
+  defp repeat_icon(_off_or_all), do: "ph-repeat"
+
+  defp repeat_label(:off), do: "Repeat the queue"
+  defp repeat_label(:all), do: "Repeat this track"
+  defp repeat_label(:one), do: "Stop at the end of the queue"
 
   # **Nothing else asks for the picture of a track.** `PiFi.Jellyfin.Fill` asks for
   # the picture of a container, because a list of containers draws one, and the player

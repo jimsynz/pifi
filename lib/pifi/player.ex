@@ -1003,6 +1003,16 @@ defmodule PiFi.Player do
     end
   end
 
+  # **A track that ran out is not a person pressing next**, and a repeat of one is the
+  # difference: it plays this track again, and a press of next moves on. See
+  # `PiFi.Playback.Queue.Mode`.
+  defp ran_out do
+    case Playback.advance_queue() do
+      {:ok, row} -> item(row.item_id)
+      {:error, _reason} -> {:error, :no_more}
+    end
+  end
+
   defp item(id), do: Playback.get_item(id, load: [:artwork])
 
   # A restored track is a paused track. A person then reads the name of the station
@@ -1287,7 +1297,7 @@ defmodule PiFi.Player do
   # leaves the device with the track that ended still selected, so a person reads what
   # they heard last and a play control starts it again.
   defp advanced(%State{} = state) do
-    with {:ok, item} <- moved(:next),
+    with {:ok, item} <- ran_out(),
          {:ok, source} <- Source.from_slug(item.source),
          true <- Source.enabled?(source),
          {:ok, state} <- start(source, item, state) do
@@ -1393,7 +1403,7 @@ defmodule PiFi.Player do
     outgoing = state.pipeline
     monitor = state.monitor
 
-    with {:ok, item} <- moved(:next),
+    with {:ok, item} <- ran_out(),
          {:ok, source} <- Source.from_slug(item.source),
          true <- Source.enabled?(source) do
       store_position(state)
