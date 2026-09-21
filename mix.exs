@@ -135,7 +135,7 @@ defmodule PiFi.MixProject do
       # because nothing here reaches the code that needs it: `homex` uses `muontrap` for
       # its `:system` mDNS responder alone, and `PiFi.HomeAssistant` names `:mdns_lite`,
       # which is the responder that a Nerves device wants in any case.
-      {:muontrap, "~> 1.8", override: true},
+      {:muontrap, "~> 2.0", override: true},
       {:circuits_spi, "~> 2.1"},
       # `membrane_core` needs `ratio`, and `ratio` names
       # `decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`, so the
