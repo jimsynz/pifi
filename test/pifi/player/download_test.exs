@@ -290,18 +290,24 @@ defmodule PiFi.Player.DownloadTest do
       refute_received :asked
     end
 
+    # **It counts the asks for its own episode.** A download left running by an earlier
+    # test answers this test's stub too, because `async: false` shares one, and CI
+    # counted 8 where this makes 5. The identifier in the path is what tells them apart.
     test "it gives up rather than asking for ever" do
       test = self()
+      uri = "https://example.test/gives-up.mp3"
 
       Req.Test.stub(Download, fn conn ->
-        send(test, :asked)
+        if conn.request_path =~ "gives-up", do: send(test, :asked)
+
         Req.Test.transport_error(conn, :closed)
       end)
 
-      start()
+      start("gives-up", uri)
       await({:error, %Req.TransportError{reason: :closed}}, 5_000)
 
-      assert asks() <= 5
+      # One request and four that ask again. See `@attempts` of `PiFi.Player.Download`.
+      assert asks() == 5
     end
   end
 
