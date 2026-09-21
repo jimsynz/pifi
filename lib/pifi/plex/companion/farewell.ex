@@ -56,6 +56,21 @@ defmodule PiFi.Plex.Companion.Farewell do
   @spec saying_goodbye?() :: boolean()
   def saying_goodbye?, do: :persistent_term.get(@key, false)
 
+  @doc """
+  Say that the player is being switched off rather than the device going down.
+
+  **The wait below is only worth making while the listener is still up**, and a person
+  who turns the Plex player off takes that listener with it, so there is no poll left to
+  answer and nothing to wait for.
+
+  It is a cast, so it reaches the mailbox before the shutdown signal that follows it and
+  a process that traps exits reads the two in that order. A cast to a name that nothing
+  holds does nothing, so `PiFi.Plex.Companion` may call this whether this is running or
+  not.
+  """
+  @spec switching_off() :: :ok
+  def switching_off, do: GenServer.cast(__MODULE__, :switching_off)
+
   @doc false
   def start_link(options), do: GenServer.start_link(__MODULE__, options, name: __MODULE__)
 
@@ -70,8 +85,12 @@ defmodule PiFi.Plex.Companion.Farewell do
     # player off and on again would otherwise answer `stopped` for ever.
     :persistent_term.put(@key, false)
 
-    {:ok, nil}
+    {:ok, %{flush?: true}}
   end
+
+  @doc false
+  @impl GenServer
+  def handle_cast(:switching_off, state), do: {:noreply, %{state | flush?: false}}
 
   @doc false
   @impl GenServer
@@ -83,8 +102,12 @@ defmodule PiFi.Plex.Companion.Farewell do
     # listener has gone, which is the reason this module exists.
     Event.publish(:player, %Events.Stopped{reason: :shutting_down})
 
-    Process.sleep(@flush)
+    # **The wait costs every teardown, so it only happens when it buys something.** A
+    # person switching the player off takes the listener with it and leaves no poll to
+    # answer, and a suite that paid it on each test held the supervisor open long enough
+    # for a child that was failing to exhaust its restarts.
+    if state.flush?, do: Process.sleep(@flush)
 
-    {:noreply, state}
+    :ok
   end
 end

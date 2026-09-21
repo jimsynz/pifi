@@ -22,7 +22,12 @@ config :pifi, Oban,
   # stereo that reboots.
   plugins: [
     {Oban.Plugins.Cron, crontab: [{"17 4 * * *", PiFi.Device.Upgrade.Check}]},
-    {Oban.Plugins.Pruner, max_age: 604_800}
+    # **A prune of 10,000 rows in one statement holds the write lock for as long as it
+    # takes**, and a read of a library writes one artwork job for each container, so the
+    # table reaches that size on a real library. Everything else that writes waits behind
+    # it, and the audio is one of those things. 500 at a time costs more statements and
+    # holds the lock for a moment each.
+    {Oban.Plugins.Pruner, max_age: 604_800, limit: 500}
   ],
   # **A device that stops in the middle of a job leaves that job `executing` for ever.**
   # This device stops often: it goes into standby, a person takes the power away, and a
@@ -42,7 +47,25 @@ config :pifi, Oban,
 # the name of the product costs a reader a search, and it costs a handler that listens
 # for the wrong one its measurement. `AshSqlite.Repo` gives `Ecto.Repo` the OTP
 # application and the adapter and no other option, so this cannot sit beside `use`.
-config :pifi, PiFi.Repo, telemetry_prefix: [:pifi, :repo]
+# **`busy_timeout` does not cover a transaction that reads and then writes**, and that
+# is the one this device kept losing. SQLite begins a `DEFERRED` transaction by default
+# and takes no lock until the first statement needs one, so a transaction that reads,
+# and then tries to write after another connection has committed, cannot keep the
+# snapshot it read. SQLite answers `SQLITE_BUSY` for that at once and **it does not call
+# the busy handler**, so the 10 second timeout of `config/target.exs` never applies and
+# the caller sees `Database busy` with no wait at all.
+#
+# `Oban.Pruner` is exactly that shape: it reads the jobs to remove and then deletes
+# them. It stopped on a board with a library sync running, and `PiFi.Cache.Entry` threw
+# away an episode that had already arrived for the same reason.
+#
+# `IMMEDIATE` takes the write lock at `BEGIN`, which is where the busy handler does run,
+# so a writer waits its turn rather than failing. The cost is that a transaction that
+# only reads still queues behind a writer, and on this device a transaction is almost
+# always a write.
+config :pifi, PiFi.Repo,
+  telemetry_prefix: [:pifi, :repo],
+  default_transaction_mode: :immediate
 
 # **The forge is the whole of the release channel.** A tag of the form `v1.2.3` builds a
 # production firmware for each target and attaches it to a release, so a device needs no

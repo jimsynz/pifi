@@ -47,6 +47,7 @@ defmodule PiFi.Plex.Companion do
 
   require Logger
 
+  alias PiFi.Plex.Companion.Farewell
   alias PiFi.Settings
 
   @enabled_key "plex.companion.enabled"
@@ -229,6 +230,8 @@ defmodule PiFi.Plex.Companion do
   end
 
   defp stop_listener do
+    Farewell.switching_off()
+
     for id <- [:farewell, :discovery, :announcement, :listener, :queue] do
       Supervisor.terminate_child(__MODULE__, id)
       Supervisor.delete_child(__MODULE__, id)
@@ -265,6 +268,6 @@ defmodule PiFi.Plex.Companion do
   # in reverse order, and this one answers the poll that a controller is holding open
   # while the listener behind it is still up. See `PiFi.Plex.Companion.Farewell`.
   defp farewell do
-    %{id: :farewell, start: {PiFi.Plex.Companion.Farewell, :start_link, [[]]}}
+    %{id: :farewell, start: {Farewell, :start_link, [[]]}}
   end
 end
