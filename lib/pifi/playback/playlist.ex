@@ -2,13 +2,26 @@ defmodule PiFi.Playback.Playlist do
   @moduledoc """
   A list of tracks that a person made.
 
-  A playlist is the one list of this firmware that a person writes themselves. Every
-  other list comes from a service: an album is what the server says it is, and a
-  country is what Radio Browser says it is.
+  Most of them a person writes themselves. **A playlist takes a track of any source,
+  because `PiFi.Playback.Item` is one table.** A station of internet radio, an episode
+  of a podcast and a song of a Jellyfin library all sit in one playlist, and nothing
+  here names a source.
 
-  **A playlist takes a track of any source, because `PiFi.Playback.Item` is one
-  table.** A station of internet radio, an episode of a podcast and a song of a
-  Jellyfin library all sit in one playlist, and nothing here names a source.
+  ## Where a playlist came from
+
+  `source` says which. `device_source/0` is a playlist that a person made here, and a
+  slug such as `plex` is one that a sync copied from a service. A mirrored playlist
+  reads the same as any other and **a person cannot change one**: the next read of the
+  service would write over whatever they did, so `mine?/1` guards the rename, the add
+  and the destroy rather than letting a person lose work.
+
+  `source` cannot be nil, and SQLite is the reason. The identity below covers
+  `[:source, :name]`, and SQLite counts two NULLs as different values in a unique
+  index, so a nullable source would let a person write `Rock` twice and lose the one
+  guarantee that this resource makes.
+
+  `last_seen_at` is how a sync removes what the service no longer has, in the way that
+  `PiFi.Plex.Sync.Library` removes an item. A playlist that a person made carries none.
 
   ## A playlist is not a queue
 
@@ -38,6 +51,55 @@ defmodule PiFi.Playback.Playlist do
 
   alias PiFi.Playback.PlaylistEntry
 
+  # A playlist that a person made here. It is a value and not nil, and the moduledoc
+  # says why.
+  @device_source "device"
+
+  @doc """
+  The `source` of a playlist that a person made on this device.
+
+      iex> PiFi.Playback.Playlist.device_source()
+      "device"
+  """
+  @spec device_source() :: String.t()
+  def device_source, do: @device_source
+
+  @doc """
+  Whether a person may change this playlist.
+
+  A mirrored one reads the same and it takes no edit, because the next read of the
+  service would write over it.
+
+      iex> PiFi.Playback.Playlist.mine?(%{source: "device"})
+      true
+
+      iex> PiFi.Playback.Playlist.mine?(%{source: "plex"})
+      false
+  """
+  @spec mine?(%{source: String.t()}) :: boolean()
+  def mine?(%{source: source}), do: source == @device_source
+
+  @doc """
+  Refuse a change to a playlist that a service owns.
+
+  `mine?/1` guards the rename and the destroy through a validation, which reads the row
+  that it is changing. **The tracks of a playlist are changed through generic actions
+  that name an identifier**, so those have nothing to validate and they call this
+  instead. `PiFi.Playback.Playlist.Mirror` writes the entries directly and reaches
+  neither, which is how a sync still writes what a person cannot.
+  """
+  @spec ensure_mine(Ash.UUID.t()) :: :ok | {:error, term()}
+  def ensure_mine(playlist_id) do
+    case Ash.get(__MODULE__, playlist_id, domain: PiFi.Playback) do
+      {:ok, playlist} -> refuse_unless_mine(playlist)
+      {:error, _reason} -> {:error, :no_such_playlist}
+    end
+  end
+
+  defp refuse_unless_mine(playlist) do
+    if mine?(playlist), do: :ok, else: {:error, {:not_yours, playlist.source}}
+  end
+
   sqlite do
     table "playback_playlists"
     repo PiFi.Repo
@@ -65,8 +127,64 @@ defmodule PiFi.Playback.Playlist do
     end
 
     update :rename do
-      description "Give this playlist another name."
+      description """
+      Give this playlist another name.
+
+      A mirrored one takes no new name: the next read of the service would write the
+      old one back, so this refuses rather than losing the change later.
+      """
+
       accept [:name]
+
+      # The guard reads the row that it is changing, so this is not one statement.
+      require_atomic? false
+
+      validate &mine/2
+    end
+
+    create :mirror do
+      description """
+      Write a playlist that a sync read from a service, or bring the one it wrote up
+      to date.
+
+      **The key is `source_ref` and not the name**, because a service lets a person
+      rename a playlist and the row has to follow that rather than make a second one.
+
+      `source_updated_at` is what tells a later read whether the tracks are worth
+      reading again, and `last_seen_at` is what keeps this row when the sync removes
+      the ones it did not see.
+      """
+
+      upsert? true
+      upsert_identity :source_playlist
+
+      accept [:name, :source, :source_ref, :source_updated_at, :last_seen_at]
+    end
+
+    read :of_source do
+      description "The playlists that one service gave this device."
+
+      argument :source, :string, allow_nil?: false
+
+      filter expr(source == ^arg(:source))
+      prepare build(sort: [name: :asc])
+    end
+
+    read :unseen do
+      description """
+      The playlists of one service that a read did not see.
+
+      A person removed them on the service, so they go. See
+      `PiFi.Plex.Sync.Library`.
+      """
+
+      argument :source, :string, allow_nil?: false
+      argument :since, :utc_datetime_usec, allow_nil?: false
+
+      filter expr(
+               source == ^arg(:source) and
+                 (is_nil(last_seen_at) or last_seen_at < ^arg(:since))
+             )
     end
 
     action :add, {:array, :struct} do
@@ -83,6 +201,26 @@ defmodule PiFi.Playback.Playlist do
       argument :item_ids, {:array, :uuid}, allow_nil?: false
 
       run PiFi.Playback.Playlist.Add
+    end
+
+    action :replace_entries, :integer do
+      description """
+      Put exactly these tracks in this playlist, in this order, and give the count.
+
+      A sync calls this and a person never does. It writes the whole list rather than
+      working out a difference: a service gives the order and nothing else, so a
+      difference would have to compare every place anyway, and this way a playlist
+      that a person reordered on the server reads correctly with no special case.
+
+      **It writes nothing when the playlist already reads this way**, because an SD
+      card has a finite number of writes and most reads of a library find a playlist
+      that nobody touched. See `PiFi.Playback.Playlist.Mirror`.
+      """
+
+      argument :playlist_id, :uuid, allow_nil?: false
+      argument :item_ids, {:array, :uuid}, allow_nil?: false
+
+      run PiFi.Playback.Playlist.Mirror
     end
 
     action :item_ids, {:array, :uuid} do
@@ -103,9 +241,38 @@ defmodule PiFi.Playback.Playlist do
       Remove this playlist, and the entries of it.
 
       The tracks stay. A playlist names an item and it does not own one.
+
+      A mirrored one takes no removal from a person: the next read of the service
+      would write it back, so the control belongs on the service and not here.
       """
 
       primary? true
+
+      require_atomic? false
+
+      validate &mine/2
+    end
+
+    destroy :forget do
+      description """
+      Remove a playlist that the service no longer has.
+
+      This is the removal that a sync makes, and it is the one path that takes a
+      mirrored playlist away.
+      """
+    end
+  end
+
+  # A mirrored playlist reads the same as any other and it takes no edit, because the
+  # next read of the service would write over whatever a person did.
+  defp mine(changeset, _context) do
+    if mine?(changeset.data) do
+      :ok
+    else
+      {:error,
+       field: :source,
+       message: "comes from %{source} and changes to it belong there",
+       vars: [source: changeset.data.source]}
     end
   end
 
@@ -117,6 +284,34 @@ defmodule PiFi.Playback.Playlist do
       allow_nil? false
       public? true
       constraints min_length: 1, max_length: 100, trim?: true, allow_empty?: false
+    end
+
+    attribute :source, :string do
+      description "`device` for a playlist that a person made, or the slug of a source."
+      allow_nil? false
+      default @device_source
+      public? true
+    end
+
+    attribute :source_ref, :string do
+      description "What the service calls this playlist. A playlist a person made has none."
+      public? true
+    end
+
+    attribute :source_updated_at, :utc_datetime_usec do
+      description """
+      When the service last changed this playlist.
+
+      A sync reads the tracks of a playlist only when this moved, so an hourly read of
+      a library that nobody touched writes nothing at all.
+      """
+
+      public? true
+    end
+
+    attribute :last_seen_at, :utc_datetime_usec do
+      description "When a sync last saw this playlist on the service."
+      public? true
     end
 
     timestamps()
@@ -140,9 +335,23 @@ defmodule PiFi.Playback.Playlist do
   end
 
   identities do
-    identity :name, [:name] do
+    identity :source_playlist, [:source, :source_ref] do
+      description """
+      One row for each playlist of a service.
+
+      **A service renames a playlist and the row follows**, so the reference is what
+      identifies it and the name is not. A playlist that a person made here carries no
+      reference, and SQLite counts two NULLs as different values in a unique index, so
+      this constrains none of them.
+      """
+    end
+
+    identity :name, [:source, :name] do
       description """
       One playlist for each name.
+
+      A service names its own, so the source is part of it: a person who calls a
+      playlist `Rock` and a Plex server that holds one of that name are two rows.
 
       **The index compares the bytes, and a filter compares the letters.** `name` is
       an `Ash.Type.CiString`, so AshSqlite writes `COLLATE NOCASE` for a filter and

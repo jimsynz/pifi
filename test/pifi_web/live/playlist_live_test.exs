@@ -250,4 +250,70 @@ defmodule PiFiWeb.PlaylistLiveTest do
       )
     end
   end
+
+  # **A playlist can come from a service now**, and a person needs to read which. It
+  # takes no edit here either: the next read of that service would write over it.
+  describe "a playlist that a service keeps" do
+    setup do
+      {:ok, mirrored} =
+        PiFi.Playback.mirror_playlist(%{
+          source: "plex",
+          source_ref: "p1",
+          name: "From the server",
+          last_seen_at: DateTime.utc_now()
+        })
+
+      %{mirrored: mirrored}
+    end
+
+    test "the list draws the mark of the service beside it", %{conn: conn, mirrored: mirrored} do
+      {:ok, view, _html} = live(conn, ~p"/playlists")
+
+      assert has_element?(view, "#playlist-#{mirrored.id} .brand-plex")
+      refute has_element?(view, "#playlist-#{mirrored.id} .ph-list-bullets")
+    end
+
+    test "it says which service keeps it, and offers no rename", %{conn: conn, mirrored: mirrored} do
+      {:ok, view, html} = live(conn, ~p"/playlists/#{mirrored.id}")
+
+      assert html =~ "Plex keeps this playlist"
+      refute has_element?(view, "#rename-form")
+      refute has_element?(view, "#remove-playlist")
+    end
+
+    test "a playlist that a person made draws the list mark and offers both", %{conn: conn} do
+      {:ok, mine} = PiFi.Playback.create_playlist("Mine")
+
+      {:ok, index, _html} = live(conn, ~p"/playlists")
+
+      assert has_element?(index, "#playlist-#{mine.id} .ph-list-bullets")
+      refute has_element?(index, "#playlist-#{mine.id} .brand-plex")
+
+      {:ok, view, _html} = live(conn, ~p"/playlists/#{mine.id}")
+
+      assert has_element?(view, "#rename-form")
+      assert has_element?(view, "#remove-playlist")
+    end
+
+    test "the resource refuses a rename whatever asks", %{mirrored: mirrored} do
+      assert {:error, _reason} = PiFi.Playback.rename_playlist(mirrored, "Mine now")
+    end
+
+    test "the resource refuses a removal whatever asks", %{mirrored: mirrored} do
+      assert {:error, _reason} = PiFi.Playback.destroy_playlist(mirrored)
+    end
+
+    test "the resource refuses a track added to it", %{mirrored: mirrored} do
+      item =
+        PiFi.Playback.upsert_item!(%{
+          source: "plex",
+          source_ref: "t1",
+          title: "A track",
+          kind: :track,
+          keeps_place?: false
+        })
+
+      assert {:error, _reason} = PiFi.Playback.add_to_playlist(mirrored.id, [item.id])
+    end
+  end
 end

@@ -38,6 +38,8 @@ defmodule PiFiWeb.PlaylistLive do
   alias PiFi.Event
   alias PiFi.Event.Player, as: Events
   alias PiFi.Playback
+  alias PiFi.Playback.Playlist
+  alias PiFi.Source
 
   import PiFiWeb.ItemList, only: [cover: 1]
 
@@ -230,7 +232,7 @@ defmodule PiFiWeb.PlaylistLive do
               id={"open-#{playlist.id}"}
               class="group flex min-w-0 grow items-center gap-3 py-2 text-left"
             >
-              <.icon name="ph-list-bullets" class="size-5 shrink-0 text-ink-faint" />
+              <.playlist_mark playlist={playlist} />
               <span class="min-w-0 grow">
                 <span class="block truncate text-ink group-hover:text-accent">{playlist.name}</span>
                 <span class="block truncate text-xs text-ink-faint">
@@ -280,6 +282,7 @@ defmodule PiFiWeb.PlaylistLive do
         >
           <.icon name="ph-caret-left" class="size-4" />
         </.link>
+        <.playlist_mark playlist={@playlist} class="size-4 shrink-0 text-ink-faint" />
         <h2 id="playlist-name" class="grow truncate text-xs uppercase tracking-[0.18em] text-ink-faint">
           {@playlist.name}
         </h2>
@@ -296,6 +299,7 @@ defmodule PiFiWeb.PlaylistLive do
         </button>
 
         <button
+          :if={Playlist.mine?(@playlist)}
           type="button"
           id="remove-playlist"
           phx-click="remove_playlist"
@@ -307,7 +311,20 @@ defmodule PiFiWeb.PlaylistLive do
         </button>
       </div>
 
-      <form id="rename-form" phx-submit="rename" class="mb-3 flex items-center gap-2">
+      <p
+        :if={not Playlist.mine?(@playlist)}
+        id="playlist-source"
+        class="mb-3 text-sm text-ink-dim"
+      >
+        {from(@playlist)} keeps this playlist. Change it there and PiFi follows.
+      </p>
+
+      <form
+        :if={Playlist.mine?(@playlist)}
+        id="rename-form"
+        phx-submit="rename"
+        class="mb-3 flex items-center gap-2"
+      >
         <input
           type="text"
           id="new-name"
@@ -331,19 +348,53 @@ defmodule PiFiWeb.PlaylistLive do
       <ul
         :if={@rows != []}
         id="playlist-rows"
-        phx-hook="DragToReorder"
+        phx-hook={Playlist.mine?(@playlist) && "DragToReorder"}
         class="divide-y divide-edge"
       >
         <li :for={row <- @rows} id={"entry-#{row.id}"} data-row={row.id}>
-          <.entry row={row} playing_id={@playing_id} />
+          <.entry row={row} playing_id={@playing_id} mine?={Playlist.mine?(@playlist)} />
         </li>
       </ul>
     </div>
     """
   end
 
+  # The mark beside the name of a playlist. A playlist that a person made draws a list.
+  # One that a service gave draws the mark of that service, so a person reads where it
+  # came from without opening it.
+  attr(:playlist, :map, required: true)
+  attr(:class, :any, default: "size-5 shrink-0 text-ink-faint")
+
+  defp playlist_mark(assigns) do
+    assigns = assign(assigns, :mark, mark_of(assigns.playlist))
+
+    ~H"""
+    <.source_icon :if={@mark} name={@mark} class={@class} />
+    <.icon :if={is_nil(@mark)} name="ph-list-bullets" class={@class} />
+    """
+  end
+
+  defp mark_of(playlist) do
+    with false <- Playlist.mine?(playlist),
+         {:ok, module} <- Source.from_slug(playlist.source) do
+      module.icon()
+    else
+      _other -> nil
+    end
+  end
+
+  # A source that this firmware no longer holds still names itself in the row, so a
+  # person reads something rather than a blank.
+  defp from(playlist) do
+    case Source.from_slug(playlist.source) do
+      {:ok, module} -> module.title()
+      {:error, _reason} -> playlist.source
+    end
+  end
+
   attr(:row, :map, required: true)
   attr(:playing_id, :any, required: true)
+  attr(:mine?, :boolean, required: true)
 
   defp entry(assigns) do
     assigns = assign(assigns, :artwork, Artwork.thumbnail_path(assigns.row.item.artwork))
@@ -379,6 +430,7 @@ defmodule PiFiWeb.PlaylistLive do
       </span>
 
       <span
+        :if={@mine?}
         id={"drag-#{@row.id}"}
         data-drag-handle
         aria-label="Drag to reorder"
@@ -388,6 +440,7 @@ defmodule PiFiWeb.PlaylistLive do
       </span>
 
       <button
+        :if={@mine?}
         type="button"
         id={"remove-#{@row.id}"}
         phx-click="remove"

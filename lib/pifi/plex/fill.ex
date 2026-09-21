@@ -67,6 +67,7 @@ defmodule PiFi.Plex.Fill do
   alias PiFi.Playback
   alias PiFi.Playback.Item
   alias PiFi.Playback.ItemFacet
+  alias PiFi.Playback.Playlist
   alias PiFi.Plex.Server
 
   @source "plex"
@@ -144,6 +145,94 @@ defmodule PiFi.Plex.Fill do
   """
   @spec record_label_key() :: String.t()
   def record_label_key, do: @record_label_key
+
+  @doc """
+  Write the row of one playlist of the server, or bring the one this device has up to
+  date, and mark it seen.
+
+  It writes the name and never `source_updated_at`: that moment says the tracks are
+  current, and only `playlist_tracks/3` may claim it.
+  """
+  @spec playlist(Server.playlist(), DateTime.t()) :: {:ok, Playlist.t()} | {:error, term()}
+  def playlist(entry, seen_at) do
+    Playback.mirror_playlist(%{
+      source: @source,
+      source_ref: entry.ref,
+      name: entry.title,
+      last_seen_at: seen_at
+    })
+  end
+
+  @doc """
+  Whether the tracks of this playlist are worth reading again.
+
+  **Most reads of a library find a playlist that nobody touched**, and the tracks of
+  one are a request for every 50 of them, so this is what keeps an hourly sync cheap.
+
+  A server that names no moment gives `nil`, and then the answer is always yes: a read
+  that costs a request is better than a playlist that never changes again.
+  """
+  @spec playlist_current?(Playlist.t(), Server.playlist()) :: boolean()
+  def playlist_current?(%{source_updated_at: held}, %{updated_at: %DateTime{} = moved})
+      when not is_nil(held) do
+    DateTime.compare(held, moved) != :lt
+  end
+
+  def playlist_current?(_row, _entry), do: false
+
+  @doc """
+  Put the tracks of one playlist in the order that the server gave, and give the count.
+
+  The references name tracks that `tracks/1` has already written, so this reads the
+  catalogue for them. **A reference that this device has not read yet is left out**, and
+  the playlist is then shorter here than on the server.
+
+  It claims `source_updated_at` only for a playlist that it wrote whole. A read that
+  stopped part way through the library leaves tracks missing, and a row that claimed
+  the moment anyway would be skipped by every later read and stay short for ever.
+  """
+  @spec playlist_tracks(Playlist.t(), [String.t()], DateTime.t() | nil) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def playlist_tracks(row, refs, updated_at) do
+    item_ids = track_ids(refs)
+
+    with {:ok, count} <- Playback.mirror_playlist_entries(row.id, item_ids),
+         :ok <- claim(row, updated_at, length(item_ids) == length(refs)) do
+      {:ok, count}
+    end
+  end
+
+  # **The order is the order of the references**, and a read of the catalogue gives no
+  # order at all, so this reads a map and then walks the list that the server gave. A
+  # track that a person put in twice is in the list twice, and the map answers for both.
+  defp track_ids([]), do: []
+
+  defp track_ids(refs) do
+    ids =
+      Item
+      |> Ash.Query.filter(source == ^@source and source_ref in ^Enum.uniq(refs))
+      |> Ash.Query.select([:id, :source_ref])
+      |> Ash.read!()
+      |> Map.new(&{&1.source_ref, &1.id})
+
+    refs |> Enum.map(&ids[&1]) |> Enum.reject(&is_nil/1)
+  end
+
+  defp claim(_row, _updated_at, false), do: :ok
+  defp claim(_row, nil, _whole?), do: :ok
+
+  defp claim(row, updated_at, true) do
+    with {:ok, _row} <-
+           Playback.mirror_playlist(%{
+             source: @source,
+             source_ref: row.source_ref,
+             name: to_string(row.name),
+             source_updated_at: updated_at,
+             last_seen_at: row.last_seen_at
+           }) do
+      :ok
+    end
+  end
 
   @doc "Write one page of tracks, and give the number that it wrote."
   @spec tracks([Server.entry()]) :: non_neg_integer()

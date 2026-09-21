@@ -77,6 +77,7 @@ defmodule PiFi.Plex.Sync.Library do
   require Logger
 
   alias PiFi.Event
+  alias PiFi.Playback
   alias PiFi.Playback.Item
   alias PiFi.Plex.Fill
   alias PiFi.Plex.Server
@@ -98,7 +99,16 @@ defmodule PiFi.Plex.Sync.Library do
     if Source.enabled?(Source.Plex) and Server.configured?() do
       sync()
     else
-      {:ok, %{artists: 0, albums: 0, tracks: 0, removed: 0, skipped?: true}}
+      {:ok,
+       %{
+         artists: 0,
+         albums: 0,
+         tracks: 0,
+         playlists: 0,
+         removed: 0,
+         forgotten: 0,
+         skipped?: true
+       }}
     end
   end
 
@@ -107,18 +117,92 @@ defmodule PiFi.Plex.Sync.Library do
          {:ok, sections} <- Server.sections(link),
          {:ok, sections} <- music(sections),
          point = start_point(sections),
-         {:ok, counts} <- read_from(point, sections, link) do
+         {:ok, counts} <- read_from(point, sections, link),
+         {:ok, playlists} <- read_playlists(point.started_at, link) do
       gone = remove_unseen(point.started_at)
+      forgotten = forget_unseen_playlists(point.started_at)
       Checkpoint.forget()
       announce()
 
       Logger.info(
-        "The Plex library gave #{counts.artists} artists, #{counts.albums} albums " <>
-          "and #{counts.tracks} tracks, and #{gone} items are no longer on the server."
+        "The Plex library gave #{counts.artists} artists, #{counts.albums} albums, " <>
+          "#{counts.tracks} tracks and #{playlists} playlists, and #{gone} items and " <>
+          "#{forgotten} playlists are no longer on the server."
       )
 
-      {:ok, Map.merge(counts, %{removed: gone, skipped?: false})}
+      {:ok,
+       Map.merge(counts, %{
+         playlists: playlists,
+         removed: gone,
+         forgotten: forgotten,
+         skipped?: false
+       })}
     end
+  end
+
+  # **A playlist belongs to the server and not to a section**, so this is not one of
+  # `@kinds` and it takes no part in the checkpoint: it runs once, after every section
+  # of every kind, and a read that resumes does the whole of it again. That costs one
+  # request, because the tracks of a playlist are only read when the server says it
+  # changed.
+  #
+  # **It runs after the tracks and it must.** A playlist names its tracks by the same
+  # reference that a track row carries, so a pass that ran first would find nothing to
+  # point at.
+  defp read_playlists(started_at, link) do
+    with {:ok, playlists} <- Server.playlists(link) do
+      Enum.reduce_while(playlists, {:ok, 0}, &mirrored(&1, &2, started_at, link))
+    end
+  end
+
+  # One that fails stops the read, in the way that a page of a section does, so the
+  # removal below never runs against a list that this device did not finish reading.
+  defp mirrored(playlist, {:ok, written}, started_at, link) do
+    case mirror(playlist, started_at, link) do
+      {:ok, _count} -> {:cont, {:ok, written + 1}}
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
+  end
+
+  defp mirror(playlist, started_at, link) do
+    with {:ok, row} <- Fill.playlist(playlist, started_at) do
+      tracks(row, playlist, link, Fill.playlist_current?(row, playlist))
+    end
+  end
+
+  # A playlist that the server says is unchanged costs the row above and nothing else.
+  defp tracks(_row, _playlist, _link, true), do: {:ok, 0}
+
+  defp tracks(row, playlist, link, false) do
+    with {:ok, refs} <- playlist_refs(playlist.ref, 0, [], link) do
+      Fill.playlist_tracks(row, refs, playlist.updated_at)
+    end
+  end
+
+  defp playlist_refs(ref, start, held, link) do
+    case Server.playlist_refs(ref, start, link) do
+      {:ok, %{count: 0}} ->
+        {:ok, held}
+
+      {:ok, %{refs: refs, count: count, total: total}} ->
+        next = start + count
+        all = held ++ refs
+
+        if next >= total, do: {:ok, all}, else: playlist_refs(ref, next, all, link)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # A person removed the playlist on the server, so it goes here as well. The tracks
+  # stay: a playlist names an item and it does not own one.
+  defp forget_unseen_playlists(started_at) do
+    unseen = Playback.unseen_playlists!(Fill.source(), started_at)
+
+    for playlist <- unseen, do: Playback.forget_playlist!(playlist)
+
+    length(unseen)
   end
 
   # A server that holds no music is a server that this device cannot read, and it is

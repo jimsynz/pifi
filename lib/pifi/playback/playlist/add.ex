@@ -6,17 +6,26 @@ defmodule PiFi.Playback.Playlist.Add do
   the order of the list that it gets. **A track that the playlist already carries goes
   in again**, because a person who asks for one twice means it.
 
+  It refuses a playlist that a service owns, because the next read of that service
+  would write the addition away. See `PiFi.Playback.Playlist.ensure_mine/1`.
+
   It returns the entries that it wrote.
   """
 
   use Ash.Resource.Actions.Implementation
 
+  alias PiFi.Playback.Playlist
   alias PiFi.Playback.Playlist.Order
   alias PiFi.Playback.PlaylistEntry
 
   @impl true
   def run(input, _options, _context) do
     playlist_id = input.arguments.playlist_id
+
+    with :ok <- Playlist.ensure_mine(playlist_id), do: added(input, playlist_id)
+  end
+
+  defp added(input, playlist_id) do
     next = Order.next_position(playlist_id)
 
     entries =

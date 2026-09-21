@@ -58,6 +58,11 @@ defmodule PiFi.Playback do
       define :rename_playlist, action: :rename, args: [:name]
       define :destroy_playlist, action: :destroy
       define :add_to_playlist, action: :add, args: [:playlist_id, :item_ids]
+      define :mirror_playlist, action: :mirror
+      define :mirror_playlist_entries, action: :replace_entries, args: [:playlist_id, :item_ids]
+      define :playlists_of_source, action: :of_source, args: [:source]
+      define :unseen_playlists, action: :unseen, args: [:source, :since]
+      define :forget_playlist, action: :forget
       define :playlist_item_ids, action: :item_ids, args: [:playlist_id]
     end
 

@@ -187,6 +187,13 @@ defmodule PiFi.Plex.Server do
   """
   @type page :: %{entries: [entry()], count: non_neg_integer(), total: non_neg_integer()}
 
+  @typedoc "One playlist of the server, as `playlists/1` reports it."
+  @type playlist :: %{
+          ref: String.t(),
+          title: String.t(),
+          updated_at: DateTime.t() | nil
+        }
+
   @typedoc "One server of the account, as `servers/0` reports it."
   @type resource :: %{
           name: String.t(),
@@ -514,6 +521,83 @@ defmodule PiFi.Plex.Server do
       {:ok,
        %{
          entries: parse(items, kind, address, token),
+         count: length(items),
+         total: total(container, items)
+       }}
+    end
+  end
+
+  @doc """
+  Every audio playlist of the server.
+
+  **A playlist belongs to the server and not to a library section**, unlike an artist
+  or an album, so this takes no section and a caller must read it once and not once for
+  each section.
+
+  `playlistType=audio` is what leaves out the video and the photo ones. A smart
+  playlist is a query that the server runs, and it answers here in the same shape as
+  any other, so this device reads what the query gave at the moment it asked.
+
+  `updated_at` is the moment the server last changed the playlist, and it is the reason
+  an hourly sync of a library that nobody touched costs one request: a read that finds
+  it unmoved never asks for the tracks. A server that names none gives `nil`, and a
+  caller then has to read the tracks to find out.
+  """
+  @spec playlists(map() | nil) :: {:ok, [playlist()]} | {:error, term()}
+  def playlists(link \\ nil)
+
+  def playlists(nil) do
+    with {:ok, link} <- link(), do: playlists(link)
+  end
+
+  def playlists(%{address: address, token: token, client_id: client_id}) do
+    with {:ok, body} <-
+           request(:get, address, token, "/playlists", [{"playlistType", "audio"}], [], client_id) do
+      playlists =
+        body
+        |> container()
+        |> Map.get("Metadata", [])
+        |> List.wrap()
+        |> Enum.map(&to_playlist/1)
+        |> Enum.reject(&is_nil/1)
+
+      {:ok, playlists}
+    end
+  end
+
+  @doc """
+  Read one page of the tracks of one playlist, in the order that they play.
+
+  The answer carries the reference of each track and nothing else, because the track
+  itself is already a row that `PiFi.Plex.Sync.Library` wrote: a playlist names what it
+  holds and it does not describe it again.
+
+  **A track appears twice when a person put it in twice**, so this keeps every entry in
+  the order the server gave and removes no repeat.
+  """
+  @spec playlist_refs(String.t(), non_neg_integer(), map() | nil) ::
+          {:ok, %{refs: [String.t()], count: non_neg_integer(), total: non_neg_integer()}}
+          | {:error, term()}
+  def playlist_refs(ref, start, link \\ nil)
+
+  def playlist_refs(ref, start, nil) do
+    with {:ok, link} <- link(), do: playlist_refs(ref, start, link)
+  end
+
+  def playlist_refs(ref, start, %{address: address, token: token, client_id: client_id}) do
+    paging = [
+      {"x-plex-container-start", to_string(start)},
+      {"x-plex-container-size", to_string(@page)}
+    ]
+
+    with {:ok, body} <-
+           request(:get, address, token, "/playlists/#{ref}/items", [], paging, client_id) do
+      container = container(body)
+      items = container |> Map.get("Metadata", []) |> List.wrap()
+
+      {:ok,
+       %{
+         refs: items |> Enum.map(& &1["ratingKey"]) |> Enum.filter(&is_binary/1),
          count: length(items),
          total: total(container, items)
        }}
@@ -1251,6 +1335,23 @@ defmodule PiFi.Plex.Server do
   defp item_type(:artists), do: @artist_type
   defp item_type(:albums), do: @album_type
   defp item_type(:tracks), do: @track_type
+
+  # A playlist with no identifier or no name cannot become a row, in the way that an
+  # artist with neither cannot. `updatedAt` is seconds since the epoch, and a server
+  # that names none leaves the caller to read the tracks to find out what changed.
+  defp to_playlist(%{"ratingKey" => ref, "title" => title} = entry)
+       when is_binary(ref) and is_binary(title) and title != "" do
+    %{ref: ref, title: title, updated_at: seconds(entry["updatedAt"])}
+  end
+
+  defp to_playlist(_entry), do: nil
+
+  defp seconds(value) do
+    case whole(value) do
+      nil -> nil
+      number -> DateTime.from_unix!(number)
+    end
+  end
 
   defp container(body) when is_map(body), do: Map.get(body, "MediaContainer", %{})
   defp container(_body), do: %{}

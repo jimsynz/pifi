@@ -67,13 +67,52 @@ defmodule PiFi.Plex.SyncTest do
   # test can measure the paging.
   #
   # `library` is `%{section => %{type => [item]}}`.
-  defp stub_library(library) do
+  defp stub_library(library), do: stub_library(library, %{})
+
+  # `playlists` is `%{ref => %{title: _, updated_at: _, refs: [track ref]}}`, and a
+  # server with none answers an empty list rather than a 404.
+  defp stub_library(library, playlists) do
     test = self()
 
     Req.Test.stub(Server, fn conn ->
       conn = Plug.Conn.fetch_query_params(conn)
 
       case conn.request_path do
+        "/playlists" ->
+          send(test, {:request, :playlists, nil, nil})
+
+          Req.Test.json(conn, %{
+            "MediaContainer" => %{
+              "Metadata" =>
+                Enum.map(playlists, fn {ref, playlist} ->
+                  %{
+                    "ratingKey" => ref,
+                    "title" => playlist.title,
+                    "updatedAt" => playlist[:updated_at]
+                  }
+                end)
+            }
+          })
+
+        "/playlists/" <> rest ->
+          ref = rest |> String.split("/") |> List.first()
+          refs = playlists |> Map.get(ref, %{}) |> Map.get(:refs, [])
+          start = header(conn, "x-plex-container-start")
+          size = header(conn, "x-plex-container-size")
+
+          send(test, {:request, :playlist_items, ref, start})
+
+          Req.Test.json(conn, %{
+            "MediaContainer" => %{
+              "Metadata" =>
+                refs
+                |> Enum.drop(start)
+                |> Enum.take(size)
+                |> Enum.map(&%{"ratingKey" => &1}),
+              "totalSize" => length(refs)
+            }
+          })
+
         "/library/sections" ->
           send(test, {:request, :sections, nil, nil})
 
@@ -129,6 +168,161 @@ defmodule PiFi.Plex.SyncTest do
     |> Ash.Query.filter(source == ^Fill.source() and kind == ^kind)
     |> Ash.Query.sort(title: :asc)
     |> Ash.read!()
+  end
+
+  defp playlists_here do
+    Playback.list_playlists!() |> Enum.sort_by(&to_string(&1.name))
+  end
+
+  defp entry_refs(playlist) do
+    playlist.id
+    |> Playback.playlist_entries!(load: [:item])
+    |> Enum.map(& &1.item.source_ref)
+  end
+
+  # **A playlist belongs to the server and not to a library section**, and it names
+  # tracks that the track pass has already written, so it reads last and once.
+  describe "the playlists of the server" do
+    test "it writes one row for each, with the tracks in the order the server gave" do
+      stub_library(
+        one_section([artist(1)], [album(1, 1)], [track(1, 1), track(2, 1)]),
+        %{"p1" => %{title: "Road trip", refs: ["track-2", "track-1"]}}
+      )
+
+      assert {:ok, counts} = Plex.sync_library()
+      assert counts.playlists == 1
+
+      assert [playlist] = playlists_here()
+      assert to_string(playlist.name) == "Road trip"
+      assert playlist.source == Fill.source()
+      assert playlist.source_ref == "p1"
+      refute Playback.Playlist.mine?(playlist)
+
+      assert entry_refs(playlist) == ["track-2", "track-1"]
+    end
+
+    # `PiFi.Playback.PlaylistEntry` says it in as many words: a track goes in twice if
+    # a person asks twice. This is the case a facet could never have represented.
+    test "a track that a person put in twice is in it twice" do
+      stub_library(
+        one_section([artist(1)], [album(1, 1)], [track(1, 1)]),
+        %{"p1" => %{title: "On repeat", refs: ["track-1", "track-1", "track-1"]}}
+      )
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert [playlist] = playlists_here()
+      assert entry_refs(playlist) == ["track-1", "track-1", "track-1"]
+    end
+
+    # A person removed it on the server, so it goes here. The tracks stay: a playlist
+    # names an item and it does not own one.
+    test "one that the server no longer has goes, and its tracks stay" do
+      library = one_section([artist(1)], [album(1, 1)], [track(1, 1)])
+
+      stub_library(library, %{"p1" => %{title: "Gone soon", refs: ["track-1"]}})
+      assert {:ok, _counts} = Plex.sync_library()
+      assert length(playlists_here()) == 1
+
+      stub_library(library, %{})
+      assert {:ok, counts} = Plex.sync_library()
+
+      assert counts.forgotten == 1
+      assert playlists_here() == []
+      assert length(items_of(:track)) == 1
+    end
+
+    # **An SD card has a finite number of writes**, and most reads find a playlist that
+    # nobody touched, so the tracks of one are read only when the server says it moved.
+    test "one that did not change is not read again" do
+      library = one_section([artist(1)], [album(1, 1)], [track(1, 1)])
+      playlists = %{"p1" => %{title: "Steady", updated_at: 1_700_000_000, refs: ["track-1"]}}
+
+      stub_library(library, playlists)
+      assert {:ok, _counts} = Plex.sync_library()
+      assert_received {:request, :playlist_items, "p1", _start}
+
+      stub_library(library, playlists)
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert_received {:request, :playlists, _ref, _start}
+      refute_received {:request, :playlist_items, "p1", _start}
+    end
+
+    test "one that changed is read again" do
+      library = one_section([artist(1)], [album(1, 1)], [track(1, 1), track(2, 1)])
+
+      stub_library(library, %{
+        "p1" => %{title: "Moving", updated_at: 1_700_000_000, refs: ["track-1"]}
+      })
+
+      assert {:ok, _counts} = Plex.sync_library()
+      assert entry_refs(hd(playlists_here())) == ["track-1"]
+
+      stub_library(library, %{
+        "p1" => %{title: "Moving", updated_at: 1_700_000_900, refs: ["track-1", "track-2"]}
+      })
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert entry_refs(hd(playlists_here())) == ["track-1", "track-2"]
+    end
+
+    # A server lets a person rename a playlist, and the row follows rather than making
+    # a second one, because the reference identifies it and the name does not.
+    test "a rename on the server renames the row" do
+      library = one_section([artist(1)], [album(1, 1)], [track(1, 1)])
+
+      stub_library(library, %{"p1" => %{title: "Old name", refs: ["track-1"]}})
+      assert {:ok, _counts} = Plex.sync_library()
+
+      stub_library(library, %{"p1" => %{title: "New name", refs: ["track-1"]}})
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert [playlist] = playlists_here()
+      assert to_string(playlist.name) == "New name"
+    end
+
+    test "a playlist that a person made here is left alone" do
+      {:ok, mine} = Playback.create_playlist("Mine")
+
+      stub_library(one_section([artist(1)], [album(1, 1)], [track(1, 1)]), %{})
+      assert {:ok, counts} = Plex.sync_library()
+
+      assert counts.forgotten == 0
+      assert [kept] = playlists_here()
+      assert kept.id == mine.id
+      assert Playback.Playlist.mine?(kept)
+    end
+
+    # A read that stopped part way through the library leaves tracks missing. A row
+    # that claimed the moment anyway would be skipped by every later read and stay
+    # short for ever.
+    test "one whose tracks this device has not read yet is read again next time" do
+      stub_library(
+        one_section([artist(1)], [album(1, 1)], [track(1, 1)]),
+        %{
+          "p1" => %{title: "Partly here", updated_at: 1_700_000_000, refs: ["track-1", "track-9"]}
+        }
+      )
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert [playlist] = playlists_here()
+      assert entry_refs(playlist) == ["track-1"]
+      assert playlist.source_updated_at == nil
+
+      stub_library(
+        one_section([artist(1)], [album(1, 1)], [track(1, 1), track(9, 1)]),
+        %{
+          "p1" => %{title: "Partly here", updated_at: 1_700_000_000, refs: ["track-1", "track-9"]}
+        }
+      )
+
+      assert {:ok, _counts} = Plex.sync_library()
+
+      assert entry_refs(hd(playlists_here())) == ["track-1", "track-9"]
+    end
   end
 
   describe "sync_library" do
