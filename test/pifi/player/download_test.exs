@@ -11,6 +11,14 @@ defmodule PiFi.Player.DownloadTest do
 
   setup do
     Application.put_env(:pifi, Download, plug: {Req.Test, Download}, retry: false)
+
+    # **The wait between attempts is real time, and it is set for the whole file.** It
+    # used to be set inside one describe block and cleared when that block ended, so a
+    # download still asking again took the production wait of two seconds a step — and
+    # outlived the drain below, into the next test, where its requests answered that
+    # test's stub. Two tests failed that way in CI.
+    Application.put_env(:pifi, :download_backoff_ms, 10)
+
     Req.Test.set_req_test_from_context(%{async: false})
 
     clean = fn ->
@@ -23,6 +31,7 @@ defmodule PiFi.Player.DownloadTest do
     on_exit(fn ->
       drained()
       Application.delete_env(:pifi, Download)
+      Application.delete_env(:pifi, :download_backoff_ms)
       clean.()
     end)
 
@@ -229,14 +238,6 @@ defmodule PiFi.Player.DownloadTest do
   # gives it several: a person plays a track while a mark reads a whole discography. The
   # read of the track died for that, and the pipeline with it, so the music stopped.
   describe "a connection that closes part way" do
-    setup do
-      # The wait between attempts is real time, so these keep it short.
-      Application.put_env(:pifi, :download_backoff_ms, 10)
-      on_exit(fn -> Application.delete_env(:pifi, :download_backoff_ms) end)
-
-      :ok
-    end
-
     # **Each attempt runs in a process of its own**, because the request is spawned, so
     # the count of them lives outside all of them.
     #
