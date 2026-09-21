@@ -242,9 +242,14 @@ defmodule PiFi.MixProject do
       # so a USB DAC cannot work on it. It also gives 192 MB to the GPU and
       # reserves 128 MB of CMA, and this device drives no display over HDMI. See
       # the README of the system.
+      #
+      # 0.2.0 turns the Bluetooth of the kernel on and ships the firmware blob that the
+      # `btbcm` driver loads, which is the part that cannot come from NBPR: a blob is
+      # loaded before any of the rootfs is this project's code. The daemon and the
+      # library that speak to it are NBPR packages. See `PiFi.Bluetooth`.
       {:nerves_system_pifi_rpi0_2,
        git: "https://harton.dev/mypihifiguy/nerves_system_pifi_rpi0_2.git",
-       tag: "v0.1.3",
+       tag: "v0.2.0",
        runtime: false,
        targets: :pifi_rpi0_2,
        nerves: [compile: true]},
