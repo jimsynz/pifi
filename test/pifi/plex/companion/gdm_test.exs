@@ -42,6 +42,28 @@ defmodule PiFi.Plex.Companion.GdmTest do
       assert port == Gdm.search_port()
     end
 
+    # **A responder of UDP must not read the database for each packet, and this used to.**
+    # `PiFi.Plex.Server.client_id/0` reads the settings and writes them the first time
+    # anything asks, so every search cost a read. A read that met a busy database took
+    # the responder down with it, and CI caught exactly that: the answer never left and
+    # the search timed out.
+    #
+    # Taking the setting away between two searches is how a test sees the difference. A
+    # responder that reads it again would make a new identifier and a controller would
+    # list two players; one that read it once answers the same both times.
+    test "it reads its identifier once and not for each search", %{socket: socket} do
+      {:ok, {_address, _port, first}} = search(socket)
+      identifier = headers(first)["Resource-Identifier"]
+
+      assert identifier
+      assert {:ok, setting} = PiFi.Settings.fetch(Server.client_id_setting())
+      assert :ok = PiFi.Settings.delete(setting)
+
+      {:ok, {_address, _port, second}} = search(socket)
+
+      assert headers(second)["Resource-Identifier"] == identifier
+    end
+
     test "it names what a controller needs to draw a player", %{socket: socket} do
       {:ok, {_address, _port, answer}} = search(socket)
 

@@ -26,6 +26,18 @@ defmodule PiFi.Plex.Companion.Announcement do
   A publish of the same address costs one request of plex.tv and it changes nothing, so
   a start that needed no correction is no worse for making one.
 
+  ## A publish that fails must not take the player with it
+
+  This is a child of `PiFi.Plex.Companion`, which is `:one_for_one` with the default
+  intensity, so three failures in five seconds and the supervisor gives up — and it
+  takes the listener, the discovery responder and the play queue with it. Nothing starts
+  them again, because `start_enabled/0` runs once at the boot.
+
+  So `publish_to_account/0` answers for every way a publish can fail, and not only for
+  the `{:error, _}` that `PiFi.Plex.Server` returns. The device answers a controller that
+  already knows where it is whatever plex.tv says, so a publish that did not land costs
+  a person nothing until they open a controller that has never seen this device.
+
   **It publishes nothing for a device that a person has not made a player**, and it
   asks plex.tv nothing to find that out. The account holds no row for such a device, so
   `PiFi.Plex.Server.registered_as_player?/0` reads the settings and this stops there.
@@ -94,6 +106,17 @@ defmodule PiFi.Plex.Companion.Announcement do
     :ok
   end
 
+  # **A raise here used to take the whole Plex player down with it.** This process is a
+  # child of `PiFi.Plex.Companion`, which is `:one_for_one` with the default intensity,
+  # so three failures in five seconds and the supervisor gives up — and it takes the
+  # listener, the discovery responder and the play queue with it. Nothing starts them
+  # again, because `start_enabled/0` runs once at the boot, so a person's Plex player
+  # would quietly stop existing until the next reboot.
+  #
+  # `Server.publish_player/1` answers `{:error, _}` for the faults it knows about and
+  # raises for the rest: `Req` raises on a plug that is not there, and a pool can exit
+  # under it. The clause above says a publish that fails must not stop the player, and
+  # these two make that true of every way it can fail.
   defp publish_to_account do
     case Server.publish_player(Companion.addresses()) do
       :ok ->
@@ -104,5 +127,15 @@ defmodule PiFi.Plex.Companion.Announcement do
     end
 
     :ok
+  rescue
+    exception ->
+      Logger.warning("plex.tv did not take the address of this player: #{inspect(exception)}")
+
+      :ok
+  catch
+    :exit, reason ->
+      Logger.warning("plex.tv did not take the address of this player: #{inspect(reason)}")
+
+      :ok
   end
 end

@@ -85,8 +85,8 @@ defmodule PiFi.Plex.Companion.Gdm do
   a `HELLO`. The two differ in that line alone, so a controller reads one player
   whichever way it met it.
   """
-  @spec message(String.t()) :: binary()
-  def message(first_line) do
+  @spec message(String.t(), String.t()) :: binary()
+  def message(first_line, client_id) do
     [
       first_line,
       "Content-Type: plex/media-player",
@@ -97,7 +97,7 @@ defmodule PiFi.Plex.Companion.Gdm do
       "Protocol-Version: #{Companion.protocol_version()}",
       "Protocol-Capabilities: #{Companion.capabilities()}",
       "Device-Class: #{Companion.device_class()}",
-      "Resource-Identifier: #{Server.client_id()}",
+      "Resource-Identifier: #{client_id}",
       "Version: #{Server.version()}",
       "Updated-At: #{System.system_time(:second)}"
     ]
@@ -122,58 +122,94 @@ defmodule PiFi.Plex.Companion.Gdm do
     :ok = Event.subscribe(:device)
 
     case open() do
-      {:ok, socket} -> {:ok, socket, {:continue, :hello}}
+      {:ok, socket} -> {:ok, %{socket: socket, client_id: nil}, {:continue, :hello}}
       {:error, reason} -> {:stop, reason}
     end
   end
 
   @doc false
   @impl GenServer
-  def handle_continue(:hello, socket) do
-    send_to(socket, @group, @hello_port, message("HELLO * HTTP/1.0"))
-
-    {:noreply, socket}
+  def handle_continue(:hello, state) do
+    {:noreply, hello(identified(state))}
   end
 
   @doc false
   @impl GenServer
-  def handle_info({:udp, _socket, address, port, packet}, socket) do
-    if search?(packet), do: send_to(socket, address, port, message("HTTP/1.0 200 OK"))
+  def handle_info({:udp, _socket, address, port, packet}, state) do
+    state = identified(state)
 
-    {:noreply, socket}
+    if search?(packet) and state.client_id do
+      send_to(state.socket, address, port, message("HTTP/1.0 200 OK", state.client_id))
+    end
+
+    {:noreply, state}
   end
 
   # **A socket that joined no group hears nothing**, and that is what a boot with no
   # network leaves behind. See the module documentation.
-  def handle_info(%NetworkChanged{}, socket) do
-    :gen_udp.close(socket)
+  def handle_info(%NetworkChanged{}, state) do
+    :gen_udp.close(state.socket)
 
     case open() do
       {:ok, opened} ->
-        send_to(opened, @group, @hello_port, message("HELLO * HTTP/1.0"))
-
-        {:noreply, opened}
+        {:noreply, hello(identified(%{state | socket: opened}))}
 
       # The port is the one thing here that another program can hold, and a player
       # that cannot open it is one that a person turns off and on again. Stopping
       # says so, where carrying on with a closed socket would look like working.
       {:error, reason} ->
-        {:stop, reason, socket}
+        {:stop, reason, state}
     end
   end
 
-  def handle_info(_message, socket), do: {:noreply, socket}
+  def handle_info(_message, state), do: {:noreply, state}
 
   # **A controller that stops asking must not keep the player in its list.** A `BYE`
   # says that this player has gone, and a person who turns the player off in the
   # settings expects it to leave the controller that they are holding.
   @doc false
   @impl GenServer
-  def terminate(_reason, socket) do
-    send_to(socket, @group, @hello_port, message("BYE * HTTP/1.0"))
+  def terminate(_reason, state) do
+    if state.client_id do
+      send_to(state.socket, @group, @hello_port, message("BYE * HTTP/1.0", state.client_id))
+    end
 
-    :gen_udp.close(socket)
+    :gen_udp.close(state.socket)
   end
+
+  defp hello(%{client_id: nil} = state), do: state
+
+  defp hello(state) do
+    send_to(state.socket, @group, @hello_port, message("HELLO * HTTP/1.0", state.client_id))
+
+    state
+  end
+
+  # **A responder of UDP must not read the database for each packet, and this used to.**
+  # `PiFi.Plex.Server.client_id/0` reads the settings, and it writes them the first time
+  # anything asks. Every search of every controller on the network therefore cost a read,
+  # and the first one cost a write.
+  #
+  # A read that met a busy database took this process down with it. CI caught that: the
+  # `HELLO` of a start raised, the responder died, and the search of a controller then
+  # went unanswered. The identifier does not change while the device runs, so reading it
+  # once is both the faster answer and the safe one.
+  #
+  # **A read that fails leaves the responder alive and answering nothing**, and the next
+  # packet tries again. A controller that hears nothing searches again, where one that
+  # heard an answer with no identifier in it would list a player it could not reach.
+  defp identified(%{client_id: nil} = state) do
+    %{state | client_id: Server.client_id()}
+  rescue
+    exception ->
+      Logger.warning(
+        "The Plex player cannot read its identifier yet: #{Exception.message(exception)}"
+      )
+
+      state
+  end
+
+  defp identified(state), do: state
 
   defp open do
     case :gen_udp.open(@search_port, options() ++ [add_membership: {@group, {0, 0, 0, 0}}]) do
