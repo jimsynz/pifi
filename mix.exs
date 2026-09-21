@@ -355,7 +355,16 @@ defmodule PiFi.MixProject do
       #
       # It only shows when no prebuilt artefact exists, which is every package after a
       # new version of the Nerves system, so it hid until 0.2.0 landed.
-      firmware: ["assets.deploy", "deps.compile", "nbpr.fetch", "firmware"]
+      #
+      # **It names the one package and not `deps.compile`.** Compiling everything
+      # rebuilt `nerves` itself part way through the alias, and Mix then answered
+      # `The task "firmware" could not be found` for the step after it.
+      firmware: [
+        "assets.deploy",
+        "deps.compile nbpr_librespot",
+        "nbpr.fetch",
+        "firmware"
+      ]
     ]
   end
 
