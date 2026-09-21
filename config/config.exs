@@ -8,6 +8,19 @@ import Config
 config :ash_oban, pro?: false
 config :ash, default_string_length_count: :codepoints
 
+# **Without this every `DateTime.shift_zone/2` answers `:utc_only_time_zone_database`**,
+# and a device that shows a person the time in UTC is a device that shows them the wrong
+# time for most of the world. See `PiFi.Device.Timezone`.
+config :elixir, :time_zone_database, Tz.TimeZoneDatabase
+
+# **The whole IANA database is history back to 1970 and rules forward for ever**, and
+# each period of each zone becomes a clause in a compiled module. A stereo needs the
+# rules of the years that it runs in, so this keeps a window around them and leaves the
+# rest out of the firmware.
+config :tz,
+  reject_periods_before_year: 2020,
+  build_dst_periods_until_year: 2040
+
 config :pifi, Oban,
   engine: Oban.Engines.Lite,
   notifier: Oban.Notifiers.PG,
@@ -21,7 +34,10 @@ config :pifi, Oban,
   # the same minute, and a person who upgrades at 3 in the morning is asleep beside a
   # stereo that reboots.
   plugins: [
-    {Oban.Plugins.Cron, crontab: [{"17 4 * * *", PiFi.Device.Upgrade.Check}]},
+    # **The hour is the worker's and not the crontab's**, and `PiFi.Device.Upgrade.Check`
+    # says why: a crontab is read as the firmware boots, and a person sets their time
+    # zone long after that.
+    {Oban.Plugins.Cron, crontab: [{"17 * * * *", PiFi.Device.Upgrade.Check}]},
     # **A prune of 10,000 rows in one statement holds the write lock for as long as it
     # takes**, and a read of a library writes one artwork job for each container, so the
     # table reaches that size on a real library. Everything else that writes waits behind

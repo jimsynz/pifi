@@ -13,6 +13,7 @@ defmodule PiFiWeb.SettingsLive do
       /settings/sources/internet-radio one source
       /settings/peripherals            the screens and the controls of the board
       /settings/crossfade              how long one track plays under the next
+      /settings/timezone               which part of the world the device is in
       /settings/standby                the period of quiet, and the switch off
       /settings/network                a report
       /settings/storage                a report
@@ -60,6 +61,7 @@ defmodule PiFiWeb.SettingsLive do
   alias PiFi.AutoSync
   alias PiFi.Device
   alias PiFi.Device.Identity
+  alias PiFi.Device.Timezone
   alias PiFi.Event
   alias PiFi.Event.Device, as: Events
   alias PiFi.Hardware
@@ -343,6 +345,17 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("set_timezone", %{"timezone" => timezone}, socket) do
+    case Device.set_timezone(String.trim(timezone)) do
+      {:ok, :ok} ->
+        {:noreply, socket |> put_flash(:info, timezone_flash(timezone)) |> refresh()}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "PiFi doesn't know a place called #{timezone}.")}
+    end
+  end
+
+  @impl Phoenix.LiveView
   def handle_event("set_crossfade_seconds", %{"seconds" => seconds}, socket) do
     case PiFi.Playback.set_crossfade_seconds(String.to_integer(seconds)) do
       {:ok, :ok} ->
@@ -407,6 +420,10 @@ defmodule PiFiWeb.SettingsLive do
         title="Peripherals"
       >
         {peripherals_summary(@peripheral_list)}
+      </.row>
+
+      <.row id="timezone-row" to={~p"/settings/timezone"} icon="ph-globe-hemisphere-west" title="Time zone">
+        {timezone_summary(@clock)}
       </.row>
 
       <.row id="standby-row" to={~p"/settings/standby"} icon="ph-moon" title="Standby">
@@ -831,6 +848,49 @@ defmodule PiFiWeb.SettingsLive do
           </button>
         </li>
       </ul>
+    </.section>
+    """
+  end
+
+  @impl Phoenix.LiveView
+  def render(%{live_action: :timezone} = assigns) do
+    ~H"""
+    <.section id="settings-timezone" title="Time zone" back={~p"/settings"}>
+      <p class="mb-3 text-sm text-ink-dim">
+        PiFi keeps every time in UTC and shows it to you in the place you name here. It
+        also decides when overnight work happens: PiFi looks for a new firmware at
+        {Device.Upgrade.Check.hour()} in the morning, your time.
+      </p>
+
+      <p class="mb-4 text-sm text-ink-dim">
+        Name a place and not an offset. A place carries the daylight saving rule with it,
+        so PiFi stays right through both ends of the year.
+      </p>
+
+      <form id="timezone-form" phx-submit="set_timezone" class="mb-4 flex items-center gap-2">
+        <input
+          type="text"
+          id="timezone-name"
+          name="timezone"
+          value={@clock.timezone}
+          list="timezone-options"
+          required
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Time zone"
+          class="control grow rounded-lg px-3 py-2 text-sm"
+        />
+        <datalist id="timezone-options">
+          <option :for={zone <- @clock.common} value={zone}></option>
+        </datalist>
+        <button type="submit" id="save-timezone" class="control rounded-lg px-3 py-2 text-sm">
+          Save
+        </button>
+      </form>
+
+      <p id="timezone-now" class="text-sm text-ink-dim">
+        It is {Calendar.strftime(@clock.now, "%A %-d %B, %H:%M")} in {@clock.timezone}.
+      </p>
     </.section>
     """
   end
@@ -1470,6 +1530,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())
     |> assign(:crossfade_seconds, PiFi.Playback.crossfade_seconds!())
+    |> assign(:clock, Device.clock!())
     |> assign(:screen_blank_seconds, PiFi.Playback.screen_blank_seconds!())
     |> assign(:screen?, Peripheral.any_screen?())
     |> assign(:switch_off?, SwitchOff.enabled?())
@@ -1493,7 +1554,7 @@ defmodule PiFiWeb.SettingsLive do
   defp check_message(%{available: version}), do: "Version #{version} is ready to install."
 
   defp checked_text(nil), do: "Not yet"
-  defp checked_text(at), do: Calendar.strftime(at, "%d %B, %H:%M UTC")
+  defp checked_text(at), do: local(at, "%d %B, %H:%M")
 
   # The periods that a person can pick. A free number would need a check of its own on
   # this page, and no person of a stereo wants 37 minutes.
@@ -1512,6 +1573,18 @@ defmodule PiFiWeb.SettingsLive do
   # The hours that a person can choose for one job of `PiFi.AutoSync`. A station list
   # moves slowly and a feed of a podcast moves each day, so the list reaches a week.
   defp sync_periods, do: [0, 1, 6, 12, 24, 72, 168]
+
+  # **A time that a person reads is in their place and not in Greenwich.** A device that
+  # nobody told keeps the `UTC` after it, so they can see that it is showing the time it
+  # knows rather than the time where they are. See `PiFi.Device.Timezone`.
+  defp local(at, format) do
+    Calendar.strftime(Timezone.at(at), format) <> Timezone.suffix(Timezone.get())
+  end
+
+  defp timezone_summary(%{default?: true}), do: "Not set, so times read in UTC"
+  defp timezone_summary(%{timezone: zone}), do: zone
+
+  defp timezone_flash(zone), do: "PiFi is in #{zone} now."
 
   defp crossfade_summary(0), do: "Off"
   defp crossfade_summary(seconds), do: crossfade_title(seconds)
@@ -1545,7 +1618,7 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   defp last_run_title(nil), do: "Hasn't run yet."
-  defp last_run_title(at), do: "It last ran on #{Calendar.strftime(at, "%d %B at %H:%M UTC")}."
+  defp last_run_title(at), do: "It last ran on #{local(at, "%d %B at %H:%M")}."
 
   defp periods, do: [0, 5, 10, 15, 20, 30, 45, 60, 90, 120]
 

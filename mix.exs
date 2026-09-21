@@ -212,6 +212,13 @@ defmodule PiFi.MixProject do
       # Nerves system. `Saxy.Partial` takes one chunk at a time, so a 13 MB feed
       # never arrives in memory as one binary.
       {:saxy, "~> 1.6"},
+      # **A device runs on a person's clock and stores every time in UTC.** Elixir ships
+      # no time zone database, so `DateTime.shift_zone/2` answers
+      # `{:error, :utc_only_time_zone_database}` without one. This one compiles the IANA
+      # data into modules at build time, which is what suits a read-only rootfs:
+      # `tzdata` downloads its updates at runtime and writes them beside itself, and
+      # there is nowhere on this device for it to do that. See `PiFi.Device.Timezone`.
+      {:tz, "~> 0.28"},
       {:shoehorn, "~> 0.9.1"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:telemetry_metrics, "~> 1.0"},

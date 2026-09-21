@@ -15,6 +15,11 @@ defmodule PiFi.Device do
   use Ash.Domain, otp_app: :pifi
 
   resources do
+    resource PiFi.Device.Clock do
+      define :clock, action: :report
+      define :set_timezone, action: :set_timezone, args: [:timezone]
+    end
+
     resource PiFi.Device.Network do
       define :network, action: :report
     end

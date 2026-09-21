@@ -5,6 +5,7 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias Nerves.Runtime.KV
   alias PiFi.Artwork
   alias PiFi.Device.Identity
+  alias PiFi.Device.Timezone
   alias PiFi.Device.Upgrade
   alias PiFi.Device.Upgrade.Forge
   alias PiFi.Device.Upgrade.Server, as: UpgradeServer
@@ -481,6 +482,58 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       assert html =~ "keeps working in standby"
       refute PiFi.SwitchOff.enabled?()
+    end
+  end
+
+  describe "the time zone section" do
+    setup do
+      on_exit(fn -> Timezone.put(Timezone.default()) end)
+
+      :ok
+    end
+
+    test "a device that no person told says so, and says it reads UTC", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/settings")
+
+      assert html =~ "Not set, so times read in UTC"
+    end
+
+    test "a person names a place and the menu then says it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/timezone")
+
+      html =
+        view
+        |> form("#timezone-form", %{"timezone" => "Pacific/Auckland"})
+        |> render_submit()
+
+      assert html =~ "PiFi is in Pacific/Auckland now."
+      assert Timezone.get() == "Pacific/Auckland"
+
+      {:ok, _menu, html} = live(conn, ~p"/settings")
+      assert html =~ "Pacific/Auckland"
+    end
+
+    # An error says what happened and what a person can do, and it never makes them feel
+    # stupid.
+    test "a place that PiFi does not know is refused and nothing changes", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/timezone")
+
+      html =
+        view
+        |> form("#timezone-form", %{"timezone" => "Middle/Earth"})
+        |> render_submit()
+
+      assert html =~ "doesn&#39;t know a place called Middle/Earth"
+      assert Timezone.get() == "Etc/UTC"
+    end
+
+    test "the page shows the time where the person is", %{conn: conn} do
+      :ok = Timezone.put("Pacific/Auckland")
+
+      {:ok, view, _html} = live(conn, ~p"/settings/timezone")
+
+      assert has_element?(view, "#timezone-now")
+      assert render(view) =~ "Pacific/Auckland"
     end
   end
 
