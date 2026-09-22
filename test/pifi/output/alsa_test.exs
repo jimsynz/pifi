@@ -4,6 +4,23 @@ defmodule PiFi.Output.AlsaTest do
   alias PiFi.Output.Alsa
 
   describe "parse_cards/1" do
+    # **The loopback is a pipe between two programs and not a thing to listen to.** A
+    # person offered it would send the music into the side that Spotify reads from. See
+    # `PiFi.Spotify.Loopback`.
+    test "the loopback card is not one a person can choose" do
+      contents = """
+       0 [Audio          ]: USB-Audio - SA9023 USB Audio
+                            HiFimeDIY Audio SA9023 USB Audio at usb-1, full speed
+       1 [Loopback       ]: Loopback - Loopback
+                            Loopback 1
+      """
+
+      cards = Alsa.parse_cards(contents)
+
+      assert [%{id: "Audio"}] = cards
+      refute Enum.any?(cards, &(&1.id == "Loopback"))
+    end
+
     test "reads a USB DAC" do
       contents = """
        0 [Audio          ]: USB-Audio - SA9023 USB Audio

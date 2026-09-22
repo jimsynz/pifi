@@ -55,18 +55,20 @@ defmodule PiFiWeb.ManifestControllerTest do
   # The same rule as the pictures of `priv/splash`: a name that claims a size and a file
   # that is another one costs a person a blurred icon and says nothing about why.
   describe "the icons that ship" do
+    # **The names are written out rather than globbed.** `mix phx.digest` writes
+    # `icon-192-<hash>.png` beside each one, and a glob would measure those too and read
+    # the hash as the size it claims.
     test "each one is the size that its name claims" do
-      files = Path.wildcard(Path.join(:code.priv_dir(:pifi), "static/icons/icon-*.png"))
+      for {name, size} <- [
+            {"icon-192.png", 192},
+            {"icon-512.png", 512},
+            {"icon-maskable-512.png", 512}
+          ] do
+        path = Path.join([:code.priv_dir(:pifi), "static/icons", name])
 
-      refute files == [], "this firmware ships no icon at all"
-
-      for path <- files do
-        assert [_all, size] = Regex.run(~r/-(\d+)\.png$/, Path.basename(path)),
-               "#{path} does not name a size"
-
-        {output, 0} = System.cmd("file", [path])
-
-        assert output =~ "#{size} x #{size}", "#{path} is not #{size} by #{size}"
+        assert File.exists?(path), "#{name} does not ship"
+        assert {output, 0} = System.cmd("file", [path])
+        assert output =~ "#{size} x #{size}", "#{name} is not #{size} by #{size}"
       end
     end
 

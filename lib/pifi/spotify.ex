@@ -81,14 +81,9 @@ defmodule PiFi.Spotify do
 
   require Logger
 
-  alias NBPR.Librespot.Librespot
-  alias PiFi.Device.Identity
   alias PiFi.Output.Alsa
   alias PiFi.Source
-
-  # librespot writes the credentials here, so a person signs in once. It goes on the
-  # writable partition, which mounts at `/root` on a target. See `PiFi.Device.Storage`.
-  @cache "/root/spotify"
+  alias PiFi.Spotify.Loopback
 
   @doc """
   Whether a person turned this on.
@@ -161,7 +156,7 @@ defmodule PiFi.Spotify do
   defp start_child(child) do
     case Supervisor.start_child(__MODULE__, child) do
       {:ok, _pid} ->
-        Logger.info("Spotify can reach this device.")
+        :ok
 
       {:error, :already_present} ->
         Supervisor.restart_child(__MODULE__, :librespot)
@@ -191,40 +186,26 @@ defmodule PiFi.Spotify do
   # sink: the behaviour promises a sink and says nothing about what is inside one, and
   # an output that is not ALSA at all has no name to give. See
   # `PiFi.Output.Alsa.pcm_name/1`.
-  # **It starts MuonTrap itself rather than calling `NBPR.Librespot.Librespot.start_link/1`.**
-  # That generated function passes `[]` for the MuonTrap options, so nothing captures
-  # what librespot says: a device that would not play had no log of the daemon at all,
-  # and neither a person nor this project could see why. `binary_path/0` and `argv/1`
-  # are what NBPR publishes for exactly this, so this is the package's own API and not
-  # a way around it.
+  # **It plays into the ALSA loopback and never into the sound card.** `aplay` stays the
+  # one program that opens the card, and a cast becomes a stream that `PiFi.Player`
+  # carries like any other. See `PiFi.Spotify.Loopback`.
+  #
+  # **The child spec names `PiFi.Spotify.Daemon` and not the NBPR module**, so nothing
+  # reads the package until the supervisor starts the child. The package is a target
+  # dependency, so on a host it is absent, and a spec that resolved it as it was built
+  # would raise where this lets `start_child/1` log that the daemon did not start.
+  # **The loopback is loaded and not yet depended on.** librespot still plays to the
+  # sound card, so a board where `modprobe` fails must still be able to cast, and a
+  # board with no card still starts nothing. See `PiFi.Spotify.Daemon`.
   defp daemon do
-    with {:ok, device} <- alsa_device() do
-      {:ok, %{id: :librespot, start: {__MODULE__, :start_librespot, [device]}}}
+    case Loopback.ensure_loaded() do
+      :ok -> :ok
+      {:error, reason} -> Logger.info("The ALSA loopback is not up: #{inspect(reason)}")
     end
-  end
 
-  @doc false
-  # **The child spec names this and not the NBPR module**, so nothing reads the package
-  # until the supervisor starts the child. The package is a target dependency, so on a
-  # host it is absent, and a spec that resolved it as it was built would raise where the
-  # old one let `start_child/1` log that the daemon did not start.
-  @spec start_librespot(String.t()) :: GenServer.on_start()
-  def start_librespot(device) do
-    MuonTrap.Daemon.start_link(
-      Librespot.binary_path(),
-      Librespot.argv(
-        name: Identity.name(),
-        device: device,
-        cache: @cache,
-        # **An SD card has a finite number of writes.** The credentials are worth
-        # keeping, so a person signs in once, and the audio of every track that they
-        # play is not.
-        disable_audio_cache: true
-      ),
-      log_output: :info,
-      log_prefix: "librespot: ",
-      stderr_to_stdout: true
-    )
+    with {:ok, device} <- alsa_device() do
+      {:ok, %{id: :librespot, start: {PiFi.Spotify.Daemon, :start_link, [[device: device]]}}}
+    end
   end
 
   defp alsa_device do

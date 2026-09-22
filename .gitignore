@@ -29,6 +29,15 @@ test*.db*
 /priv/static/favicon-*.ico
 /priv/static/robots-*.txt
 
+# The same, for the marks that a browser and a telephone ask for. Each name is written
+# out rather than globbed, because `icon-maskable-512.png` is one this repository keeps
+# and a pattern loose enough to catch a digest would catch that too.
+/priv/static/icons/apple-touch-icon-*.png
+/priv/static/icons/favicon-*.svg
+/priv/static/icons/icon-192-*.png
+/priv/static/icons/icon-512-*.png
+/priv/static/icons/icon-maskable-512-*.png
+
 # The cache of a host build and of a test. `PiFi.Cache` writes it beside the
 # database, so a target holds it at `/root/cache` and a host holds it here.
 /cache/

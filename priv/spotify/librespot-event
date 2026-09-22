@@ -1,0 +1,11 @@
+#!/bin/sh
+# librespot runs this for each event and puts the facts in its environment. It also
+# hands the program its own standard output, so printing the environment is how those
+# facts reach PiFi. See `PiFi.Spotify.Events`.
+#
+# `env` writes its variables in no order, so the two markers are what say where a block
+# starts and stops. Without the closing one the last event of a cast would wait for an
+# event that never comes.
+echo "--- pifi event ---"
+env
+echo "--- pifi event end ---"

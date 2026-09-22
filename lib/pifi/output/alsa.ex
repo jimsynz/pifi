@@ -35,6 +35,12 @@ defmodule PiFi.Output.Alsa do
   @card_path "/proc/asound/card"
   @usb_driver "USB-Audio"
 
+  # **The loopback is a pipe between two programs and not a thing to listen to.**
+  # `snd-aloop` presents a card like any other, and the settings page reads this list,
+  # so a person would be offered "Loopback" beside their DAC and the music would go
+  # into the capture side that Spotify reads from. See `PiFi.Spotify.Loopback`.
+  @hidden_cards ["Loopback"]
+
   @doc """
   List each playback device that ALSA knows about.
 
@@ -133,7 +139,11 @@ defmodule PiFi.Output.Alsa do
   end
 
   @doc """
-  Read the cards from the text of `/proc/asound/cards`.
+  Read the cards that this firmware offers, from the text of `/proc/asound/cards`.
+
+  **A card of `@hidden_cards` is not one of them.** The loopback is a pipe between two
+  programs, and dropping it here rather than at the caller means no part of this module
+  can offer it by accident.
 
   Each card takes two lines. The first carries the number, the identifier, the
   driver and a short name. The second carries a longer description.
@@ -157,6 +167,7 @@ defmodule PiFi.Output.Alsa do
         usb?: driver == @usb_driver
       }
     end)
+    |> Enum.reject(&(&1.id in @hidden_cards))
     |> Enum.sort_by(&(not &1.usb?))
   end
 
