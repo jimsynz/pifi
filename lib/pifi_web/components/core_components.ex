@@ -40,7 +40,8 @@ defmodule PiFiWeb.CoreComponents do
     podcast: "ph-microphone",
     radio: "ph-broadcast",
     refresh: "ph-arrows-clockwise",
-    remove: "ph-trash"
+    remove: "ph-trash",
+    spotify: "ph-spotify-logo"
   }
 
   @doc """

@@ -56,4 +56,24 @@ defmodule PiFi.Event.Source do
 
     defstruct [:source, :ref]
   end
+
+  defmodule EnabledChanged do
+    @moduledoc """
+    A person put one source in use, or took it out of use.
+
+    **A source that owns something outside the catalogue needs to hear this.**
+    `PiFi.Source.Spotify` runs a daemon that holds a port, and the control a person
+    presses is the generic one on the settings page: `PiFi.Playback.enable_source/2`
+    writes the setting and knows nothing about any source. A special case there for
+    the one source with a daemon is exactly what `PiFi.Source` exists to prevent, so
+    the setting says what happened and the source acts on it.
+
+    `PiFi.Spotify.Monitor` is the reader today. A source with nothing to start needs
+    no reader, and most have none.
+    """
+
+    @type t :: %__MODULE__{source: module(), enabled?: boolean()}
+
+    defstruct [:source, :enabled?]
+  end
 end

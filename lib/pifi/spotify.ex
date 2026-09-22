@@ -23,12 +23,15 @@ defmodule PiFi.Spotify do
   `PiFi.Plex.Companion` and `PiFi.HomeAssistant` both follow: the setting decides, a
   device that no person changed opens nothing, and the supervisor starts with no child.
 
-  ## It is not a `PiFi.Source`, and it never will be
+  ## This is the daemon, and `PiFi.Source.Spotify` is the face of it
 
-  A source finds audio and gives a stream that `PiFi.Player` pulls. Spotify pushes:
-  the telephone decides what plays and when, and nothing here resolves a track, seeks
-  in one, or knows how long it is. So this holds no catalogue, writes no row, and
-  appears nowhere in the browse tree.
+  Spotify pushes: the telephone decides what plays and when, and nothing here resolves
+  a track, seeks in one, or knows how long it is. So this holds no catalogue, writes no
+  row, and appears nowhere in the browse tree.
+
+  **It is still a source**, because that is where a person looks for the switch. See
+  `PiFi.Source.Spotify` for why, and for what a page draws in the place of a tree. That
+  module owns the setting; this one owns the process.
 
   ## The sound card holds one program at a time
 
@@ -81,51 +84,20 @@ defmodule PiFi.Spotify do
   alias NBPR.Librespot.Librespot
   alias PiFi.Device.Identity
   alias PiFi.Output.Alsa
-  alias PiFi.Settings
-
-  @enabled_key "spotify.enabled"
+  alias PiFi.Source
 
   # librespot writes the credentials here, so a person signs in once. It goes on the
   # writable partition, which mounts at `/root` on a target. See `PiFi.Device.Storage`.
   @cache "/root/spotify"
 
   @doc """
-  The settings key that says whether a person turned this on.
-
-      iex> PiFi.Spotify.enabled_key()
-      "spotify.enabled"
-  """
-  @spec enabled_key() :: String.t()
-  def enabled_key, do: @enabled_key
-
-  @doc """
   Whether a person turned this on.
 
-  **A device that no person changed leaves it off**, because this opens a port and
-  because of what the module documentation says about the licence.
+  It is the same setting as every other source, and `PiFi.Source.Spotify.ready?/0` is
+  what leaves it off on a device that no person changed.
   """
   @spec enabled?() :: boolean()
-  def enabled? do
-    case Settings.fetch(@enabled_key) do
-      {:ok, %{value: "true"}} -> true
-      _other -> false
-    end
-  end
-
-  @doc """
-  Turn it on, or off.
-
-  It starts the daemon, or it stops it, so a person hears the change without a
-  restart.
-  """
-  @spec enable(boolean()) :: :ok
-  def enable(enabled?) do
-    Settings.put!(@enabled_key, to_string(enabled?))
-
-    if enabled?, do: start_daemon(), else: stop_daemon()
-
-    :ok
-  end
+  def enabled?, do: Source.enabled?(Source.Spotify)
 
   @doc "Whether the daemon is running now."
   @spec running?() :: boolean()
@@ -135,15 +107,19 @@ defmodule PiFi.Spotify do
   end
 
   @doc """
-  Start the daemon when a person asked for it.
+  Start the daemon, or stop it, to match what a person asked for.
 
   `PiFi.Application` calls this after the tree, in the way that it calls
   `PiFi.Plex.Companion.start_enabled/0`. **A port that another program holds must not
   stop the boot**, and a child of the tree that cannot start would do that.
+
+  `PiFi.Spotify.Monitor` calls it again whenever the setting changes, so a person hears
+  the change without a restart. The control they press is the generic source switch,
+  which knows nothing about daemons. See `PiFi.Event.Source.EnabledChanged`.
   """
-  @spec start_enabled() :: :ok
-  def start_enabled do
-    if enabled?(), do: start_daemon()
+  @spec follow_setting() :: :ok
+  def follow_setting do
+    if enabled?(), do: start_daemon(), else: stop_daemon()
 
     :ok
   end

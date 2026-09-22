@@ -65,7 +65,7 @@ defmodule PiFi.Application do
       # `PiFi.Plex.Companion`.
       Companion.start_enabled()
       PiFi.HomeAssistant.start_enabled()
-      PiFi.Spotify.start_enabled()
+      PiFi.Spotify.follow_setting()
 
       # The mDNS advertisement lives in memory, and the name of the device lives on the
       # card, so each boot says the name again. See `PiFi.Device.Identity`.

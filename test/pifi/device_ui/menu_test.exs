@@ -60,6 +60,15 @@ defmodule PiFi.DeviceUi.MenuTest do
       assert titles({:source, Source.InternetRadio}) == names
     end
 
+    # **A source that receives audio has no branches**, and a level with no row at all
+    # reads as a source that is broken. See `PiFi.Source.Spotify`.
+    test "a source that receives audio says so in one row that does nothing" do
+      assert [%{kind: :do, action: :none, title: "Nothing to browse"} = row] =
+               Menu.level({:source, Source.Spotify}).rows
+
+      assert row.subtitle =~ "phone"
+    end
+
     test "a branch of facets leads to the values of that key" do
       Stations.create(%{country_code: "NZ", title: "RNZ National"})
       Stations.create(%{country_code: "AU", title: "ABC Sydney"})

@@ -97,7 +97,7 @@ defmodule PiFiWeb.SettingsLiveTest do
     test "each row says what the section holds", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
-      assert html =~ "1 of 4 enabled"
+      assert html =~ "1 of 5 enabled"
       assert html =~ "free of"
     end
 
@@ -1300,13 +1300,13 @@ defmodule PiFiWeb.SettingsLiveTest do
   end
 
   # **A person reads the licence question on this page and nowhere else**, because
-  # they are the one taking the risk. See `PiFi.Spotify`.
-  describe "the Spotify section" do
+  # they are the one taking the risk. Spotify is a source with nothing to browse, so it
+  # lives with the other music services and not in a section of its own. See
+  # `PiFi.Source.Spotify`.
+  describe "Spotify, as a source" do
     setup do
       on_exit(fn ->
-        Spotify.enable(false)
-
-        case Settings.fetch(Spotify.enabled_key()) do
+        case Settings.fetch(Source.enabled_key(Source.Spotify)) do
           {:ok, setting} -> Settings.delete!(setting)
           {:error, _reason} -> :ok
         end
@@ -1315,41 +1315,56 @@ defmodule PiFiWeb.SettingsLiveTest do
       :ok
     end
 
-    test "it says what librespot is before a person turns it on", %{conn: conn} do
-      {:ok, view, html} = live(conn, ~p"/settings/spotify")
+    test "it is listed with the other sources", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      assert has_element?(view, "#toggle-spotify[aria-pressed='false']")
+      assert has_element?(view, "#source-row-spotify")
+    end
+
+    test "it says what librespot is before a person turns it on", %{conn: conn} do
+      {:ok, view, html} = live(conn, ~p"/settings/sources/spotify")
+
+      assert has_element?(view, "#enable-source-spotify", "Enable")
       assert html =~ "Premium"
       assert html =~ "librespot"
       assert html =~ "against their terms"
     end
 
+    # A person deciding whether to take the risk has to be able to see which paragraph
+    # is the risk, so the source says that one is a warning and the page colours it.
+    test "the licence paragraph is marked as a warning", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/spotify")
+
+      assert view
+             |> element("#source-description p.text-danger")
+             |> render() =~ "against their terms"
+    end
+
     # The card plays one thing at a time, and a person meeting that with no warning
     # would read it as the feature being broken.
     test "it says that the card plays one thing at a time", %{conn: conn} do
-      {:ok, _view, html} = live(conn, ~p"/settings/spotify")
+      {:ok, _view, html} = live(conn, ~p"/settings/sources/spotify")
 
       assert html =~ "one thing at a time"
     end
 
     test "a person turns it on and off again", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings/spotify")
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/spotify")
 
-      html = view |> element("#toggle-spotify") |> render_click()
-
-      assert html =~ "can cast Spotify to this device now"
+      view |> element("#enable-source-spotify") |> render_click()
       assert Spotify.enabled?()
 
-      html = view |> element("#toggle-spotify") |> render_click()
-
-      assert html =~ "can no longer reach this device"
+      view |> element("#enable-source-spotify") |> render_click()
       refute Spotify.enabled?()
     end
 
-    test "the menu says whether it is on", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings")
+    # It opens a port and the licence is the person's call, so a device that nobody
+    # asked leaves it off. Every other source is in use as soon as it is ready.
+    test "a device that no person changed holds it off", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      assert has_element?(view, "#spotify-row", "Off")
+      assert has_element?(view, "#source-row-spotify", "Disabled")
+      refute Spotify.enabled?()
     end
   end
 end

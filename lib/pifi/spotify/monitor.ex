@@ -18,6 +18,14 @@ defmodule PiFi.Spotify.Monitor do
   to anything: renaming the device and changing the DAC are both done from the settings
   page.
 
+  ## It also starts and stops the daemon
+
+  A person turns Spotify on with the source switch, and that switch is the generic one:
+  `PiFi.Playback.enable_source/2` writes a setting and knows nothing about any source.
+  A special case there for the one source with a daemon is what `PiFi.Source` exists to
+  prevent, so the setting says what happened on the `:source` topic and this acts on
+  it. See `PiFi.Event.Source.EnabledChanged`.
+
   ## It runs whether the daemon does or not
 
   This is a child of `PiFi.Spotify` from the start, unlike the daemon beside it.
@@ -31,6 +39,7 @@ defmodule PiFi.Spotify.Monitor do
   alias PiFi.Event
   alias PiFi.Event.Device.IdentityChanged
   alias PiFi.Event.Device.OutputChanged
+  alias PiFi.Event.Source.EnabledChanged
 
   @doc false
   def start_link(options), do: GenServer.start_link(__MODULE__, options, name: __MODULE__)
@@ -39,6 +48,7 @@ defmodule PiFi.Spotify.Monitor do
   @impl GenServer
   def init(_options) do
     :ok = Event.subscribe(:device)
+    :ok = Event.subscribe(:source)
 
     {:ok, nil}
   end
@@ -57,7 +67,14 @@ defmodule PiFi.Spotify.Monitor do
     {:noreply, state}
   end
 
-  # The storage and the battery report on this topic as well, and neither one is an
-  # argument that librespot was given.
+  def handle_info(%EnabledChanged{source: PiFi.Source.Spotify}, state) do
+    PiFi.Spotify.follow_setting()
+
+    {:noreply, state}
+  end
+
+  # The storage and the battery report on the `:device` topic as well, every other
+  # source reports on the `:source` one, and none of that is an argument that librespot
+  # was given.
   def handle_info(_message, state), do: {:noreply, state}
 end

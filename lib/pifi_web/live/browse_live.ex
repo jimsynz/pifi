@@ -246,7 +246,9 @@ defmodule PiFiWeb.BrowseLive do
 
         <.finder :if={is_nil(@here) and @searchable?} source={@source} />
 
-        <.roots :if={is_nil(@here)} roots={@roots} counts={@root_counts} />
+        <.receive_only :if={is_nil(@here) and not is_list(@roots)} source={@source} />
+
+        <.roots :if={is_nil(@here) and is_list(@roots)} roots={@roots} counts={@root_counts} />
 
         <.collection_header :if={@opened} item={@opened} playable?={@tracks_only?} />
 
@@ -444,7 +446,10 @@ defmodule PiFiWeb.BrowseLive do
   defp root_counts(_module, [_segment | _rest]), do: %{}
 
   defp root_counts(module, []) do
-    Map.new(module.roots(), fn {name, listing} -> {name, Ash.count!(listing.query)} end)
+    case module.roots() do
+      {:error, _module} -> %{}
+      roots -> Map.new(roots, fn {name, listing} -> {name, Ash.count!(listing.query)} end)
+    end
   end
 
   attr :source, :any, required: true
@@ -618,6 +623,29 @@ defmodule PiFiWeb.BrowseLive do
       {:table, "rows", "ph-list", "Show this as rows"},
       {:grid, "cards", "ph-squares-four", "Show this as cards"}
     ]
+  end
+
+  attr :source, :atom, required: true
+
+  # **A source that receives audio has no tree**, so this stands where the branches
+  # would. A person who pressed Spotify in the top row meant to reach Spotify, and a
+  # page that drew nothing would read as a source that was broken. See
+  # `t:PiFi.Source.unsupported/0`.
+  defp receive_only(assigns) do
+    ~H"""
+    <div id="receive-only" class="glass rounded-xl p-6 text-center">
+      <.source_icon name={@source.icon()} class="mx-auto size-8 text-accent" />
+
+      <p class="mt-3 text-ink">
+        There is nothing to browse here. Send audio to this device from
+        {@source.title()} on your phone or computer, and it plays.
+      </p>
+
+      <.link navigate={~p"/settings/sources/#{Source.slug(@source)}"} class="mt-3 inline-block text-sm text-accent underline">
+        {@source.title()} settings
+      </.link>
+    </div>
+    """
   end
 
   attr :roots, :list, required: true
@@ -909,9 +937,11 @@ defmodule PiFiWeb.BrowseLive do
   # A branch, or a container by its identifier. `PiFiWeb.SearchLive` finds a show
   # that no branch of this source names, so the address of a container cannot need one.
   defp step(source, nil, segment) do
-    case Enum.find(source.roots(), fn {name, _listing} -> slug(name) == segment end) do
-      {name, listing} -> %{title: name, listing: listing}
-      nil -> container(source, segment)
+    with roots when is_list(roots) <- source.roots(),
+         {name, listing} <- Enum.find(roots, fn {name, _listing} -> slug(name) == segment end) do
+      %{title: name, listing: listing}
+    else
+      _other -> container(source, segment)
     end
   end
 

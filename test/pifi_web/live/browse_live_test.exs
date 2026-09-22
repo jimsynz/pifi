@@ -1820,4 +1820,31 @@ defmodule PiFiWeb.BrowseLiveTest do
       assert length(Playback.queue!()) == 3
     end
   end
+
+  # **A source that receives audio has nothing to browse**, and it is still a source,
+  # because that is where a person looks for the switch. A page that drew nothing would
+  # read as a source that was broken. See `PiFi.Source.Spotify`.
+  describe "a source that receives audio" do
+    test "it says what to do instead of drawing an empty tree", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/browse/spotify")
+
+      assert has_element?(view, "#receive-only")
+      refute has_element?(view, "#entries")
+      assert html =~ "nothing to browse here"
+      assert html =~ "Spotify"
+    end
+
+    test "the card points at the settings of that source", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/browse/spotify")
+
+      assert has_element?(view, ~s{#receive-only a[href="/settings/sources/spotify"]})
+    end
+
+    # It offers no search either, so the control that would run one must be absent.
+    test "it offers no finder", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/browse/spotify")
+
+      refute has_element?(view, "#finder")
+    end
+  end
 end

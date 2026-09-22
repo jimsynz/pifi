@@ -78,6 +78,7 @@ defmodule PiFi.DeviceUi.Menu do
           {:open, place()}
           | {:play, [Ash.UUID.t()], non_neg_integer()}
           | :close
+          | :none
           | :standby
 
   @typedoc "One row of a level."
@@ -133,24 +134,43 @@ defmodule PiFi.DeviceUi.Menu do
 
   defp rows(:root), do: {:ok, title(:root), root_rows()}
 
+  # **A source that receives audio has no branches**, and a level with no row at all
+  # reads as a source that is broken. One row says what this is, and pressing it does
+  # nothing, because there is nothing for it to do. See `t:PiFi.Source.unsupported/0`.
   defp rows({:source, module} = place) do
-    rows =
-      Enum.map(module.roots(), fn {name, _listing} ->
-        %{
-          title: name,
-          subtitle: nil,
-          kind: :open,
-          action: {:open, {:branch, module, name}}
-        }
-      end)
+    case module.roots() do
+      {:error, _module} ->
+        {:ok, title(place),
+         [
+           %{
+             title: "Nothing to browse",
+             subtitle: "Send audio from your phone",
+             kind: :do,
+             action: :none
+           }
+         ]}
 
-    {:ok, title(place), rows}
+      roots ->
+        rows =
+          Enum.map(roots, fn {name, _listing} ->
+            %{
+              title: name,
+              subtitle: nil,
+              kind: :open,
+              action: {:open, {:branch, module, name}}
+            }
+          end)
+
+        {:ok, title(place), rows}
+    end
   end
 
   defp rows({:branch, module, name} = place) do
-    case Enum.find(module.roots(), fn {found, _listing} -> found == name end) do
-      {_name, listing} -> {:ok, title(place), of_listing(module, listing)}
-      nil -> :error
+    with roots when is_list(roots) <- module.roots(),
+         {_name, listing} <- Enum.find(roots, fn {found, _listing} -> found == name end) do
+      {:ok, title(place), of_listing(module, listing)}
+    else
+      _other -> :error
     end
   end
 

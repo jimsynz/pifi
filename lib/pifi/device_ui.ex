@@ -339,6 +339,10 @@ defmodule PiFi.DeviceUi do
 
   defp act(:close, state), do: close(state)
 
+  # A row that says something and does nothing. `PiFi.DeviceUi.Menu` draws one for a
+  # source that receives audio, because a level with no row reads as a broken source.
+  defp act(:none, state), do: state
+
   defp act(:standby, state) do
     standby()
 

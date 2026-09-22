@@ -2,14 +2,20 @@ defmodule PiFi.Source do
   @moduledoc """
   Where the music comes from.
 
-  A source shows a tree. A container contains more entries, and a track plays. The
+  Most sources show a tree. A container contains more entries, and a track plays. The
   player and each user interface move through that tree, so neither one needs knowledge of
   any particular service.
 
-  `PiFi.Source.InternetRadio`, `PiFi.Source.Podcasts` and
-  `PiFi.Source.Jellyfin` are the sources today. Spotify, Plex and Squeezecast come
-  later, and each one is a module that implements this behaviour and changes nothing
-  else.
+  **Some sources receive audio instead.** `PiFi.Source.Spotify` is one: a phone decides
+  what plays, so there is no tree to walk and nothing to resolve. It is still a source,
+  because a person looking for where to switch Spotify on looks where every other music
+  service is, and a settings section of its own was somewhere they had to be told about.
+  Such a source implements every callback and returns `t:unsupported/0` from the two it
+  cannot answer, so a page can say what it is rather than draw nothing.
+
+  `PiFi.Source.InternetRadio`, `PiFi.Source.Podcasts`, `PiFi.Source.Jellyfin`,
+  `PiFi.Source.Plex` and `PiFi.Source.Spotify` are the sources today. Each one is a
+  module that implements this behaviour and changes nothing else.
   """
 
   require Ash.Query
@@ -40,6 +46,26 @@ defmodule PiFi.Source do
   See `c:capabilities/0`.
   """
   @type capability :: :refresh | :search | :skip
+
+  @typedoc """
+  A source saying that it does not do this at all.
+
+  **Some sources receive audio rather than offer it.** Spotify Connect is one: a phone
+  decides what plays, so nothing here resolves a track, and there is no catalogue to
+  walk. AirPlay and a Bluetooth speaker are the same shape.
+
+  Such a source still implements every callback, and the ones it cannot answer return
+  this instead. `Enumerable.count/1` answers the same way, for the same reason: a
+  caller that asks something the thing cannot do gets a value it can match on, and not
+  a crash and not a lie.
+
+  **The point is that a caller can say something useful.** `PiFiWeb.BrowseLive` draws a
+  card telling a person to send audio from their device, and `PiFi.DeviceUi.Menu` says
+  it in one row. A missing callback could only have given them a blank page.
+
+  See `c:roots/0` and `c:resolve/1`.
+  """
+  @type unsupported :: {:error, module()}
 
   @typedoc """
   One value of a source that a person can change.
@@ -324,8 +350,11 @@ defmodule PiFi.Source do
 
   Each pair is a name and the read behind it. A source names its own branches, and
   everything below them is generic.
+
+  **A source that a person cannot browse returns `{:error, __MODULE__}`**, in the way
+  that `Enumerable` says that it cannot count a thing. See `t:unsupported/0`.
   """
-  @callback roots() :: [{String.t(), listing()}]
+  @callback roots() :: [{String.t(), listing()}] | unsupported()
 
   @doc """
   How the items inside one container read, and in what order.
@@ -441,8 +470,41 @@ defmodule PiFi.Source do
   This is the one thing that only a source can do. A station gives the address of a
   stream, and an episode gives the file that the cache keeps, so the shape of the
   answer is the same and the way to it is not. See `t:playable/0`.
+
+  **A source that receives audio returns `{:error, __MODULE__}`**, because a phone
+  decided what plays and there is nothing here to resolve. See `t:unsupported/0`. It
+  has no catalogue either, so nothing reaches this in practice, and a source that said
+  so only when asked would still be saying it truthfully.
   """
   @callback resolve(PiFi.Playback.Item.t()) :: {:ok, playable()} | {:error, term()}
+
+  @typedoc """
+  One paragraph that a person reads about a source, before they set it up.
+
+  `{:warning, text}` is the one a surface draws differently, and a source says which
+  rather than choosing a colour: the settings page draws it in the danger colour and a
+  screen of 240 pixels would do something else. This is the same rule as `t:fact/0`,
+  and for the same reason.
+
+  See `c:description/0`.
+  """
+  @type paragraph :: String.t() | {:warning, String.t()}
+
+  @doc """
+  What this source is, for a person reading its settings.
+
+  One entry is one paragraph, in the order that they read them. A settings page draws
+  them under the title and above the controls, and the device screen draws none of
+  them: it has 240 pixels and a person sets a source up in a browser.
+
+  **This is where a warning goes, in front of the person taking the risk.** Spotify
+  Connect is librespot, and that project says connecting this way is probably against
+  Spotify's terms. A person deciding whether to turn it on must read that where they
+  press the control, and not in a commit message.
+
+  A source that needs no such words leaves this out.
+  """
+  @callback description() :: [paragraph()]
 
   @doc """
   The values that a person can change for this source.
@@ -508,7 +570,8 @@ defmodule PiFi.Source do
 
   # A source with no search leaves `search/1` out, and it names no `:search` in
   # `c:capabilities/0`.
-  @optional_callbacks hold_limit: 0,
+  @optional_callbacks description: 0,
+                      hold_limit: 0,
                       listing: 1,
                       opened: 1,
                       ready?: 0,
@@ -535,7 +598,8 @@ defmodule PiFi.Source do
       PiFi.Source.InternetRadio,
       PiFi.Source.Podcasts,
       PiFi.Source.Jellyfin,
-      PiFi.Source.Plex
+      PiFi.Source.Plex,
+      PiFi.Source.Spotify
     ])
   end
 
@@ -603,13 +667,22 @@ defmodule PiFi.Source do
   @doc """
   Put a source in use, or take it out of use.
 
-  This writes the setting and nothing else. `PiFi.Playback.enable_source/2` is
-  what a user interface calls, because it also stops the player when the source
-  that plays goes out of use.
+  This writes the setting and says so on the `:source` topic.
+  `PiFi.Playback.enable_source/2` is what a user interface calls, because it also stops
+  the player when the source that plays goes out of use.
+
+  **A source that owns something outside the catalogue listens for that event.**
+  `PiFi.Source.Spotify` runs a daemon that holds a port, and it starts and stops it
+  when it hears this. See `PiFi.Event.Source.EnabledChanged`.
   """
   @spec enable(module(), boolean()) :: :ok
   def enable(module, enabled?) do
     PiFi.Settings.put!(enabled_key(module), to_string(enabled?))
+
+    PiFi.Event.publish(:source, %PiFi.Event.Source.EnabledChanged{
+      source: module,
+      enabled?: enabled?
+    })
 
     :ok
   end
@@ -787,6 +860,20 @@ defmodule PiFi.Source do
     Enum.map(module.kinds(), fn {one, title} ->
       {title, %{query: Ash.Query.filter(query, kind == ^one), kind: :item}}
     end)
+  end
+
+  @doc """
+  What one source is, for a person reading its settings.
+
+  See `c:description/0`. A source that needs no such words gives an empty list.
+
+      iex> PiFi.Source.description(PiFi.Source.InternetRadio)
+      []
+
+  """
+  @spec description(module()) :: [paragraph()]
+  def description(module) do
+    if implements?(module, :description, 0), do: module.description(), else: []
   end
 
   @doc """

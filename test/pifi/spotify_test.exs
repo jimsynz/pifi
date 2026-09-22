@@ -6,20 +6,30 @@ defmodule PiFi.SpotifyTest do
   alias PiFi.Event
   alias PiFi.Event.Device, as: Events
   alias PiFi.Settings
+  alias PiFi.Source
   alias PiFi.Spotify
   alias PiFi.Test.NoCardOutput
 
   setup do
     on_exit(fn ->
-      Spotify.enable(false)
+      enable(false)
 
-      case Settings.fetch(Spotify.enabled_key()) do
+      case Settings.fetch(Source.enabled_key(Source.Spotify)) do
         {:ok, setting} -> Settings.delete!(setting)
         {:error, _reason} -> :ok
       end
     end)
 
     :ok
+  end
+
+  # The control a person presses writes the setting and says so on the `:source` topic,
+  # and `PiFi.Spotify.Monitor` acts on that. A test that waited for the message would be
+  # testing the delivery, so this does both halves itself and one test below covers the
+  # monitor.
+  defp enable(enabled?) do
+    Source.enable(Source.Spotify, enabled?)
+    Spotify.follow_setting()
   end
 
   describe "whether a person turned it on" do
@@ -29,14 +39,14 @@ defmodule PiFi.SpotifyTest do
     end
 
     test "a person turns it on, and the answer stays" do
-      assert :ok = Spotify.enable(true)
+      assert :ok = enable(true)
       assert Spotify.enabled?()
     end
 
     test "a person turns it off again" do
-      Spotify.enable(true)
+      enable(true)
 
-      assert :ok = Spotify.enable(false)
+      assert :ok = enable(false)
 
       refute Spotify.enabled?()
       refute Spotify.running?()
@@ -50,12 +60,38 @@ defmodule PiFi.SpotifyTest do
     test "it starts no daemon, and it says so rather than failing" do
       NoCardOutput.use_it()
 
-      assert :ok = Spotify.enable(true)
+      assert :ok = enable(true)
 
       # The setting is what a person chose, and it stays chosen. The daemon starts
       # when a card arrives.
       assert Spotify.enabled?()
       refute Spotify.running?()
+    end
+  end
+
+  # **The control a person presses is the generic source switch**, which knows nothing
+  # about daemons. The setting says what happened on the `:source` topic and the monitor
+  # acts on it, so no part of `PiFi.Source` holds a special case for the one source with
+  # a process behind it.
+  describe "the source switch reaches the daemon" do
+    test "the monitor hears that a person turned it off" do
+      monitor = Process.whereis(PiFi.Spotify.Monitor)
+
+      Source.enable(Source.Spotify, false)
+
+      assert eventually(fn -> not Spotify.running?() end)
+      assert Process.alive?(monitor)
+    end
+
+    # Every other source publishes the same event, and none of them is this one.
+    test "it ignores another source going out of use" do
+      enable(true)
+      monitor = Process.whereis(PiFi.Spotify.Monitor)
+
+      Source.enable(Source.InternetRadio, false)
+
+      assert eventually(fn -> Process.alive?(monitor) end)
+      assert Spotify.enabled?()
     end
   end
 
