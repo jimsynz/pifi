@@ -22,6 +22,27 @@ size: Forgejo and the GitHub mirror both render a PNG from a relative path and
 neither is reliable with an SVG, and a markdown image carries no width, so the
 file has to be the size that it draws at.
 
+## The favicon and the icons a telephone installs
+
+`pifi-mark.svg` is the π alone on the cyan ground: the crossbar and the two legs of
+`pifi-logo.svg`, framed square. The lockup carries the word "PiFi" as well, and at 16
+pixels that word is a smudge, so the mark drops it and keeps the one shape a person
+can still read at that size.
+
+`pifi-mark-maskable.svg` is the same thing with more room around it. Android masks an
+icon to whatever shape the launcher draws — a circle, a squircle, a rounded square —
+and crops anything outside the middle 80 percent. The π there is 58 percent of the
+frame, so every shape a launcher might cut still holds the whole of it.
+
+`priv/static/icons` holds what ships, and `priv/static/favicon.ico` holds 16, 32 and
+48 in one file. To make them again:
+
+    render() { magick -background none "$1" -resize "$(( $2 * 4 ))x$(( $2 * 4 ))" -resize "${2}x${2}" -strip "$3"; }
+
+Four times the size and scaled down, which is the rule below and for the same reason.
+`PiFiWeb.ManifestController` names them, and it is a route rather than a file because
+the name of a device is not the same on two of them.
+
 ## The PiFi mark
 
 `pifi-320x240.svg` and `pifi-240x240.svg` hold the lockup of the website, at the

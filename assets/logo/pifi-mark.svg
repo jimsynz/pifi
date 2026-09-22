@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="162.5 15 275 275" width="275" height="275" role="img" aria-label="PiFi">
+  <rect x="162.5" y="15" width="275" height="275" fill="#2fc6e8" />
+
+  <g fill="#101010">
+    <rect x="205" y="70" width="190" height="32" />
+    <polygon points="240,102 277,102 265,235 228,235" />
+    <polygon points="323,102 360,102 372,235 335,235" />
+  </g>
+</svg>
