@@ -164,7 +164,7 @@ defmodule PiFi.Bluetooth do
   # leaves the two above it talking to a bus that no longer holds their names. Each one
   # therefore takes the ones after it with it.
   defp start_daemons do
-    for child <- [bus(), bluetoothd(), bluealsa()], do: start_child(child)
+    for child <- [dbus_daemon(), bluetoothd(), bluealsa(), client()], do: start_child(child)
 
     :ok
   end
@@ -188,7 +188,7 @@ defmodule PiFi.Bluetooth do
   end
 
   defp stop_daemons do
-    for id <- [:bluealsa, :bluetoothd, :dbus] do
+    for id <- [PiFi.Bluetooth.Bus, :bluealsa, :bluetoothd, :dbus] do
       Supervisor.terminate_child(__MODULE__, id)
       Supervisor.delete_child(__MODULE__, id)
     end
@@ -200,7 +200,7 @@ defmodule PiFi.Bluetooth do
   # that comes up empty on every boot, and `dbus-daemon` will not make the parent of its
   # own socket: it fails with `Failed to bind socket` and the whole stack stops behind
   # it. Nothing else writes here, so this is the place that makes it.
-  defp bus do
+  defp dbus_daemon do
     File.mkdir_p!("/run/dbus")
     File.write!(@bus_config, bus_config())
 
@@ -239,6 +239,13 @@ defmodule PiFi.Bluetooth do
 
         if File.dir?(dir), do: dir
     end
+  end
+
+  # **The client comes last and it is part of the group.** `:rest_for_one` restarts what
+  # follows a child that went, so a bus that restarts takes the connection with it: a
+  # connection to a daemon that is no longer there is worse than no connection at all.
+  defp client do
+    %{id: PiFi.Bluetooth.Bus, start: {PiFi.Bluetooth.Bus, :start_link, [[]]}}
   end
 
   defp bluetoothd do
