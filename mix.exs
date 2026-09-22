@@ -52,6 +52,7 @@ defmodule PiFi.MixProject do
       consolidate_protocols: Mix.env() != :dev,
       deps: deps(),
       elixir: "~> 1.20",
+      elixirc_options: elixirc_options(Mix.target()),
       elixirc_paths: elixirc_paths(Mix.env()),
       listeners: listeners(Mix.target(), Mix.env()),
       releases: [{@app, release()}],
@@ -60,6 +61,16 @@ defmodule PiFi.MixProject do
       usage_rules: usage_rules()
     ]
   end
+
+  # **An NBPR package is a target dependency, so its modules do not exist on the host.**
+  # A child spec that names one as an atom compiles anywhere, and a call to one does
+  # not: `PiFi.Spotify` calls `binary_path/0` and `argv/1` of the librespot package so
+  # that it can start MuonTrap itself and capture what the daemon says.
+  #
+  # This says which of those are expected to be absent. A module that is missing for any
+  # other reason still warns.
+  defp elixirc_options(:host), do: [no_warn_undefined: [NBPR.Librespot.Librespot]]
+  defp elixirc_options(_target), do: []
 
   # Run "mix help compile.app" to learn about applications.
   def application do

@@ -57,6 +57,15 @@ defmodule PiFi.Spotify do
   starts the daemon again, because a Spotify device that kept the old name after a
   rename, or played to a card that is no longer there, is worse than a short silence.
 
+  ## What it says, and where
+
+  **librespot writes to stdout and stderr, and a daemon whose output goes nowhere
+  cannot be debugged on a device that a person cannot reach.** `NBPR.BrPackage`
+  generates a `start_link/1` that gives MuonTrap no options, so nothing captured a word
+  of it: a board that connected to Spotify and played nothing had no log to read. This
+  starts `MuonTrap.Daemon` itself with `binary_path/0` and `argv/1`, which NBPR
+  publishes, and asks for the output at `:info` behind a `librespot: ` prefix.
+
   ## Volume
 
   librespot keeps a volume of its own, and the slider in the Spotify application
@@ -69,6 +78,7 @@ defmodule PiFi.Spotify do
 
   require Logger
 
+  alias NBPR.Librespot.Librespot
   alias PiFi.Device.Identity
   alias PiFi.Output.Alsa
   alias PiFi.Settings
@@ -205,26 +215,40 @@ defmodule PiFi.Spotify do
   # sink: the behaviour promises a sink and says nothing about what is inside one, and
   # an output that is not ALSA at all has no name to give. See
   # `PiFi.Output.Alsa.pcm_name/1`.
+  # **It starts MuonTrap itself rather than calling `NBPR.Librespot.Librespot.start_link/1`.**
+  # That generated function passes `[]` for the MuonTrap options, so nothing captures
+  # what librespot says: a device that would not play had no log of the daemon at all,
+  # and neither a person nor this project could see why. `binary_path/0` and `argv/1`
+  # are what NBPR publishes for exactly this, so this is the package's own API and not
+  # a way around it.
   defp daemon do
     with {:ok, device} <- alsa_device() do
-      {:ok,
-       %{
-         id: :librespot,
-         start:
-           {NBPR.Librespot.Librespot, :start_link,
-            [
-              [
-                name: Identity.name(),
-                device: device,
-                cache: @cache,
-                # **An SD card has a finite number of writes.** The credentials are
-                # worth keeping, so a person signs in once, and the audio of every
-                # track that they play is not.
-                disable_audio_cache: true
-              ]
-            ]}
-       }}
+      {:ok, %{id: :librespot, start: {__MODULE__, :start_librespot, [device]}}}
     end
+  end
+
+  @doc false
+  # **The child spec names this and not the NBPR module**, so nothing reads the package
+  # until the supervisor starts the child. The package is a target dependency, so on a
+  # host it is absent, and a spec that resolved it as it was built would raise where the
+  # old one let `start_child/1` log that the daemon did not start.
+  @spec start_librespot(String.t()) :: GenServer.on_start()
+  def start_librespot(device) do
+    MuonTrap.Daemon.start_link(
+      Librespot.binary_path(),
+      Librespot.argv(
+        name: Identity.name(),
+        device: device,
+        cache: @cache,
+        # **An SD card has a finite number of writes.** The credentials are worth
+        # keeping, so a person signs in once, and the audio of every track that they
+        # play is not.
+        disable_audio_cache: true
+      ),
+      log_output: :info,
+      log_prefix: "librespot: ",
+      stderr_to_stdout: true
+    )
   end
 
   defp alsa_device do

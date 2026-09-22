@@ -373,7 +373,11 @@ defmodule PiFi.Output.APlayPortTest do
     end
   end
 
-  defp eventually(check, attempts \\ 100)
+  # **The only signal is the file**, because the program on the other end of the port is
+  # `cat` and it says nothing. 2 seconds was enough on an idle machine and not under the
+  # load that `mix check` puts on one, where a subprocess waits to be scheduled before
+  # it writes a byte. Only a test that is going to fail pays the longer wait.
+  defp eventually(check, attempts \\ 500)
 
   defp eventually(_check, 0), do: false
 
