@@ -69,7 +69,17 @@ defmodule PiFi.MixProject do
   #
   # This says which of those are expected to be absent. A module that is missing for any
   # other reason still warns.
-  defp elixirc_options(:host), do: [no_warn_undefined: [NBPR.Librespot.Librespot]]
+  defp elixirc_options(:host) do
+    [
+      no_warn_undefined: [
+        NBPR.Bluez5Utils.Bluetoothd,
+        NBPR.BluezAlsa.Bluealsad,
+        NBPR.Dbus.DbusDaemon,
+        NBPR.Librespot.Librespot
+      ]
+    ]
+  end
+
   defp elixirc_options(_target), do: []
 
   # Run "mix help compile.app" to learn about applications.
@@ -106,6 +116,26 @@ defmodule PiFi.MixProject do
       {:nbpr_vorbis_tools, "~> 1.4", organization: "nbpr", targets: @all_targets},
       {:nbpr_libvips, "~> 8.18", organization: "nbpr", targets: @all_targets},
       {:nbpr_librespot, "~> 0.8", organization: "nbpr", targets: @all_targets},
+      # **Bluetooth audio needs four of these and the system holds none of them.** The
+      # version of each follows the thing it packages, so none of them reads like a
+      # version of NBPR. `bluez_alsa` is what turns a paired speaker into an ALSA
+      # device, which is the whole reason this fits: the audio path of this firmware
+      # already ends at an ALSA name. See `PiFi.Bluetooth`.
+      # **BlueZ speaks D-Bus and nothing else**, so pairing needs a client for it.
+      #
+      # This one is pure Erlang: the tarball holds no C at all, and its `make` is
+      # erlang.mk and not a compiler, so it cross-compiles for this board like any
+      # other BEAM code. It also names no dependency of its own, which the Elixir one
+      # beside it on Hex could not manage: `ex_dbus` pins `saxy ~> 1.4.0` for reading
+      # introspection XML, and this firmware is on 1.6.
+      #
+      # It is unmaintained, last released in 2021. See `PiFi.Bluetooth.Bus` for what
+      # was measured against a real adapter before anything was built on top of it.
+      {:dbus, "~> 0.8"},
+      {:nbpr_dbus, "~> 1.14", organization: "nbpr", targets: @all_targets},
+      {:nbpr_bluez5_utils, "~> 5.79", organization: "nbpr", targets: @all_targets},
+      {:nbpr_sbc, "~> 2.1", organization: "nbpr", targets: @all_targets},
+      {:nbpr_bluez_alsa, "~> 4.3", organization: "nbpr", targets: @all_targets},
       # Dependencies for all targets
       {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.8"},

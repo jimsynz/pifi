@@ -51,6 +51,9 @@ defmodule PiFi.Application do
         # It listens as well, and it starts with no daemon for the same reason. See
         # `PiFi.Spotify`.
         PiFi.Spotify,
+        # Three daemons and a radio that answers anything in range, so it starts with
+        # none of them for the same reason. See `PiFi.Bluetooth`.
+        PiFi.Bluetooth,
         PiFiWeb.Endpoint
       ] ++ listening_children() ++ target_children()
 
@@ -66,6 +69,7 @@ defmodule PiFi.Application do
       Companion.start_enabled()
       PiFi.HomeAssistant.start_enabled()
       PiFi.Spotify.follow_setting()
+      PiFi.Bluetooth.start_enabled()
 
       # The mDNS advertisement lives in memory, and the name of the device lives on the
       # card, so each boot says the name again. See `PiFi.Device.Identity`.
