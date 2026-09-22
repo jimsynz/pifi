@@ -101,8 +101,7 @@ defmodule PiFiWeb.Shell do
       |> assign(:page_name, nil)
       |> assign(:player_state, Playback.state!())
       |> assign(:standby?, Playback.state!().standby?)
-      |> compose_title()
-      |> attach_hook(:page_title, :handle_info, &player_moved/2)
+      |> attach_title(params)
       |> attach_hook(:standby, :handle_info, &standby/2)
       |> attach_hook(:artwork_ready, :handle_info, &artwork_ready/2)
       |> attach_hook(:page_used, :handle_event, &page_used/3)
@@ -170,6 +169,22 @@ defmodule PiFiWeb.Shell do
   end
 
   defp artwork_ready(_message, socket), do: {:cont, socket}
+
+  # **Only the page owns the title, and `PiFiWeb.PlayerLive` is not the page.** It is a
+  # sticky child that `PiFiWeb.Layouts` renders inside every page, it takes the same
+  # `:player` events, and it never says what page it is — so it composed the name of the
+  # device and nothing else, and whichever of the two answered last won. CI caught it as
+  # a title that went back to "PiFi" rather than to the page it was on.
+  #
+  # The params of a mount say which kind this is, in the way that `attach_page_moved/2`
+  # already uses.
+  defp attach_title(socket, :not_mounted_at_router), do: socket
+
+  defp attach_title(socket, _params) do
+    socket
+    |> compose_title()
+    |> attach_hook(:page_title, :handle_info, &player_moved/2)
+  end
 
   # **A child LiveView cannot hold a `:handle_params` hook**, and an attach on one
   # raises. The params of a mount say which kind this is: LiveView gives

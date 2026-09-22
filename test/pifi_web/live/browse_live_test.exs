@@ -1901,6 +1901,11 @@ defmodule PiFiWeb.BrowseLiveTest do
       refute title =~ "Internet radio —"
     end
 
+    # **`PiFiWeb.PlayerLive` is not the page.** It is a sticky child rendered inside
+    # every page, it takes the same `:player` events, and it says what page it is never.
+    # It used to compose the name of the device alone and race the real page for the
+    # title, which CI caught here as a title that went back to "PiFi".
+    #
     # The title follows the player and not the page, so a page that nobody touched
     # still catches up.
     test "it goes back to the page when the player stops", %{conn: conn} do
