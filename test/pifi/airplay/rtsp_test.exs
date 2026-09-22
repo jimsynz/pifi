@@ -152,4 +152,30 @@ defmodule PiFi.AirPlay.RtspTest do
       assert head =~ "content-length: 8"
     end
   end
+
+  describe "the version" do
+    test "both of the ones a sender speaks are read" do
+      for version <- ["RTSP/1.0", "HTTP/1.1"] do
+        assert {:ok, request, ""} = Rtsp.parse(message(["GET /info #{version}"]))
+        assert request.version == version
+      end
+    end
+
+    # **The version goes straight back out in the status line.** A request line taken on
+    # trust puts a sender's bytes where the name of the protocol belongs, and
+    # `\0\0\0 this is not RTSP` parses as a request whose version is `is` — which came
+    # back as `is 501 Error` before this was checked.
+    test "anything else is refused rather than echoed back" do
+      for line <- [
+            "\0\0\0 this is not RTSP",
+            "GET /info RTSP/2.0",
+            "GET /info HTTP/1.0",
+            "GET /info",
+            "GET /info rtsp/1.0"
+          ] do
+        assert {:error, {:bad_request_line, _line}} = Rtsp.parse(message([line])),
+               "#{inspect(line)} was accepted"
+      end
+    end
+  end
 end

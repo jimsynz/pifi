@@ -3,6 +3,7 @@ defmodule PiFiWeb.SettingsLiveTest do
   use Oban.Testing, repo: PiFi.Repo
 
   alias Nerves.Runtime.KV
+  alias PiFi.AirPlay.Server, as: AirPlay
   alias PiFi.Artwork
   alias PiFi.Device.Identity
   alias PiFi.Device.Timezone
@@ -1327,6 +1328,58 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings")
 
       assert has_element?(view, "#home-assistant-row", "Off")
+    end
+  end
+
+  # **This opens a port as well**, and anyone on the network can send to it, so it
+  # follows the same rule. See `PiFi.AirPlay.Server`.
+  describe "the AirPlay section" do
+    setup do
+      on_exit(fn ->
+        AirPlay.enable(false)
+
+        case Settings.fetch(AirPlay.enabled_key()) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "a device that no person changed says off", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/airplay")
+
+      assert has_element?(view, "#toggle-airplay[aria-pressed='false']")
+      assert render(view) =~ to_string(AirPlay.port())
+    end
+
+    test "a person turns it on and off again", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/airplay")
+
+      html = view |> element("#toggle-airplay") |> render_click()
+
+      assert html =~ "over AirPlay now"
+      assert AirPlay.enabled?()
+      assert has_element?(view, "#toggle-airplay[aria-pressed='true']")
+
+      html = view |> element("#toggle-airplay") |> render_click()
+
+      assert html =~ "AirPlay is off"
+      refute AirPlay.enabled?()
+    end
+
+    # A person deciding whether to open a port should be told that it is one.
+    test "says what a person is agreeing to", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/settings/airplay")
+
+      assert html =~ "Anyone on your network"
+    end
+
+    test "the menu says whether it is on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings")
+
+      assert has_element?(view, "#airplay-row", "Off")
     end
   end
 

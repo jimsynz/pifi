@@ -170,6 +170,30 @@ defmodule PiFi.AirPlay.Srp do
   end
 
   @doc """
+  A value as the wire carries it: big-endian, and **padded to the width of the prime**.
+
+  The padding is not decoration. `A` and `B` go into the hashes that both sides compute,
+  and a value that lost its leading zero would hash differently at each end — which
+  happens for one exchange in about two hundred and fifty, so it passes a test and fails
+  on a board.
+
+      iex> group = PiFi.AirPlay.Srp.group_3072()
+      iex> PiFi.AirPlay.Srp.bytes(group, 1) |> byte_size()
+      384
+  """
+  @spec bytes(group(), non_neg_integer()) :: binary()
+  def bytes(group, value), do: padded(group, value)
+
+  @doc """
+  A value read off the wire.
+
+      iex> PiFi.AirPlay.Srp.value(<<1, 0>>)
+      256
+  """
+  @spec value(binary()) :: non_neg_integer()
+  def value(bytes), do: decode(bytes)
+
+  @doc """
   A private value for one exchange.
 
   It is 32 bytes of randomness, which is what RFC 5054 asks for, and it never leaves

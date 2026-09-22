@@ -29,6 +29,10 @@ defmodule PiFi.AirPlay.Rtsp do
 
   @max_body 1024 * 1024
 
+  # **A sender speaks both.** Pairing and `/info` arrive as HTTP/1.1 and the streaming
+  # methods arrive as RTSP/1.0, on the same connection, so neither one alone is enough.
+  @versions ["RTSP/1.0", "HTTP/1.1"]
+
   defmodule Request do
     @moduledoc "One message from a sender."
 
@@ -123,9 +127,13 @@ defmodule PiFi.AirPlay.Rtsp do
     end
   end
 
+  # **The version is checked and not merely read.** It goes straight back out in the
+  # status line of the reply, so a line this took on trust would have a sender's bytes
+  # reflected as the name of the protocol — and `\0\0\0 this is not RTSP` parses as a
+  # request whose version is `is`, which is a reply that means nothing to anybody.
   defp request_line(line) do
     case String.split(line, " ", parts: 3) do
-      [method, uri, version] -> {:ok, method, uri, version}
+      [method, uri, version] when version in @versions -> {:ok, method, uri, version}
       _other -> {:error, {:bad_request_line, line}}
     end
   end

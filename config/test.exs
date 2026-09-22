@@ -7,6 +7,9 @@ config :pifi, Oban, testing: :manual
 # of another person on a host, so a test writes somewhere that it may.
 config :pifi, :switch_off_marker, Path.join(System.tmp_dir!(), "pifi-switch-off-test")
 
+# `PiFi.AirPlay.Identity` writes its seed to the same partition, for the same reason.
+config :pifi, :airplay_data_dir, Path.join(System.tmp_dir!(), "pifi-airplay-test")
+
 # **The sandbox holds a transaction open for the whole of each test**, so `:immediate`
 # means every async test takes the write lock as it starts and holds it until it ends.
 # They then run one at a time whatever `max_cases` says, and the ones that wait longer

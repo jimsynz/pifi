@@ -80,6 +80,17 @@ defmodule PiFi.AirPlay.Advertisement do
   def features, do: @features
 
   @doc """
+  What this receiver is doing, as a sender reads it.
+
+  Bit 2 says an audio cable is attached, which is a receiver that can play now.
+
+      iex> PiFi.AirPlay.Advertisement.status_flags()
+      4
+  """
+  @spec status_flags() :: non_neg_integer()
+  def status_flags, do: @status_flags
+
+  @doc """
   The features number as the mDNS record writes it, **low word first**.
 
       iex> PiFi.AirPlay.Advertisement.features_txt(0x00058340405C4A00)

@@ -150,6 +150,9 @@ defmodule PiFi.MixProject do
        override: true},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
+      # AirPlay speaks RTSP and not HTTP, so the receiver needs the acceptor pool
+      # under Bandit rather than Bandit itself. See `PiFi.AirPlay.Server`.
+      {:thousand_island, "~> 1.5"},
       # The browse page gives Cinder a query, and Cinder holds the loading state, the
       # sort, the page controls and the URL state. It is pure Elixir, and so is
       # `ash_phoenix`, which it needs.
