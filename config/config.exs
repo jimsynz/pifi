@@ -111,6 +111,7 @@ config :pifi, PiFi.Device.Upgrade,
 config :pifi,
   ecto_repos: [PiFi.Repo],
   ash_domains: [
+    PiFi.AirPlay,
     PiFi.Cache,
     PiFi.Device,
     PiFi.Jellyfin,
