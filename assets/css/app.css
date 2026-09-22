@@ -328,6 +328,54 @@ h1, h2, h3, h4 {
   }
 }
 
+/* A control that is not part of the faceplate proper.
+
+   **The top row holds two kinds of thing, and they were drawn as one.** The sources
+   are what a person switches between, and search, playlists, the queue, history and
+   settings are how they get around. Nine boxes of the same weight gave the eye nothing
+   to rest on, and the row ran out of width as soon as a fourth source arrived.
+
+   So the sources keep the box, and these lose it. The border is what says "this
+   changes what you are listening to", which makes the weight carry information rather
+   than decoration. It also gives back about a third of the row.
+
+   It keeps the lift of `control`, and halves it: these are still controls, and a row
+   where only some things answered the pointer would read as a row of dead icons. */
+@utility control-quiet {
+  color: var(--color-ink-dim);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  transition: color 90ms steps(2, end), transform 90ms steps(2, end);
+
+  &:hover:not(:disabled) {
+    color: var(--color-ink);
+    transform: translate(-1px, -1px);
+  }
+
+  &:active:not(:disabled) {
+    transform: translate(1px, 1px);
+  }
+
+  &:disabled {
+    color: var(--color-ink-faint);
+    opacity: 0.55;
+  }
+}
+
+/* The page that a person is on, for a control with no box to fill.
+
+   `control-on` fills the box with cyan, and a quiet control has no box: the colour
+   would have bled to the edge of a shape that is not there. The mark takes the accent
+   instead, which is the same colour saying the same thing. */
+@utility control-quiet-on {
+  color: var(--color-accent);
+
+  &:hover:not(:disabled) {
+    color: var(--color-accent);
+  }
+}
+
 /* A box that scrolls sideways, and keeps the offset shadow of what is inside it.
    **`overflow-x` set to anything but `visible` makes `overflow-y` compute to the same
    value**, so a row that scrolls sideways clips the shadow at its foot as well. The
@@ -338,12 +386,29 @@ h1, h2, h3, h4 {
    negative margin takes that room back out of the layout. It holds the 3 pixels of a
    shadow at rest. A control that a person points at moves 2 pixels and grows its
    shadow to 5, so a corner of it clips while the pointer is on it, and that is the
-   price of a row that scrolls. */
+   price of a row that scrolls.
+
+   **The bar itself is hidden.** A 3 pixel border and a hard shadow are what this
+   interface is made of, and a scrollbar drawn in the same ink read as another one of
+   those: a heavy black rule under the sources that looked like part of the faceplate.
+   The row still scrolls by swipe, by drag and by a trackpad, and with the utilities
+   quietened it rarely has anywhere to scroll to.
+
+   **Hiding it cost the one thing it was doing**, which was saying that there is more.
+   A telephone at 390 pixels draws three sources of four, and a person with no bar and
+   no fade has no reason to think the fourth exists. So the last few pixels of the row
+   fade out. A row that fits has nothing under the fade and shows no change; a row that
+   does not fit ends in a control that is visibly cut, which is the oldest way there is
+   of saying "keep going". */
 @utility scroller {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-ink) transparent;
+  scrollbar-width: none;
   margin: -0.25rem;
   padding: 0.25rem;
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* An input is a card that a person types in. */
