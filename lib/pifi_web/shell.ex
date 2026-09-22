@@ -52,11 +52,13 @@ defmodule PiFiWeb.Shell do
   import Phoenix.LiveView, only: [attach_hook: 4, connected?: 1, push_event: 3]
 
   alias PiFi.Artwork
+  alias PiFi.Device.Identity
   alias PiFi.Event
   alias PiFi.Event.Input
   alias PiFi.Event.Player, as: Events
   alias PiFi.Playback
   alias PiFi.Source
+  alias PiFiWeb.Title
 
   @doc """
   Read the sources in use, for the top row of the faceplate.
@@ -71,6 +73,21 @@ defmodule PiFiWeb.Shell do
     assign(socket, :sources, sources)
   end
 
+  @doc """
+  Say what this page is, for the tab of a browser.
+
+  **A page calls this rather than assigning `:page_title` itself**, because the title
+  is not the page alone: it is the name of the device, and the track if one is playing.
+  See `PiFiWeb.Title`. This keeps the words of the page and composes the rest, so a
+  page needs no knowledge of the player.
+  """
+  @spec put_page(Phoenix.LiveView.Socket.t(), String.t() | nil) :: Phoenix.LiveView.Socket.t()
+  def put_page(socket, page) do
+    socket
+    |> assign(:page_name, page)
+    |> compose_title()
+  end
+
   def on_mount(:default, params, _session, socket) do
     if connected?(socket) do
       Event.subscribe(:player)
@@ -81,13 +98,51 @@ defmodule PiFiWeb.Shell do
       socket
       |> assign_sources()
       |> assign(:current_source, nil)
+      |> assign(:page_name, nil)
+      |> assign(:player_state, Playback.state!())
       |> assign(:standby?, Playback.state!().standby?)
+      |> compose_title()
+      |> attach_hook(:page_title, :handle_info, &player_moved/2)
       |> attach_hook(:standby, :handle_info, &standby/2)
       |> attach_hook(:artwork_ready, :handle_info, &artwork_ready/2)
       |> attach_hook(:page_used, :handle_event, &page_used/3)
       |> attach_page_moved(params)
 
     {:cont, socket}
+  end
+
+  # **Every event of the player can change the tab, so this reads the player rather than
+  # the event.** A `Progress` moves the position, a `Stopped` takes the track away and a
+  # `Standby` replaces the lot, and matching each one here would be a second copy of
+  # what the player already knows.
+  #
+  # It writes nothing when the words have not changed. `Progress` arrives once a second
+  # and the position in the title is a whole second, so an event that lands early
+  # composes the same string and sends no diff.
+  defp player_moved(%_{} = event, socket) when is_struct(event) do
+    if player_event?(event) do
+      {:cont, socket |> assign(:player_state, Playback.state!()) |> compose_title()}
+    else
+      {:cont, socket}
+    end
+  end
+
+  defp player_moved(_message, socket), do: {:cont, socket}
+
+  defp player_event?(%module{}),
+    do: match?(["PiFi", "Event", "Player", _name], Module.split(module))
+
+  defp compose_title(socket) do
+    title =
+      Title.compose(
+        Identity.name(),
+        socket.assigns[:page_name],
+        socket.assigns[:player_state] || %{}
+      )
+
+    if socket.assigns[:page_title] == title,
+      do: socket,
+      else: assign(socket, :page_title, title)
   end
 
   # The hook keeps `standby?` and passes the event on, because a LiveView that reads

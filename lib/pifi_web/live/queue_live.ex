@@ -52,7 +52,11 @@ defmodule PiFiWeb.QueueLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: Event.subscribe(:player)
 
-    socket = socket |> assign(page_title: "Play queue", asked: MapSet.new()) |> load()
+    socket =
+      socket
+      |> PiFiWeb.Shell.put_page("Play queue")
+      |> assign(asked: MapSet.new())
+      |> load()
 
     {:ok, socket}
   end

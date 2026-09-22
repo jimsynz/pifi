@@ -2,6 +2,7 @@ defmodule PiFiWeb.BrowseLiveTest do
   use PiFiWeb.ConnCase, async: false
   use Oban.Testing, repo: PiFi.Repo
 
+  alias PiFi.Device.Identity
   alias PiFi.Event
   alias PiFi.Event.Player, as: Events
   alias PiFi.Jellyfin.Fill, as: JellyfinFill
@@ -644,9 +645,19 @@ defmodule PiFiWeb.BrowseLiveTest do
       {:ok, view, _html} = live(conn, @radio)
       open(view, "Countries")
       view |> element("button", "NZ") |> render_click()
+
+      # **The player publishes from its own process, so the stop has to come second.**
+      # A `Stopped` sent before the `Started` arrives is overtaken by it, and the mark
+      # goes back on: the page reads the two in the order they land and not the order
+      # they were sent. Waiting for the start is what makes the order the one this test
+      # means to check.
+      Event.subscribe(:player)
       view |> element("#play-#{station.id}") |> render_click()
+      assert_receive %Events.Started{}, 2_000
+      render(view)
 
       Event.publish(:player, %Events.Stopped{reason: :requested})
+      Event.unsubscribe(:player)
 
       refute has_element?(view, ~s(#play-#{station.id}[aria-current="true"]))
     end
@@ -1845,6 +1856,65 @@ defmodule PiFiWeb.BrowseLiveTest do
       {:ok, view, _html} = live(conn, "/browse/spotify")
 
       refute has_element?(view, "#finder")
+    end
+  end
+
+  # **A person with four tabs open reads the title and nothing else.** See
+  # `PiFiWeb.Title`.
+  describe "the title of the tab" do
+    # The player publishes from its own process, so a render alone is a race. Once the
+    # test holds the event the page holds it too, and a render then answers after the
+    # page has read its mailbox.
+    defp played(view, station) do
+      Event.subscribe(:player)
+      view |> element("#play-#{station.id}") |> render_click()
+      assert_receive %Events.Started{}, 2_000
+      render(view)
+      Event.unsubscribe(:player)
+
+      page_title(view)
+    end
+
+    defp a_station(view) do
+      station = Stations.create(%{country_code: "NZ", title: "RNZ National"})
+      open(view, "Countries")
+      view |> element("button", "NZ") |> render_click()
+
+      station
+    end
+
+    test "an idle device names itself and the page", %{conn: conn} do
+      {:ok, view, _html} = live(conn, @radio)
+
+      assert page_title(view) == "#{Identity.name()} — Internet radio"
+    end
+
+    test "a track that plays replaces the page in the title", %{conn: conn} do
+      PlayingPipeline.use_it()
+      SilentOutput.use_it()
+
+      {:ok, view, _html} = live(conn, @radio)
+      title = view |> a_station() |> then(&played(view, &1))
+
+      assert title =~ "Playing RNZ National"
+      assert title =~ Identity.name()
+      refute title =~ "Internet radio —"
+    end
+
+    # The title follows the player and not the page, so a page that nobody touched
+    # still catches up.
+    test "it goes back to the page when the player stops", %{conn: conn} do
+      PlayingPipeline.use_it()
+      SilentOutput.use_it()
+
+      {:ok, view, _html} = live(conn, @radio)
+      assert view |> a_station() |> then(&played(view, &1)) =~ "Playing"
+
+      PiFi.Player.stop()
+      Event.publish(:player, %Events.Stopped{reason: :requested})
+      render(view)
+
+      assert page_title(view) == "#{Identity.name()} — Internet radio"
     end
   end
 end

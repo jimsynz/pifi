@@ -1445,7 +1445,7 @@ defmodule PiFiWeb.SettingsLive do
   defp upload_message(:too_many_files), do: "Choose one picture."
   defp upload_message(error), do: "That upload failed: #{inspect(error)}"
 
-  defp title(socket), do: assign(socket, :page_title, "Settings")
+  defp title(socket), do: PiFiWeb.Shell.put_page(socket, "Settings")
 
   # A source reads its own current values, and a description of one carries a count
   # or a state, so both come again after each change. See `PiFi.Source`.

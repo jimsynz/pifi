@@ -37,7 +37,7 @@ defmodule PiFiWeb.HistoryLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "History")
+     |> PiFiWeb.Shell.put_page("History")
      |> assign(:collection_id, @collection)
      |> assign(:current_source, nil)
      |> assign(:list_query, nil)

@@ -66,7 +66,7 @@ defmodule PiFiWeb.SearchAllLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Search")
+     |> PiFiWeb.Shell.put_page("Search")
      |> assign(:text, "")
      |> assign(:groups, [])
      |> assign(:searched?, false)}

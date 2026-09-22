@@ -48,7 +48,7 @@ defmodule PiFiWeb.SearchLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Search")
+     |> PiFiWeb.Shell.put_page("Search")
      |> assign(:collection_id, @collection)
      |> assign(:group, nil)
      |> assign(:list_query, nil)
@@ -83,7 +83,7 @@ defmodule PiFiWeb.SearchLive do
       |> assign(:current_source, Source.slug(module))
       |> assign(:text, text)
       |> assign(:group, group)
-      |> assign(:page_title, title(module, group))
+      |> PiFiWeb.Shell.put_page(title(module, group))
       |> assign(:kinds, options_of(module))
       |> assign(:query, query(module, text, group))
     end

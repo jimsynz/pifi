@@ -456,7 +456,7 @@ defmodule PiFiWeb.PlaylistLive do
 
   defp load(socket, :index, _params) do
     socket
-    |> assign(:page_title, "Playlists")
+    |> PiFiWeb.Shell.put_page("Playlists")
     |> assign(:playlists, Playback.list_playlists!(load: [:entry_count]))
     |> assign(:queue_count, length(Playback.queue!()))
   end
@@ -467,7 +467,7 @@ defmodule PiFiWeb.PlaylistLive do
         rows = Playback.playlist_entries!(playlist.id, load: [item: [:artwork]])
 
         socket
-        |> assign(:page_title, to_string(playlist.name))
+        |> PiFiWeb.Shell.put_page(to_string(playlist.name))
         |> assign(:playlist, playlist)
         |> assign(:rows, rows)
         |> assign(:playing_id, playing_id())

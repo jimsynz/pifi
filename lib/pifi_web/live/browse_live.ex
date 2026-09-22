@@ -86,7 +86,7 @@ defmodule PiFiWeb.BrowseLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Browse")
+     |> PiFiWeb.Shell.put_page("Browse")
      |> assign(:finding?, false)
      |> assign(:letter, nil)
      |> assign(:list_layout, :table)
@@ -1052,7 +1052,7 @@ defmodule PiFiWeb.BrowseLive do
     |> assign(:source, module)
     |> assign(:searchable?, :search in module.capabilities())
     |> assign(:current_source, Source.slug(module))
-    |> assign(:page_title, module.title())
+    |> PiFiWeb.Shell.put_page(module.title())
     |> assign(:roots, module.roots())
   end
 
