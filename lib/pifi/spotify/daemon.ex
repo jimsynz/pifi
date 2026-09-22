@@ -27,14 +27,12 @@ defmodule PiFi.Spotify.Daemon do
   librespot 0.8.0 fills every slot hex.pm takes. See `PiFi.Bluetooth` for the same
   deadlock met from the other side.
 
-  ## It still plays to the sound card
+  ## It plays into the loopback
 
-  **The loopback is built and not yet wired up.** `PiFi.Spotify.CaptureSource` exists
-  and nothing starts it, so a cast routed into the loopback would go nowhere and a
-  person would get silence where they get music today. librespot therefore still opens
-  the card, and the one-program-at-a-time rule still applies. The device moves to
-  `PiFi.Spotify.Loopback.playback_device/0` in the change that teaches `PiFi.Player` to
-  carry a stream with no item, and not before.
+  **librespot never opens the sound card now.** It writes to one half of an ALSA
+  loopback and `PiFi.Spotify.CaptureSource` reads the other, so `aplay` is the only
+  program that opens the card and a cast is a stream that `PiFi.Player` carries like
+  any other. The rule about stopping the music before casting is gone with it.
 
   ## What it does with an event
 

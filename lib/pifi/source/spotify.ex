@@ -41,6 +41,8 @@ defmodule PiFi.Source.Spotify do
 
   @behaviour PiFi.Source
 
+  alias PiFi.Spotify.Loopback
+
   @doc false
   @impl PiFi.Source
   def title, do: "Spotify"
@@ -68,14 +70,58 @@ defmodule PiFi.Source.Spotify do
   def roots, do: {:error, __MODULE__}
 
   @doc """
-  Nothing here resolves a Spotify track. See the module documentation.
+  The loopback that librespot plays into.
 
-      iex> PiFi.Source.Spotify.resolve(%PiFi.Playback.Item{})
-      {:error, PiFi.Source.Spotify}
+  **This used to answer `{:error, __MODULE__}`, and the change is the point of the
+  whole arrangement.** A cast went straight to the sound card, so nothing here had any
+  audio to give and there was nothing to resolve. Now librespot plays into an ALSA
+  loopback and the player reads the other half, so a cast is a stream like any other
+  and this is the one thing that says where it is.
 
+  `c:PiFi.Source.roots/0` still answers that it cannot: a telephone decides what plays,
+  and there is still no tree to walk.
   """
   @impl PiFi.Source
-  def resolve(_item), do: {:error, __MODULE__}
+  def resolve(_item) do
+    {:ok,
+     %{
+       uri: Loopback.capture_device(),
+       headers: [],
+       transport: :capture,
+       container: :none,
+       # The samples are already samples. See `PiFi.Spotify.CaptureSource`.
+       format: :raw,
+       # **A cast has no end that this device knows.** A telephone decides when it
+       # stops, so there is no length to count against and nothing to seek in.
+       live?: true,
+       position_ms: 0,
+       key: nil,
+       position_bytes: nil
+     }}
+  end
+
+  @doc """
+  The one item that stands for the input.
+
+  **A cast is shaped like a radio station.** A station is an item and the song playing
+  on it arrives separately, over ICY, as `stream_title`. Spotify is the same: the item
+  is the input, and the title, the artist and the artwork of whatever is playing ride
+  in the fields that radio already uses.
+
+  So there is one row and not one for each track. A row for each track would write to
+  the SD card for every song a person casts, for something that is in no catalogue and
+  that nothing can play again. **An SD card has a finite number of writes.**
+  """
+  @spec item() :: PiFi.Playback.Item.t()
+  def item do
+    PiFi.Playback.upsert_item!(%{
+      source: PiFi.Source.slug(__MODULE__),
+      source_ref: "spotify",
+      title: title(),
+      kind: :track,
+      live?: true
+    })
+  end
 
   @doc false
   @impl PiFi.Source

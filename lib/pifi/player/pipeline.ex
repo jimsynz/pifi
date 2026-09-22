@@ -181,6 +181,14 @@ defmodule PiFi.Player.Pipeline do
   # `Membrane.HLS.Source` reads the media playlist again and again, and it returns
   # the bytes of each segment. The playlist therefore is the buffer, and this
   # source needs none of its own.
+  # **A capture is a sound card that another program plays into**, so there is no
+  # network, no buffer and no decoder: the samples arrive as they will leave. librespot
+  # writes one half of an ALSA loopback and this reads the other. See
+  # `PiFi.Spotify.Loopback`.
+  defp source(%{transport: :capture} = playable, _buffer_bytes) do
+    child(:source, %PiFi.Spotify.CaptureSource{device: playable.uri, command: "arecord"})
+  end
+
   defp source(%{transport: :hls} = playable, _buffer_bytes) do
     child(:source, %Membrane.HLS.Source{
       storage: Hls.Storage.new(),
@@ -299,6 +307,9 @@ defmodule PiFi.Player.Pipeline do
 
   # MAD gives 24-bit samples, and FDK gives 16-bit ones. The sink reads the format
   # from the stream and tells `aplay`, so neither one needs a resampler.
+  # Something else already decoded these, so there is nothing to do but carry them.
+  defp decoder(link, %{format: :raw}), do: link
+
   defp decoder(link, %{format: :mp3}), do: child(link, :decoder, Membrane.MP3.MAD.Decoder)
 
   defp decoder(link, %{format: :aac}), do: child(link, :decoder, Membrane.AAC.FDK.Decoder)

@@ -9,6 +9,9 @@ defmodule PiFi.SpotifyTest do
   alias PiFi.Source
   alias PiFi.Spotify
   alias PiFi.Test.NoCardOutput
+  alias PiFi.Test.PlayingPipeline
+  alias PiFi.Test.SilentOutput
+  alias PiFi.Test.Stations
 
   setup do
     on_exit(fn ->
@@ -92,6 +95,57 @@ defmodule PiFi.SpotifyTest do
 
       assert eventually(fn -> Process.alive?(monitor) end)
       assert Spotify.enabled?()
+    end
+  end
+
+  # **A sink event is the only thing that says a cast began**, and it rides the
+  # `:player` topic. This process subscribed to `:device` and `:source` alone, so every
+  # one of them went past it: a cast reached librespot and stopped there, the loopback
+  # filled with audio, and nothing read it.
+  describe "a cast reaches the player" do
+    setup do
+      PlayingPipeline.use_it()
+      SilentOutput.use_it()
+
+      # The player refuses a source that a person took out of use, and in the firmware
+      # the daemon only runs when Spotify is in use, so the two agree. A test has to
+      # say so itself.
+      for module <- [Source.Spotify, Source.InternetRadio], do: Source.enable(module, true)
+
+      on_exit(fn ->
+        PiFi.Player.stop()
+        Source.enable(Source.InternetRadio, true)
+      end)
+
+      :ok
+    end
+
+    test "librespot opening its sink starts the capture" do
+      Event.subscribe(:player)
+      Event.publish(:player, %PiFi.Event.Spotify.SinkChanged{state: :running})
+
+      assert_receive %PiFi.Event.Player.Started{}, 5_000
+
+      assert %{source: PiFi.Source.Spotify} = PiFi.Playback.state!()
+    end
+
+    # **Only a cast that this device is playing may be stopped by one.** A `closed` that
+    # arrived while somebody was listening to something else would take their music.
+    test "a close that arrives while something else plays leaves it alone" do
+      item = Stations.create(%{country_code: "NZ", title: "A station"})
+
+      # The player answers before the pipeline says it began, so the state is not the
+      # new one until `Started` lands. Waiting for it is what makes this about the
+      # guard rather than about timing.
+      Event.subscribe(:player)
+      :ok = PiFi.Player.play(item)
+      assert_receive %PiFi.Event.Player.Started{}, 5_000
+      assert %{source: PiFi.Source.InternetRadio} = PiFi.Playback.state!()
+
+      Event.publish(:player, %PiFi.Event.Spotify.SinkChanged{state: :closed})
+      Process.sleep(500)
+
+      assert %{source: PiFi.Source.InternetRadio} = PiFi.Playback.state!()
     end
   end
 

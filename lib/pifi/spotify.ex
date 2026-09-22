@@ -81,7 +81,6 @@ defmodule PiFi.Spotify do
 
   require Logger
 
-  alias PiFi.Output.Alsa
   alias PiFi.Source
   alias PiFi.Spotify.Loopback
 
@@ -147,7 +146,7 @@ defmodule PiFi.Spotify do
   defp start_daemon do
     case daemon() do
       {:ok, child} -> start_child(child)
-      {:error, :no_output_device} -> Logger.info("Spotify waits for a sound card.")
+      {:error, reason} -> Logger.info("Spotify waits for the ALSA loopback: #{inspect(reason)}")
     end
 
     :ok
@@ -194,24 +193,16 @@ defmodule PiFi.Spotify do
   # reads the package until the supervisor starts the child. The package is a target
   # dependency, so on a host it is absent, and a spec that resolved it as it was built
   # would raise where this lets `start_child/1` log that the daemon did not start.
-  # **The loopback is loaded and not yet depended on.** librespot still plays to the
-  # sound card, so a board where `modprobe` fails must still be able to cast, and a
-  # board with no card still starts nothing. See `PiFi.Spotify.Daemon`.
+  # **The loopback is what librespot plays into**, so it is what the daemon waits for
+  # rather than a sound card. The card is still needed, but `PiFi.Player` opens it
+  # through `aplay` when the cast starts, in the way it does for everything else.
   defp daemon do
-    case Loopback.ensure_loaded() do
-      :ok -> :ok
-      {:error, reason} -> Logger.info("The ALSA loopback is not up: #{inspect(reason)}")
-    end
-
-    with {:ok, device} <- alsa_device() do
-      {:ok, %{id: :librespot, start: {PiFi.Spotify.Daemon, :start_link, [[device: device]]}}}
-    end
-  end
-
-  defp alsa_device do
-    case PiFi.Playback.output!() do
-      %{in_use: id} when is_binary(id) -> {:ok, Alsa.pcm_name(id)}
-      _other -> {:error, :no_output_device}
+    with :ok <- Loopback.ensure_loaded() do
+      {:ok,
+       %{
+         id: :librespot,
+         start: {PiFi.Spotify.Daemon, :start_link, [[device: Loopback.playback_device()]]}
+       }}
     end
   end
 end

@@ -186,6 +186,21 @@ defmodule PiFi.Player do
   def stop, do: GenServer.call(__MODULE__, :stop)
 
   @doc """
+  Say what is playing, when something outside the pipeline is what knows.
+
+  **A station names its track inside the stream and a cast names it beside one.**
+  Internet radio sends an ICY title, which the pipeline reads and reports, and there is
+  nothing to read here: librespot says what it is playing over its event program, and
+  `PiFi.Spotify.Monitor` passes it on. The title lands in the same field either way, so
+  every screen and page draws a cast the way it draws a station.
+
+  A caller says this for whatever is playing, so it is the caller that has to know
+  whether the title is still about the right thing.
+  """
+  @spec metadata(String.t() | nil) :: :ok
+  def metadata(title), do: GenServer.cast(__MODULE__, {:metadata, title})
+
+  @doc """
   Stop the audio and keep the track, or start it again.
 
   A pause is not a stop. A stop leaves the device with nothing selected, and a pause
@@ -567,6 +582,13 @@ defmodule PiFi.Player do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  @impl GenServer
+  def handle_cast({:metadata, title}, %State{} = state) do
+    Event.publish(:player, %Events.MetadataChanged{title: title})
+
+    {:noreply, %State{state | stream_title: title}}
   end
 
   @impl GenServer

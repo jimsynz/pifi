@@ -180,8 +180,11 @@ defmodule PiFi.Source do
   separately.
 
   - `transport` is how the bytes arrive. `:http` is one continuous answer, `:hls` is
-    a playlist of segments that the player reads again and again, and `:download`
-    is a file that `PiFi.Player.Download` writes while the player reads it.
+    a playlist of segments that the player reads again and again, `:download`
+    is a file that `PiFi.Player.Download` writes while the player reads it, and
+    `:capture` is a sound card that another program is playing into. A cast reaches
+    this device that way: librespot plays to an ALSA loopback and the player reads the
+    other half of it. See `PiFi.Spotify.CaptureSource`.
   - `container` is what carries the audio. `:mpeg_ts` needs a demultiplexer, `:ogg`
     names a container that the decoder reads itself, and `:none` gives the audio as
     it is.
@@ -200,6 +203,9 @@ defmodule PiFi.Source do
   progress bar then shows the place in the whole track, and not the place in this
   request.
 
+  **`:raw` is audio that needs no decoder**, because something else already decoded it.
+  A capture is that: the samples arrive as they will leave.
+
   `key` and `position_bytes` belong to `:download` alone. `key` is what the cache
   keeps the file under, and `position_bytes` is the byte to begin at. A transport
   that reads no file leaves both absent.
@@ -211,9 +217,9 @@ defmodule PiFi.Source do
   @type playable :: %{
           uri: String.t(),
           headers: [{String.t(), String.t()}],
-          transport: :http | :hls | :download,
+          transport: :http | :hls | :download | :capture,
           container: :none | :mpeg_ts | :ogg,
-          format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :unknown,
+          format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :raw | :unknown,
           live?: boolean(),
           position_ms: non_neg_integer(),
           key: String.t() | nil,
