@@ -733,6 +733,37 @@ defmodule PiFiWeb.SettingsLiveTest do
 
       refute has_element?(view, "#usage-jellyfin")
     end
+
+    # **Plex drew the same grey as `Other`**, because the colour map named four sources
+    # and the firmware had five. A source added without a colour takes the fallback, and
+    # two kinds of one colour is a bar that says nothing.
+    test "every kind on the bar draws a colour of its own", %{conn: conn} do
+      for source <- ["podcasts", "plex"] do
+        item =
+          PiFi.Playback.upsert_item!(%{
+            source: source,
+            source_ref: "#{source}-audio",
+            title: "A track of #{source}"
+          })
+
+        PiFi.Cache.put!("download", item.id, %{bytes: String.duplicate("a", 900)})
+      end
+
+      PiFi.Cache.put!("artwork", "cover", %{bytes: String.duplicate("c", 700)})
+
+      {:ok, view, _html} = live(conn, ~p"/settings/storage")
+
+      colours =
+        view
+        |> element("#storage-usage")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("li span[style]")
+        |> Enum.map(&(&1 |> LazyHTML.attribute("style") |> List.first()))
+
+      assert length(colours) >= 4, "the bar drew too few kinds to be a test of this"
+      assert colours == Enum.uniq(colours), "two kinds share a colour: #{inspect(colours)}"
+    end
   end
 
   # **A person turns this on, and a card that holds no level cannot be turned on.**

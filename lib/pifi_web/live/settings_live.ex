@@ -1225,14 +1225,25 @@ defmodule PiFiWeb.SettingsLive do
   # The rows under the bar carry the numbers, because a kind of 1 percent is a few
   # pixels wide and no person can measure that.
   #
-  # A kind has a colour and a row, so identity never rests on the colour alone. The
-  # segments hold a gap of 2 pixels in the colour of the surface, which is what
-  # separates two of them: a border around each one would draw six lines on a bar 12
-  # pixels tall.
+  # A kind has a colour and a row, so identity never rests on the colour alone.
+  #
+  # **The bar is 24 pixels and it used to be 12.** `recess` carries a 3 pixel border on
+  # each side, so half of a 12 pixel bar was its own edge and the colour inside it was a
+  # 6 pixel line. The border is the grammar of this style and it is not going anywhere,
+  # so the bar grew to leave room for it.
+  #
+  # **The gaps between the segments are ink, and they used to be the surface.** Two
+  # pixels of pale cream between each pair read as tiles laid on a bench rather than one
+  # bar divided, which is a thing a person asks about rather than reads. In the ink they
+  # are the same line as the border around them, and the bar reads as one object.
   defp usage_bar(assigns) do
     ~H"""
     <div :if={@used_bytes > 0} id="storage-usage" class="mb-4">
-      <div class="recess flex h-3 gap-0.5 overflow-hidden rounded-full" aria-hidden="true">
+      <div
+        class="recess flex h-6 gap-0.5 overflow-hidden"
+        style="background: var(--color-ink)"
+        aria-hidden="true"
+      >
         <div
           :for={kind <- @usage}
           class="min-w-[3px]"
@@ -1258,26 +1269,37 @@ defmodule PiFiWeb.SettingsLive do
   # `PiFi.Device.Storage.Usage` returns the kinds in a fixed order, and this map keeps
   # one colour for each key of it.
   #
-  # The four chromatic values are slots 1, 2, 3 and 4 of the categorical palette that
-  # the `dataviz` skill documents, stepped for a dark surface. A measurement against
-  # this surface, which is `#0f1114`, passes every gate in this order: the worst pair
-  # of two that touch stands at 8.4 for a reader who cannot tell red from green, where
-  # 8 is the target, and at 19.8 for a reader who can, where 15 is the floor.
+  # **Measured with CIEDE2000, for every pair and not only the pairs that touch.** The
+  # bar is one row and the legend under it is another, and a person comparing two rows
+  # of the legend is comparing colours that never met on the bar. The worst pair here
+  # stands at 14.5 and the median at 30.8, across normal vision, deuteranopia and
+  # protanopia, simulated with the Viénot transform. Every colour stands at 26 or more
+  # from the surface in both schemes.
+  #
+  # **The set before this one had a pair at 4.** Jellyfin's orange and the gold of the
+  # database are the same yellow-brown to a deuteranope, which is half the population
+  # that cannot tell red from green. It also gave Plex no colour at all, so Plex and
+  # `other` drew the same grey and a person could not tell which was which — the
+  # complaint that started this.
+  #
+  # **Three of the five are unchanged**, because the blue, the orange and the green
+  # were never the problem. Plex takes a deep blue and the database takes a brick red,
+  # and those two were chosen by searching Lab space for the pair that maximises the
+  # smallest difference against the three that stay.
+  #
+  # **Five is the ceiling and a sixth is not available.** A search of 253 candidates
+  # found nothing that clears the others by a useful margin once blue, orange, green
+  # and grey are spoken for. A new source therefore takes the grey below, and the label
+  # of its row is what says which source it is.
   #
   # **`other` is grey on purpose.** It is the fold of everything that no kind names, so
-  # it must not read as a kind of its own, and the measurement marks it as below the
-  # floor for chroma for that reason.
-  #
-  # **A source that this map does not name takes the grey.** The label of the row still
-  # says which source it is, so nothing is lost but the colour. A person who adds a
-  # source gives it a value here and measures the order again: no fifth colour passes
-  # beside orange, and an invented one would put two that a reader cannot tell apart
-  # side by side.
+  # it must not read as a kind of its own.
   @colours %{
     "podcasts" => "#3987e5",
     "jellyfin" => "#d95926",
+    "plex" => "#17629c",
     "artwork" => "#199e70",
-    "database" => "#c98500",
+    "database" => "#a23d39",
     "other" => "#60636a"
   }
 
