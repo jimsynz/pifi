@@ -7,6 +7,7 @@ defmodule PiFi.AirPlay.RouterTest do
   alias PiFi.AirPlay.PairSetup
   alias PiFi.AirPlay.Router
   alias PiFi.AirPlay.Rtsp
+  alias PiFi.AirPlay.SecureChannel
   alias PiFi.AirPlay.Srp
   alias PiFi.AirPlay.Tlv8
 
@@ -135,9 +136,11 @@ defmodule PiFi.AirPlay.RouterTest do
       assert {:ok, <<4>>} = Tlv8.fetch(items, @state)
 
       # Transient pairing is finished at M4, so there is nothing left in progress and
-      # the connection has its key.
+      # the connection has the two keys it encrypts with from here on — the same pair a
+      # Pair-Verify would have left, derived from the SRP session key instead.
       assert session.setup == nil
-      assert session.keys == phone.session_key
+      assert session.keys == SecureChannel.keys(phone.session_key)
+      assert session.keys.read != session.keys.write
     end
 
     test "refuses a telephone that did not know the code", %{session: session} do

@@ -4,6 +4,8 @@ defmodule PiFi.AirPlay.ConnectionTest do
   alias PiFi.AirPlay.BinaryPlist
   alias PiFi.AirPlay.Device
   alias PiFi.AirPlay.Identity
+  alias PiFi.AirPlay.SecureChannel
+  alias PiFi.Test.AirPlayPhone, as: Phone
 
   setup do
     dir = Path.join(System.tmp_dir!(), "airplay-conn-#{System.unique_integer([:positive])}")
@@ -76,6 +78,10 @@ defmodule PiFi.AirPlay.ConnectionTest do
     {:ok, bytes} = :gen_tcp.recv(socket, count, 2000)
 
     bytes
+  end
+
+  defp post(uri, body, cseq) do
+    "POST #{uri} RTSP/1.0\r\ncseq: #{cseq}\r\ncontent-length: #{byte_size(body)}\r\n\r\n" <> body
   end
 
   defp get_info(cseq) do
@@ -153,6 +159,92 @@ defmodule PiFi.AirPlay.ConnectionTest do
     :ok = :gen_tcp.send(socket, "\0\0\0 this is not RTSP \r\n\r\n")
 
     assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2000)
+  end
+
+  describe "once a pairing is done" do
+    defp pair(socket) do
+      :ok = :gen_tcp.send(socket, post("/pair-setup", Phone.m1(transient?: true), 1))
+      {_headers, m2, ""} = read_reply(socket)
+
+      {m3, phone} = Phone.m3(m2)
+
+      :ok = :gen_tcp.send(socket, post("/pair-setup", m3, 2))
+      {headers, _m4, leftover} = read_reply(socket)
+
+      {headers, leftover, Phone.channel(phone.session_key)}
+    end
+
+    # **The answer that finishes a pairing is the last thing in the clear.** A receiver
+    # that switched over one message early would send a reply the telephone could not
+    # read, at the one moment it had no way to say so.
+    test "the message that finishes it is still plaintext", %{port: port} do
+      socket = connect(port)
+      {headers, leftover, _channel} = pair(socket)
+
+      assert headers =~ "200 OK"
+      assert leftover == ""
+    end
+
+    test "the next request has to be encrypted, and its answer comes back encrypted",
+         %{port: port} do
+      socket = connect(port)
+      {_headers, _leftover, channel} = pair(socket)
+
+      {sealed, channel} = SecureChannel.seal(channel, get_info(3))
+      :ok = :gen_tcp.send(socket, sealed)
+
+      {:ok, arrived} = :gen_tcp.recv(socket, 0, 2000)
+
+      assert {:ok, plain, "", _channel} = SecureChannel.open(channel, arrived)
+      assert plain =~ "cseq: 3"
+
+      [_head, body] = String.split(plain, "\r\n\r\n", parts: 2)
+
+      assert {:ok, plist} = BinaryPlist.decode(body)
+      assert plist["name"] == "Kitchen"
+    end
+
+    # This is the one that catches the keys being the same way round at both ends.
+    test "a request encrypted with the keys the wrong way round closes the connection",
+         %{port: port} do
+      socket = connect(port)
+      {_headers, _leftover, channel} = pair(socket)
+
+      # Swapping read for write is what an accessory naming its keys from the
+      # controller's point of view would agree with, and nothing else would.
+      swapped = %{channel | read_key: channel.write_key, write_key: channel.read_key}
+      {sealed, _swapped} = SecureChannel.seal(swapped, get_info(3))
+
+      :ok = :gen_tcp.send(socket, sealed)
+
+      assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2000)
+    end
+
+    test "plaintext after a pairing closes the connection", %{port: port} do
+      socket = connect(port)
+      {_headers, _leftover, _channel} = pair(socket)
+
+      :ok = :gen_tcp.send(socket, get_info(3))
+
+      assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2000)
+    end
+
+    test "request after request stays in step", %{port: port} do
+      socket = connect(port)
+      {_headers, _leftover, channel} = pair(socket)
+
+      Enum.reduce(3..7, channel, fn cseq, channel ->
+        {sealed, channel} = SecureChannel.seal(channel, get_info(cseq))
+        :ok = :gen_tcp.send(socket, sealed)
+
+        {:ok, arrived} = :gen_tcp.recv(socket, 0, 2000)
+
+        assert {:ok, plain, "", channel} = SecureChannel.open(channel, arrived)
+        assert plain =~ "cseq: #{cseq}"
+
+        channel
+      end)
+    end
   end
 
   test "one connection's state does not reach another", %{port: port} do

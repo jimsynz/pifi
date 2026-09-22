@@ -43,6 +43,7 @@ defmodule PiFi.AirPlay.PairVerify do
   alias PiFi.AirPlay.Cipher
   alias PiFi.AirPlay.Hkdf
   alias PiFi.AirPlay.Identity
+  alias PiFi.AirPlay.SecureChannel
   alias PiFi.AirPlay.Tlv8
 
   # The HomeKit TLV types that this exchange uses.
@@ -57,10 +58,6 @@ defmodule PiFi.AirPlay.PairVerify do
 
   @verify_salt "Pair-Verify-Encrypt-Salt"
   @verify_info "Pair-Verify-Encrypt-Info"
-
-  @control_salt "Control-Salt"
-  @read_info "Control-Read-Encryption-Key"
-  @write_info "Control-Write-Encryption-Key"
 
   @key_bytes 32
 
@@ -153,12 +150,9 @@ defmodule PiFi.AirPlay.PairVerify do
   @spec refusal() :: binary()
   def refusal, do: Tlv8.encode([{@state, <<0x04>>}, {@error, @error_authentication}])
 
-  defp keys(%Exchange{shared: shared}) do
-    %{
-      read: Hkdf.derive(:sha512, shared, @control_salt, @read_info, @key_bytes),
-      write: Hkdf.derive(:sha512, shared, @control_salt, @write_info, @key_bytes)
-    }
-  end
+  # `PiFi.AirPlay.SecureChannel` derives these, because a transient Pair-Setup ends with
+  # a different secret and wants the same two keys out of it.
+  defp keys(%Exchange{shared: shared}), do: SecureChannel.keys(shared)
 
   defp decoded(bytes) do
     case Tlv8.decode(bytes) do

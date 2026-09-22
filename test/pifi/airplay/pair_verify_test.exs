@@ -26,6 +26,8 @@ defmodule PiFi.AirPlay.PairVerifyTest do
     %{dir: dir, phone: phone_dir, phone_id: "telephone", device_id: "PiFi"}
   end
 
+  defp control_key(shared, info), do: Hkdf.derive(:sha512, shared, "Control-Salt", info, 32)
+
   # **The telephone's half, written from the specification rather than from the code it
   # is testing.** It signs in the mirrored order, which is the thing most likely to be
   # got wrong on either side.
@@ -76,24 +78,13 @@ defmodule PiFi.AirPlay.PairVerifyTest do
 
       assert {:ok, m4, keys} = PairVerify.finish(exchange, m3, paired(context))
 
-      # The telephone derives the same two keys from its own side of the exchange.
-      assert keys.read ==
-               Hkdf.derive(
-                 :sha512,
-                 phone_shared,
-                 "Control-Salt",
-                 "Control-Read-Encryption-Key",
-                 32
-               )
-
-      assert keys.write ==
-               Hkdf.derive(
-                 :sha512,
-                 phone_shared,
-                 "Control-Salt",
-                 "Control-Write-Encryption-Key",
-                 32
-               )
+      # **The two names are the telephone's and this is the accessory, so they cross
+      # over.** What the telephone writes with is what this device reads with. An
+      # earlier version of this test asserted the names at face value, which agreed
+      # with the code and with nothing else: both were wrong the same way, and every
+      # message after the handshake would have failed to authenticate.
+      assert keys.read == control_key(phone_shared, "Control-Write-Encryption-Key")
+      assert keys.write == control_key(phone_shared, "Control-Read-Encryption-Key")
 
       assert {:ok, items} = Tlv8.decode(m4)
       assert {:ok, <<0x04>>} = Tlv8.fetch(items, @state)

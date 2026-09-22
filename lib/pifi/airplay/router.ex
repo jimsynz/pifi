@@ -30,6 +30,7 @@ defmodule PiFi.AirPlay.Router do
   alias PiFi.AirPlay.PairVerify
   alias PiFi.AirPlay.Rtsp
   alias PiFi.AirPlay.Rtsp.Request
+  alias PiFi.AirPlay.SecureChannel
   alias PiFi.AirPlay.Tlv8
 
   @state 0x06
@@ -114,10 +115,10 @@ defmodule PiFi.AirPlay.Router do
       {:ok, reply, exchange} ->
         {tlv(request, reply), %{session | setup: exchange}}
 
-      # A transient pairing is finished here, and the key it leaves is what the
-      # connection uses from now on.
-      {:done, reply, key} ->
-        {tlv(request, reply), %{session | setup: nil, keys: key}}
+      # A transient pairing is finished here, and the secret it leaves gives the keys
+      # the connection uses from now on — the same two a Pair-Verify would have left.
+      {:done, reply, secret} ->
+        {tlv(request, reply), %{session | setup: nil, keys: SecureChannel.keys(secret)}}
 
       {:error, _reason} ->
         {tlv(request, PairSetup.refusal(4)), session}

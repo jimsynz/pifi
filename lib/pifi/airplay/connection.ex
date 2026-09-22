@@ -14,11 +14,24 @@ defmodule PiFi.AirPlay.Connection do
   whole requests**, rather than being parsed once per read. A handler that assumed one
   read was one request would work on a desk and stall on a board.
 
+  ## Everything after pairing is encrypted, and the reply that finishes it is not
+
+  The message that completes a pairing is answered **in the clear**, and the message
+  after that arrives as ciphertext. So the channel is made once that answer has gone out
+  and never before it: a receiver that switched over one message early would send a
+  telephone a reply it could not read, at the one moment it had no way to say so.
+
+  After that there are two buffers rather than one — the ciphertext that has arrived and
+  the plaintext it has yielded — because neither runs out in step with the other. A
+  block can decrypt to half a request, and a request can finish in the middle of a
+  block.
+
   ## A connection that will not parse is closed
 
   Not refused with a `400` and left open: a buffer that cannot be parsed will not parse
   any better with more bytes after it, and holding the socket open would leave a
-  telephone waiting. There is no recovering the frame once it is lost.
+  telephone waiting. A block whose tag does not check is the same — the stream is a
+  sequence, and there is no finding the place again once one is lost.
 
   ## The device facts are read once
 
@@ -34,44 +47,77 @@ defmodule PiFi.AirPlay.Connection do
 
   alias PiFi.AirPlay.Router
   alias PiFi.AirPlay.Rtsp
+  alias PiFi.AirPlay.SecureChannel
 
   @impl ThousandIsland.Handler
   def handle_connection(socket, state) do
-    {:ok, session} = session_for(socket, state)
-
-    {:continue, %{buffer: <<>>, session: session}}
+    {:continue, %{buffer: <<>>, plain: <<>>, channel: nil, session: session_for(socket, state)}}
   end
 
   @impl ThousandIsland.Handler
   def handle_data(data, socket, state) do
-    case drain(state.buffer <> data, state.session, socket) do
-      {:ok, buffer, session} -> {:continue, %{state | buffer: buffer, session: session}}
-      {:error, reason} -> {:close, log_and_keep(state, reason)}
+    with {:ok, plain, rest, state} <- decrypt(state.buffer <> data, state),
+         {:ok, state} <- serve(state.plain <> plain, %{state | buffer: rest}, socket) do
+      {:continue, state}
+    else
+      {:error, reason} ->
+        Logger.warning("AirPlay connection closed: #{inspect(reason)}")
+
+        {:close, state}
     end
   end
 
-  defp drain(buffer, session, socket) do
-    case Rtsp.parse(buffer) do
+  # Before a pairing there is no channel and the bytes are already plain.
+  defp decrypt(arrived, %{channel: nil} = state), do: {:ok, arrived, <<>>, state}
+
+  defp decrypt(arrived, state) do
+    case SecureChannel.open(state.channel, arrived) do
+      {:ok, plain, rest, channel} -> {:ok, plain, rest, %{state | channel: channel}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp serve(plain, state, socket) do
+    case Rtsp.parse(plain) do
       {:more, rest} ->
-        {:ok, rest, session}
+        {:ok, %{state | plain: rest}}
 
       {:ok, request, rest} ->
-        {reply, session} = Router.route(request, session)
+        {reply, session} = Router.route(request, state.session)
 
-        ThousandIsland.Socket.send(socket, reply)
+        state =
+          %{state | session: session}
+          |> answer(reply, socket)
+          |> secure()
 
-        drain(rest, session, socket)
+        serve(rest, state, socket)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp log_and_keep(state, reason) do
-    Logger.warning("AirPlay connection closed: #{inspect(reason)}")
+  defp answer(%{channel: nil} = state, reply, socket) do
+    ThousandIsland.Socket.send(socket, reply)
 
     state
   end
+
+  defp answer(state, reply, socket) do
+    {sealed, channel} = SecureChannel.seal(state.channel, reply)
+
+    ThousandIsland.Socket.send(socket, sealed)
+
+    %{state | channel: channel}
+  end
+
+  # **This runs after the answer has gone out**, which is what keeps the last message of
+  # a pairing in the clear while the one after it is not.
+  defp secure(%{channel: nil, session: %{keys: keys}} = state) when is_map(keys) do
+    %{state | channel: SecureChannel.new(keys)}
+  end
+
+  defp secure(state), do: state
 
   defp session_for(socket, state) do
     sender =
@@ -80,6 +126,6 @@ defmodule PiFi.AirPlay.Connection do
         _other -> "unknown"
       end
 
-    {:ok, Router.new(state.device, sender, state.data_dir)}
+    Router.new(state.device, sender, state.data_dir)
   end
 end
