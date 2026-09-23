@@ -332,19 +332,37 @@ defmodule PiFi.CacheTest do
       assert keys() == ["hot", "warm"]
     end
 
-    # The loop that one measure makes: `PiFi.Artwork` touches a picture each time
-    # that it draws a list, so a picture is always warm and the audio of an album that
-    # a person marked and did not play is always cold. The eviction took the album, the
-    # next sync read it again, and moving through a list of covers wrote the card.
-    test "it takes the lightest first, though the heavier entry is colder" do
+    # **This used to answer the other way, and the change is deliberate.** `weight` was
+    # read as a tier, so every picture went before any track whatever their ages, and a
+    # person browsing Plex saw gaps in the artwork while tracks they had not played in
+    # months sat on the card. It is a weighting now: a track has to be twice as cold as
+    # a picture to go before it. See `PiFi.Cache.Entry.Prune.score/2`.
+    test "a track that is colder than a picture goes before it" do
       audio = put("download", "audio", String.duplicate("x", 400), %{weight: 1})
       put("artwork", "picture", String.duplicate("x", 400))
 
-      # The audio is the colder of the two, and the picture is warm because a list
-      # was drawn a moment ago.
       Cache.touch!(audio)
-      Process.sleep(5)
+      Process.sleep(20)
       Cache.touch!(Cache.fetch!("artwork", "picture"))
+
+      Application.put_env(:pifi, :cache_limit, 500)
+
+      assert {:ok, report} = Cache.prune()
+
+      assert report.removed == 1
+      assert keys() == ["picture"]
+    end
+
+    # **The case that the tier got wrong.** `PiFi.Artwork` touches a picture each time
+    # it draws a list, so the covers a person is looking at are the warmest things on
+    # the card — and they were still the first to go.
+    test "a picture that is colder than a track goes before it" do
+      picture = put("artwork", "picture", String.duplicate("x", 400))
+      audio = put("download", "audio", String.duplicate("x", 400), %{weight: 1})
+
+      Cache.touch!(picture)
+      Process.sleep(20)
+      Cache.touch!(audio)
 
       Application.put_env(:pifi, :cache_limit, 500)
 

@@ -91,10 +91,68 @@ defmodule PiFi.Cache.Entry.Prune do
     choose(rest, excess, [entry | taking], freed + (entry.byte_size || 0))
   end
 
+  @doc """
+  How evictable one entry is. The eviction takes the highest first.
+
+  **It is the age divided by what the entry costs to read again**, so a thing that is
+  cheap to fetch goes before an expensive thing of the same age, and an expensive thing
+  eventually goes anyway once it is old enough.
+
+  The tier this replaced never got that far. It read `weight` as an order rather than a
+  weighting, so **every** picture went before **any** track: a person browsing Plex saw
+  gaps in the artwork while tracks they had not played in months sat on the card. The
+  reasoning behind the tier was sound — a picture is 1.2 MB the device fetches again by
+  itself, a track is 8 MB that is there so it plays when the server is off — and it was
+  applied absolutely, which is the part that was wrong.
+
+  A weight of 0 divides by 1, so a picture is scored on its age alone. A weight of 1
+  divides by 2, so a track has to be twice as cold as a picture to go before it. The
+  ratio holds at any age, which an amount of grace added to the clock would not:
+  a week of credit means nothing to something a year old.
+
+      iex> now = ~U[2026-01-08 00:00:00Z]
+      iex> week_old = %{last_accessed_at: ~U[2026-01-01 00:00:00Z], weight: 0}
+      iex> PiFi.Cache.Entry.Prune.score(week_old, now)
+      604800.0
+
+  **A track has to be twice as cold as a picture to lose to it.**
+
+      iex> now = ~U[2026-01-15 00:00:00Z]
+      iex> picture = %{last_accessed_at: ~U[2026-01-08 00:00:00Z], weight: 0}
+      iex> track = %{last_accessed_at: ~U[2026-01-01 00:00:00Z], weight: 1}
+      iex> PiFi.Cache.Entry.Prune.score(picture, now) == PiFi.Cache.Entry.Prune.score(track, now)
+      true
+
+  **An entry nothing has ever read is the coldest thing there is.** A write that never
+  got a mark is a file no reader wants.
+
+      iex> PiFi.Cache.Entry.Prune.score(%{last_accessed_at: nil, weight: 9}, ~U[2026-01-01 00:00:00Z])
+      :infinity
+
+  Something read this instant scores nothing at all, whatever it weighs.
+
+      iex> now = ~U[2026-01-01 00:00:00Z]
+      iex> PiFi.Cache.Entry.Prune.score(%{last_accessed_at: now, weight: 0}, now)
+      0.0
+  """
+  @spec score(map(), DateTime.t()) :: float() | :infinity
+  def score(%{last_accessed_at: nil}, _now), do: :infinity
+
+  def score(%{last_accessed_at: at, weight: weight}, now) do
+    DateTime.diff(now, at) / (weight + 1)
+  end
+
+  # **The order is here and not in the query**, because SQLite has no arithmetic over
+  # dates that this project trusts — `ago/2` already gives no answer on AshSqlite. Every
+  # row is read in any case: choosing needs a running total of bytes, which no query
+  # expression holds.
   defp coldest(colder_than) do
+    now = DateTime.utc_now()
+
     Cache.Entry
     |> Ash.Query.for_read(:coldest, %{colder_than: colder_than})
     |> Ash.read!()
+    |> Enum.sort_by(&score(&1, now), :desc)
   end
 
   defp failed(errors) do

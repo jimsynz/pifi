@@ -111,15 +111,11 @@ defmodule PiFi.Cache.Entry do
       description """
       The entries that an eviction may take, the ones to remove first at the front.
 
-      **The weight comes before the time.** A cache that ranks by the time alone ranks
-      two things wrongly, because the time says how recently a person read a thing and
-      not what it costs to read it again. `PiFi.Artwork` touches a picture each time
-      that it draws a list, so every picture stays warm, and the audio of an album that
-      a person marked and did not play goes cold at once. The eviction then took the
-      album, the next run of `PiFi.Jellyfin.Sync.Favourites` read the 92 MB of it
-      again, and a person who moved through a list of covers wrote the card for ever.
-      A picture is 1.2 MB and a read of it says nothing to a person. A track is 8 MB,
-      and it is on the card so that it plays when the server is off.
+      **The order is not here, and `PiFi.Cache.Entry.Prune` says why.** It is arithmetic
+      over the age of an entry, and the date functions that SQLite offers are the ones
+      `ago/2` already fails on in this project. Every row this returns is read anyway —
+      the eviction walks them keeping a running total, which no query expression
+      holds — so sorting them costs a pass over a list that is already in memory.
 
       An entry that a caller marked with `keep?` is absent.
 
@@ -137,7 +133,7 @@ defmodule PiFi.Cache.Entry do
                  (is_nil(^arg(:colder_than)) or last_accessed_at < ^arg(:colder_than))
              )
 
-      prepare build(sort: [weight: :asc, last_accessed_at: :asc])
+      prepare build(sort: [last_accessed_at: :asc])
     end
 
     create :put do
@@ -379,12 +375,17 @@ defmodule PiFi.Cache.Entry do
 
     attribute :weight, :integer do
       description """
-      What this entry costs to read again. The eviction takes the lightest first.
+      What this entry costs to read again. A heavier entry has to be colder to go.
 
       A caller names it as it writes, in the way that it names `keep?`. 0 is a thing
       that the device reads again by itself and that no person waits for, and a
       picture is of that kind. 1 is the audio of a track: it is many times the size,
       and it is on the card so that it plays when no network answers.
+
+      **It is a weighting and not an order.** It used to be read as a tier — every
+      picture went before any track — and that emptied the artwork of a library while
+      tracks nobody had played in months sat there. See `PiFi.Cache.Entry.Prune.score/2`
+      for what replaced it.
       """
 
       allow_nil? false
