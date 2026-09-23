@@ -113,9 +113,48 @@ defmodule PiFi.Output.AlsaTest do
 
     test "names a device that ALSA can open" do
       for device <- Alsa.devices() do
-        assert device.id =~ ~r/\Ahw:CARD=\S+,DEV=\d+\z/
+        assert device.id =~ ~r/\Ahw:CARD=\S+,DEV=\d+\z/ or device.id =~ ~r/\Abluealsa:DEV=/
         assert is_binary(device.title)
       end
+    end
+
+    # A host runs no `bluealsa`, so the list is the cards alone and asking costs nothing.
+    test "a machine with no Bluetooth lists its cards and no more" do
+      refute Enum.any?(Alsa.devices(), &(&1.id =~ "bluealsa"))
+    end
+  end
+
+  # **A headset is an ALSA device like any other**, which is the whole reason Bluetooth
+  # fits: nothing in the player or the sink learns a word about it.
+  describe "a Bluetooth device" do
+    test "is named the way bluealsa names it" do
+      assert Alsa.bluetooth_id("70:BF:92:04:AC:5A") ==
+               "bluealsa:DEV=70:BF:92:04:AC:5A,PROFILE=a2dp"
+    end
+
+    # It looks like the `hw:` trap and it is not one: the definition `bluez-alsa` ships
+    # is already `type plug` over a `type bluealsa` slave, so a board played `S24_3LE`
+    # straight to it. Wrapping it again gives `Unknown parameter bluealsa:DEV`.
+    test "goes through as it is, whatever the rate setting says" do
+      for rate48? <- [true, false] do
+        Application.put_env(:pifi, :alsa_rate48?, rate48?)
+
+        assert Alsa.pcm_name("bluealsa:DEV=70:BF:92:04:AC:5A,PROFILE=a2dp") ==
+                 "bluealsa:DEV=70:BF:92:04:AC:5A,PROFILE=a2dp"
+      end
+
+      Application.delete_env(:pifi, :alsa_rate48?)
+    end
+
+    test "gets a sink that names the PCM bluealsa offers" do
+      assert %PiFi.Output.APlaySink{device: "bluealsa:DEV=70:BF:92:04:AC:5A,PROFILE=a2dp"} =
+               Alsa.sink_spec(Alsa.bluetooth_id("70:BF:92:04:AC:5A"))
+    end
+
+    # `amixer` takes a card and a headset is not one, so the level belongs to the
+    # headset. A person turns it up on the thing on their head.
+    test "has no level this firmware can set" do
+      refute Alsa.volume?(Alsa.bluetooth_id("70:BF:92:04:AC:5A"))
     end
   end
 

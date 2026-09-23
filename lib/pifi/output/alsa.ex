@@ -27,6 +27,8 @@ defmodule PiFi.Output.Alsa do
 
   @behaviour PiFi.Output
 
+  alias PiFi.Bluetooth.Devices
+
   # Sobelow reads `@sobelow_skip` from the source. This registration stops the
   # compiler warning that no Elixir code reads the attribute.
   Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
@@ -49,8 +51,36 @@ defmodule PiFi.Output.Alsa do
   """
   @impl PiFi.Output
   def devices do
-    Enum.flat_map(cards(), &playback_devices/1)
+    Enum.flat_map(cards(), &playback_devices/1) ++ bluetooth()
   end
+
+  # **A paired headset is an ALSA device like any other**, which is the whole reason
+  # Bluetooth fits this firmware: `bluez-alsa` installs a userspace plugin, so a speaker
+  # is a PCM name and nothing in the player or the sink learns a word about it.
+  #
+  # **Only connected devices are listed.** A headset that has gone to sleep has no PCM
+  # for `bluealsa` to offer and playing to it would fail, so it is absent in the way an
+  # unplugged card is. It comes back when it connects.
+  defp bluetooth do
+    case Devices.list() do
+      {:ok, devices} ->
+        devices
+        |> Enum.filter(& &1.connected?)
+        |> Enum.map(&%{id: bluetooth_id(&1.address), title: &1.name})
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  @doc """
+  The ALSA name of one paired Bluetooth device.
+
+      iex> PiFi.Output.Alsa.bluetooth_id("70:BF:92:04:AC:5A")
+      "bluealsa:DEV=70:BF:92:04:AC:5A,PROFILE=a2dp"
+  """
+  @spec bluetooth_id(String.t()) :: String.t()
+  def bluetooth_id(address), do: "bluealsa:DEV=#{address},PROFILE=a2dp"
 
   @doc """
   Give a sink that plays to one device.
@@ -106,6 +136,19 @@ defmodule PiFi.Output.Alsa do
 
       iex> PiFi.Output.Alsa.pcm_name("hw:CARD=Audio,DEV=0")
       "plughw:CARD=Audio,DEV=0"
+
+  **A Bluetooth device goes through as it is, and that is not an oversight.** It looks
+  like the `hw:` trap — A2DP carries SBC in `S16_LE` and libmad gives `S24_3LE` for
+  every MP3 — but the definition `bluez-alsa` ships is already `type plug` over a
+  `type bluealsa` slave, so the conversion is there before this sees it. A board played
+  `S24_3LE` straight to `bluealsa:DEV=...` and `aplay` exited 0.
+
+  **Wrapping it again does not work in any case.** `plug:` reads what follows as
+  arguments, so `plug:bluealsa:DEV=...` gives `Unknown parameter bluealsa:DEV`, and only
+  a quoted slave name parses. There is nothing to gain by quoting it.
+
+      iex> PiFi.Output.Alsa.pcm_name("bluealsa:DEV=70:BF:92:04:AC:5A,PROFILE=a2dp")
+      "bluealsa:DEV=70:BF:92:04:AC:5A,PROFILE=a2dp"
   """
   @spec pcm_name(String.t()) :: String.t()
   def pcm_name(device_id) do

@@ -63,6 +63,11 @@ defmodule PiFi.Bluetooth do
   # Where the system's `/var/lib/bluetooth` symlink points. See `keep_pairings/0`.
   @state_directory "/root/bluetooth"
 
+  # ALSA reads this as well as `/etc/asound.conf`, and `$HOME` here is the writable
+  # partition. See `name_the_plugin/0`.
+  @asoundrc "/root/.asoundrc"
+  @plugin_config "etc/alsa/conf.d/20-bluealsa.conf"
+
   # A stereo sends audio to a speaker. Taking audio from a telephone is the other half
   # of Bluetooth audio and a separate feature, and a daemon that was told both would
   # advertise this device as a speaker as well.
@@ -174,11 +179,37 @@ defmodule PiFi.Bluetooth do
   # therefore takes the ones after it with it.
   defp start_daemons do
     keep_pairings()
+    name_the_plugin()
 
     for child <- [dbus_daemon(), bluetoothd(), bluealsa(), client(), agent()],
         do: start_child(child)
 
     :ok
+  end
+
+  # **ALSA ships with no idea what `bluealsa:` means.** The plugin is in the package's
+  # priv and `ALSA_PLUGIN_DIR` finds the shared object, but the definition that names the
+  # PCM type is a `.conf` in that same priv, and ALSA reads `/etc/alsa/conf.d` — which is
+  # read-only squashfs and knows nothing about it. A board answered
+  # `Unknown PCM bluealsa:DEV=…` until this file existed.
+  #
+  # It is written rather than shipped for the reason the bus configuration is: the path
+  # holds the version of the package. `~/.asoundrc` is where it goes because ALSA reads
+  # that as well as `/etc/asound.conf`, so `rate48` and the USB DAC are untouched, and
+  # `$HOME` on this device is `/root`, which is the one writable partition.
+  defp name_the_plugin do
+    conf = Path.join(:code.priv_dir(:nbpr_bluez_alsa) |> to_string(), @plugin_config)
+
+    case File.write(@asoundrc, "<#{conf}>\n") do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Bluetooth could not name the ALSA plugin in #{@asoundrc}: " <>
+            "#{:file.format_error(reason)}. Playing to a speaker will not work."
+        )
+    end
   end
 
   # **The system points `/var/lib/bluetooth` at `/root/bluetooth` and cannot create it.**
