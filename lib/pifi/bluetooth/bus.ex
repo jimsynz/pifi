@@ -236,6 +236,7 @@ defmodule PiFi.Bluetooth.Bus do
     # than assuming it.
     Application.put_env(:dbus, :external_cookie, external_cookie(uid()))
     System.put_env("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=" <> @socket)
+    quieten()
 
     # **A proxy that dies must not take this process with it.** `:dbus_proxy.start_link/3`
     # is the only way the library makes one, and a proxy stops with `bad_return_value`
@@ -246,6 +247,42 @@ defmodule PiFi.Bluetooth.Bus do
 
     {:ok, %State{}, {:continue, :connect}}
   end
+
+  # **The library calls its debug logging `?debug` and sends it at info.** The macro is
+  # `error_logger:info_msg`, so every method and every reply arrives in the log of a
+  # device with the whole decoded body attached. `RingLogger` holds 1024 lines, one
+  # reading of the output list makes several, and a page open in a browser turns the
+  # buffer over in seconds — a board did something interesting and the log held nothing
+  # but D-Bus traffic.
+  #
+  # `info_msg` is the legacy informational channel and nothing in this firmware uses it
+  # on purpose: of everything here, only this library and `yamerl` mention
+  # `error_logger` at all. **Warnings and errors go through other tags and are
+  # untouched**, which matters — the authentication failure that turned out to be the
+  # uid, and the `Method "AddMatch" ... doesn't exist` that found a namespace bug, both
+  # arrived that way.
+  #
+  # It goes here rather than in the configuration because this is the one part of the
+  # firmware that talks to D-Bus, and because a filter added at a boot is a filter that
+  # can stop one.
+  # **A primary filter is global, so the host must not get one.** A test that starts
+  # this would otherwise quieten the whole suite, and a log a test reads is a log this
+  # had silenced.
+  if Mix.target() == :host do
+    defp quieten, do: :ok
+  else
+    defp quieten do
+      :logger.add_primary_filter(:pifi_quiet_legacy_info, {&__MODULE__.drop_legacy_info/2, []})
+    rescue
+      _exception -> :ok
+    catch
+      :exit, _reason -> :ok
+    end
+  end
+
+  @doc false
+  def drop_legacy_info(%{meta: %{error_logger: %{tag: :info_msg}}}, _extra), do: :stop
+  def drop_legacy_info(_event, _extra), do: :ignore
 
   @doc false
   @impl GenServer

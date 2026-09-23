@@ -44,4 +44,28 @@ defmodule PiFi.Bluetooth.BusTest do
   test "asking a bus that is not there gives an answer rather than raising" do
     refute Bus.connected?()
   end
+
+  # **The library calls its debug logging `?debug` and sends it at info**, so every
+  # method and every reply lands in a log that holds 1024 lines. A board did something
+  # interesting and the buffer held nothing but D-Bus traffic.
+  describe "the filter that quietens the library" do
+    test "drops a legacy informational report" do
+      event = %{level: :info, msg: {:string, "Calling"}, meta: %{error_logger: %{tag: :info_msg}}}
+
+      assert Bus.drop_legacy_info(event, []) == :stop
+    end
+
+    # These are what said the authentication failed and what found a namespace bug.
+    test "keeps a warning and an error from the same library" do
+      for tag <- [:warning_msg, :error_msg] do
+        event = %{level: :warning, msg: {:string, "x"}, meta: %{error_logger: %{tag: tag}}}
+
+        assert Bus.drop_legacy_info(event, []) == :ignore
+      end
+    end
+
+    test "keeps everything that is not a legacy report at all" do
+      assert Bus.drop_legacy_info(%{level: :info, msg: {:string, "x"}, meta: %{}}, []) == :ignore
+    end
+  end
 end
