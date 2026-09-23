@@ -29,7 +29,7 @@ defmodule PiFi.Test.SilentOutput do
   @device %{id: "silent", title: "A card that makes no sound"}
 
   @impl PiFi.Output
-  def devices, do: [@device]
+  def devices, do: Application.get_env(:pifi, :silent_output_devices, [@device])
 
   @impl PiFi.Output
   def sink_spec(_device_id), do: __MODULE__.Sink
@@ -37,6 +37,22 @@ defmodule PiFi.Test.SilentOutput do
   @doc "The card that this output reports."
   @spec device!() :: map()
   def device!, do: @device
+
+  @doc """
+  Take the card away, the way a headset that was turned off goes.
+
+  `PiFi.Output.Alsa.devices/0` answers differently when a Bluetooth device connects or
+  goes, so a test of what the player does about that needs a list it can change.
+  """
+  @spec vanish() :: :ok
+  def vanish do
+    Application.put_env(:pifi, :silent_output_devices, [])
+    ExUnit.Callbacks.on_exit(fn -> Application.delete_env(:pifi, :silent_output_devices) end)
+  end
+
+  @doc "Give it back, the way a headset that was turned on again comes back."
+  @spec appear() :: :ok
+  def appear, do: Application.put_env(:pifi, :silent_output_devices, [@device])
 
   @doc "Make this the output of the firmware for one test."
   @spec use_it() :: :ok

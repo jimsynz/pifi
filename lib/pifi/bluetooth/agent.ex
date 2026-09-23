@@ -43,6 +43,10 @@ defmodule PiFi.Bluetooth.Agent do
 
   @member 3
 
+  # The bus connects in a continue of its own, so the first attempt is often too early.
+  @attempts 10
+  @retry 1_000
+
   # What BlueZ may ask a `NoInputNoOutput` agent. Each one is approved by answering with
   # nothing, which is what the specification calls success.
   @approved ~w[Release Cancel RequestAuthorization AuthorizeService RequestConfirmation]
@@ -107,7 +111,7 @@ defmodule PiFi.Bluetooth.Agent do
   @doc false
   @impl GenServer
   def init(_options) do
-    {:ok, %{registered?: false}, {:continue, :register}}
+    {:ok, %{registered?: false, attempts: 0}, {:continue, :register}}
   end
 
   @doc false
@@ -125,13 +129,27 @@ defmodule PiFi.Bluetooth.Agent do
       {:noreply, %{state | registered?: true}}
     else
       {:error, reason} ->
-        Logger.warning(
-          "Bluetooth could not register a pairing agent: #{inspect(reason)}. " <>
-            "Pairing will not finish."
-        )
-
-        {:noreply, state}
+        {:noreply, again(state, reason)}
     end
+  end
+
+  # **The bus is up before it is connected.** `PiFi.Bluetooth.Bus` starts, the supervisor
+  # moves on to this, and the connection is made in a continue of its own — so the first
+  # attempt lands on a bus that answers `:not_connected`, and a board came up with no
+  # agent at all. Waiting and asking again is what closes that gap.
+  defp again(%{attempts: attempts} = state, _reason) when attempts < @attempts do
+    Process.send_after(self(), :register, @retry)
+
+    %{state | attempts: attempts + 1}
+  end
+
+  defp again(state, reason) do
+    Logger.warning(
+      "Bluetooth could not register a pairing agent: #{inspect(reason)}. " <>
+        "Pairing will not finish."
+    )
+
+    state
   end
 
   @doc false
@@ -140,6 +158,8 @@ defmodule PiFi.Bluetooth.Agent do
 
   @doc false
   @impl GenServer
+  def handle_info(:register, state), do: handle_continue(:register, state)
+
   def handle_info({:dbus_method_call, message, connection}, state) do
     answer(:dbus_message.get_field(@member, message), message, connection)
 

@@ -133,6 +133,7 @@ defmodule PiFi.Player do
             restarts: non_neg_integer(),
             restart_timer: reference() | nil,
             paused?: boolean(),
+            output_lost?: boolean(),
             standby?: boolean(),
             prefetched?: boolean(),
             crossfade_ms: non_neg_integer(),
@@ -155,6 +156,7 @@ defmodule PiFi.Player do
               restarts: 0,
               restart_timer: nil,
               paused?: false,
+              output_lost?: false,
               standby?: false,
               prefetched?: false,
               crossfade_ms: 0,
@@ -213,6 +215,24 @@ defmodule PiFi.Player do
   """
   @spec pause(boolean()) :: :ok | {:error, term()}
   def pause(paused?), do: GenServer.call(__MODULE__, {:pause, paused?}, :timer.seconds(30))
+
+  @doc """
+  The list of output devices changed.
+
+  **A Bluetooth headset arrives and goes without a kernel event.** `PiFi.Device.Monitor`
+  hears a card being plugged in because the kernel says so, and `bluealsa` is a plugin
+  in userspace that the kernel knows nothing about. `PiFi.Bluetooth.Watcher` hears it
+  from BlueZ instead and tells this.
+
+  **A headset going quiet is closer to a stop than to a change of speaker.** Falling
+  back to the first device is right for a card that was chosen and has never been
+  present — a board with HDMI audio still finds the DAC — and wrong for one that goes
+  away mid-track: a person who takes headphones off has not asked for the music to come
+  out of the stereo. So this pauses instead, and plays again where it left off when the
+  device comes back.
+  """
+  @spec outputs_changed() :: :ok
+  def outputs_changed, do: GenServer.cast(__MODULE__, :outputs_changed)
 
   @doc """
   Play the row after the one that plays now.
@@ -589,6 +609,72 @@ defmodule PiFi.Player do
     Event.publish(:player, %Events.MetadataChanged{title: title})
 
     {:noreply, %State{state | stream_title: title}}
+  end
+
+  @impl GenServer
+  def handle_cast(:outputs_changed, %State{} = state) do
+    report = output_report()
+
+    Event.publish(:device, struct(DeviceEvents.OutputChanged, report))
+
+    case followed(state, report) do
+      {state, :none} -> {:noreply, state}
+      {state, terminate} -> {:noreply, state, {:continue, terminate}}
+    end
+  end
+
+  # A person who chose nothing is a person the fallback is for, and there is no device
+  # of theirs to lose.
+  defp followed(%State{} = state, %{selected: nil}), do: {state, :none}
+
+  # **The device a person chose is here again**, so the audio goes back to it and picks
+  # up where it stopped. `restart_for_output/1` keeps the place.
+  defp followed(%State{output_lost?: true} = state, %{selected: selected, devices: devices}) do
+    if Enum.any?(devices, &(&1.id == selected)) do
+      # **`restart_for_output/1` is not the way back here.** It swaps the sink of a
+      # running pipeline, and a pause left none, so it answers with the state unchanged
+      # and nothing plays. This is a resume, which is what the pause was.
+      {buffering(waking(%State{state | paused?: false, output_lost?: false, restarts: 0})),
+       :resume}
+    else
+      {state, :none}
+    end
+  end
+
+  # Nothing is playing, so there is nothing to interrupt.
+  defp followed(%State{pipeline: nil} = state, _report), do: {state, :none}
+
+  # **The device a person chose has gone while it was playing.** Pausing is the honest
+  # answer: moving the audio to whatever is left puts it out loud on a stereo that
+  # nobody asked for it on.
+  defp followed(%State{} = state, %{selected: selected, devices: devices}) do
+    if Enum.any?(devices, &(&1.id == selected)) do
+      {state, :none}
+    else
+      lost(state)
+    end
+  end
+
+  # The same steps the pause clause takes, and for the same reason: `offset_ms` keeps
+  # the place, because the terminate clears `started_at`.
+  defp lost(%State{} = state) do
+    store_position(state)
+    silence(state)
+    Event.publish(:player, %Events.Paused{position_ms: position_ms(state)})
+
+    # **The failure budget belongs to the stream and not to the headset.** A sink whose
+    # device vanished crashes, and the restarts that follow spend every attempt before
+    # anything can be done about it — a board came back to `The stream failed 5 times.
+    # Giving up.` and would not play again. This is a deliberate stop, so the count goes
+    # back and the restart that is already on its way is taken out of the mailbox.
+    {%State{
+       cancel_restart(state)
+       | paused?: true,
+         output_lost?: true,
+         restarts: 0,
+         stream_title: nil,
+         offset_ms: position_ms(state)
+     }, {:terminate, state.pipeline, state.monitor}}
   end
 
   @impl GenServer
@@ -1112,7 +1198,10 @@ defmodule PiFi.Player do
         artwork_path: nil,
         offset_ms: 0,
         position_bytes: nil,
-        paused?: false
+        paused?: false,
+        # A person who stopped has no output to come back to. Without this a headset
+        # reconnecting would play again something they had already stopped.
+        output_lost?: false
     }
   end
 
@@ -1174,14 +1263,44 @@ defmodule PiFi.Player do
     %State{state | pipeline: nil, monitor: nil, started_at: nil}
   end
 
-  defp restart(%State{restarts: restarts} = state) when restarts >= @max_restarts do
+  # **A sink that cannot open because its device went is not a stream that failed.**
+  # A headset switched off takes the audio transport with it at once, the sink crashes,
+  # and the restarts that follow crash the same way — a board spent all five in ten
+  # seconds and cleared the track. So the output is looked at before anything is tried
+  # again, and a device that has gone pauses rather than counting against the stream.
+  defp restart(%State{} = state) do
+    if output_gone?(state), do: paused_for_output(state), else: try_again(state)
+  end
+
+  defp output_gone?(%State{}) do
+    case chosen_device() do
+      nil -> false
+      chosen -> not Enum.any?(Output.module().devices(), &(&1.id == chosen))
+    end
+  end
+
+  defp paused_for_output(%State{} = state) do
+    store_position(state)
+    Event.publish(:player, %Events.Paused{position_ms: position_ms(state)})
+
+    %State{
+      cancel_restart(state)
+      | paused?: true,
+        output_lost?: true,
+        restarts: 0,
+        stream_title: nil,
+        offset_ms: position_ms(state)
+    }
+  end
+
+  defp try_again(%State{restarts: restarts} = state) when restarts >= @max_restarts do
     store_position(state)
     Logger.error("The stream failed #{restarts} times. Giving up.")
     Event.publish(:player, %Events.Failed{reason: :too_many_restarts})
     %State{stop_pipeline(state) | restarts: 0, source: nil, item: nil}
   end
 
-  defp restart(%State{} = state) do
+  defp try_again(%State{} = state) do
     store_position(state)
     state = stop_pipeline(state)
     Event.publish(:player, %Events.Buffering{percent: 0})

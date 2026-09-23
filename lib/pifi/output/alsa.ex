@@ -58,18 +58,21 @@ defmodule PiFi.Output.Alsa do
   # Bluetooth fits this firmware: `bluez-alsa` installs a userspace plugin, so a speaker
   # is a PCM name and nothing in the player or the sink learns a word about it.
   #
-  # **Only connected devices are listed.** A headset that has gone to sleep has no PCM
-  # for `bluealsa` to offer and playing to it would fail, so it is absent in the way an
-  # unplugged card is. It comes back when it connects.
+  # **What counts is whether BlueALSA has a PCM, and not what BlueZ believes.** A headset
+  # that was switched off loses its PCM at once and stays `Connected` to BlueZ for about
+  # twenty seconds, so a list built on the second one offers a device that cannot be
+  # opened. `PiFi.Bluetooth.Devices.playable/0` says why that matters to the player.
+  #
+  # BlueZ is still asked, for the name: BlueALSA knows the address and not what a person
+  # calls the thing.
   defp bluetooth do
-    case Devices.list() do
-      {:ok, devices} ->
-        devices
-        |> Enum.filter(& &1.connected?)
-        |> Enum.map(&%{id: bluetooth_id(&1.address), title: &1.name})
-
-      {:error, _reason} ->
-        []
+    with {:ok, addresses} <- Devices.playable(),
+         {:ok, devices} <- Devices.list() do
+      for %{address: address} = device <- devices, address in addresses do
+        %{id: bluetooth_id(address), title: device.name}
+      end
+    else
+      {:error, _reason} -> []
     end
   end
 

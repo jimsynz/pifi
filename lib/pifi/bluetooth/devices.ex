@@ -53,6 +53,14 @@ defmodule PiFi.Bluetooth.Devices do
 
   alias PiFi.Bluetooth.Bus
 
+  @bluealsa "org.bluealsa"
+  alias PiFi.Bluetooth.Watcher
+
+  # How long a headset that was asleep gets to finish connecting after this library has
+  # already given up waiting for it. See `connect/1`.
+  @settle 2_000
+  @settle_attempts 10
+
   @adapter_interface "org.bluez.Adapter1"
   @device_interface "org.bluez.Device1"
   @properties "org.freedesktop.DBus.Properties"
@@ -88,6 +96,34 @@ defmodule PiFi.Bluetooth.Devices do
   """
   @spec audio_profile() :: String.t()
   def audio_profile, do: @a2dp_sink
+
+  @doc """
+  The paired devices BlueALSA can actually play to, by address.
+
+  **This is a different question from whether BlueZ thinks a device is connected, and a
+  faster one.** A headset that is switched off drops its audio transport at once and
+  BlueALSA loses the PCM with it, while BlueZ goes on reporting `Connected` until its
+  supervision timeout — about twenty seconds. A player that waited for BlueZ spent every
+  restart it had on a sink that could not open and gave up before it was told anything.
+
+  A PCM is also the thing that matters: the question an output list asks is "can I play
+  to this", and the answer is whether there is a PCM, not what BlueZ believes.
+  """
+  @spec playable() :: {:ok, [String.t()]} | {:error, term()}
+  def playable do
+    with {:ok, objects} <- Bus.objects(@bluealsa) do
+      {:ok, objects |> Map.keys() |> Enum.flat_map(&address_in/1) |> Enum.uniq()}
+    end
+  end
+
+  # `/org/bluealsa/hci0/dev_70_BF_92_04_AC_5A/a2dpsrc/sink` names the device in the path
+  # and nowhere else worth reading.
+  defp address_in(path) do
+    case Regex.run(~r/dev_([0-9A-F_]{17})/, path) do
+      [_whole, address] -> [String.replace(address, "_", ":")]
+      nil -> []
+    end
+  end
 
   @doc """
   Every device that can take audio, newest answer first.
@@ -228,8 +264,15 @@ defmodule PiFi.Bluetooth.Devices do
   @spec pair(String.t()) :: :ok | {:error, term()}
   def pair(path) do
     case Bus.call(path, @device_interface, "Pair") do
-      {:ok, _answer} -> trust(path)
-      {:error, reason} -> {:error, reason}
+      {:ok, _answer} ->
+        # A device nobody was listening to a moment ago is one somebody is about to
+        # play through. See `PiFi.Bluetooth.Watcher`.
+        Watcher.follow(path)
+
+        trust(path)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -249,9 +292,43 @@ defmodule PiFi.Bluetooth.Devices do
     end
   end
 
-  @doc "Open the audio connection to a paired device."
+  @doc """
+  Open the audio connection to a paired device.
+
+  **A timeout here does not mean it failed.** Every D-Bus method of this library is
+  capped at five seconds — `dbus_peer_connection:call/2` waits that long and throws, and
+  nothing a caller passes reaches it — while a headset waking from sleep takes longer
+  than that to answer. BlueZ carries on regardless of what this process has stopped
+  waiting for, so a timeout is answered by watching the device rather than by reporting
+  a failure that has not happened.
+  """
   @spec connect(String.t()) :: :ok | {:error, term()}
-  def connect(path), do: acted(Bus.call(path, @device_interface, "Connect"))
+  def connect(path) do
+    case Bus.call(path, @device_interface, "Connect") do
+      {:ok, _answer} -> :ok
+      {:error, {:timeout, _call}} -> settled(path, @settle_attempts)
+      {:error, {{:timeout, _inner}, _outer}} -> settled(path, @settle_attempts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp settled(_path, 0), do: {:error, :timeout}
+
+  defp settled(path, attempts) do
+    Process.sleep(@settle)
+
+    case connected?(path) do
+      true -> :ok
+      false -> settled(path, attempts - 1)
+    end
+  end
+
+  defp connected?(path) do
+    case list() do
+      {:ok, devices} -> Enum.any?(devices, &(&1.path == path and &1.connected?))
+      {:error, _reason} -> false
+    end
+  end
 
   @doc "Close it."
   @spec disconnect(String.t()) :: :ok | {:error, term()}

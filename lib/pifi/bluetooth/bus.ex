@@ -39,10 +39,19 @@ defmodule PiFi.Bluetooth.Bus do
   @socket "/run/dbus/system_bus_socket"
   @bluez "org.bluez"
   @object_manager "org.freedesktop.DBus.ObjectManager"
+  @root "/"
 
   # A person has to press a button on a speaker for some of these, so the wait is theirs
   # and not the network's.
   @call_timeout :timer.seconds(60)
+
+  # **The library gives up after five seconds and says nothing about it.**
+  # `:dbus_proxy.call/4` uses a default of its own, so `@call_timeout` covered only the
+  # call to this process and the one underneath it timed out first — a headset that was
+  # waking up answered `Connect` in more than five, and the board reported a failure for
+  # something that was still going. It is shorter than `@call_timeout` so that the
+  # method's own answer is what a caller sees rather than a timeout on this process.
+  @method_timeout :timer.seconds(55)
 
   defmodule State do
     @moduledoc false
@@ -105,9 +114,9 @@ defmodule PiFi.Bluetooth.Bus do
   `/org/bluez/hci0` is an adapter and `/org/bluez/hci0/dev_XX_XX_XX_XX_XX_XX` is a
   device it has seen. Each one carries the interfaces it offers and their properties.
   """
-  @spec objects() :: {:ok, map()} | {:error, term()}
-  def objects do
-    case ask(:objects, :timer.seconds(10)) do
+  @spec objects(String.t()) :: {:ok, map()} | {:error, term()}
+  def objects(service \\ @bluez) do
+    case ask({:objects, service}, :timer.seconds(10)) do
       {:ok, answer} -> answer
       {:error, reason} -> {:error, reason}
     end
@@ -119,13 +128,37 @@ defmodule PiFi.Bluetooth.Bus do
   `path` is an object path such as `/org/bluez/hci0`, `interface` names the interface
   that carries the method, and `arguments` is a list in the order the method takes them.
 
-  **The timeout is long on purpose.** `Pair` waits for a person to press a button on a
-  speaker, and `StartDiscovery` answers at once but `Connect` does not: a call that gave
-  up after five seconds would report a failure for a pairing that was still going.
+  **The timeout here is not the one that decides.** `dbus_peer_connection:call/2` waits
+  five seconds for a reply and throws, and nothing a caller passes reaches that far
+  down, so every method of BlueZ is capped at five seconds whatever this says. `Connect`
+  to a headset waking from sleep takes longer, and the answer is a timeout for something
+  that then succeeds a moment later — `PiFi.Bluetooth.Devices.connect/1` watches the
+  device rather than believing it.
   """
   @spec call(String.t(), String.t(), String.t(), [term()]) :: {:ok, term()} | {:error, term()}
   def call(path, interface, method, arguments \\ []) do
     case ask({:call, path, interface, method, arguments}, @call_timeout) do
+      {:ok, answer} -> answer
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Ask BlueZ to tell a process when something under `path` changes.
+
+  **BlueZ says what happened and nothing else asks it to.** A headset that connects or
+  goes away changes no file and raises no kernel event, so a part of this firmware that
+  wanted to know had to poll — and `objects/0` is a round trip that reads every device
+  BlueZ has ever seen.
+
+  The watcher is sent `{:signal, sender, interface, member, path, arguments}` for
+  anything under the namespace, which is every device of an adapter when the namespace
+  is the adapter. Filtering is the watcher's, because the match that D-Bus takes is
+  coarse and one subscription is cheaper than several.
+  """
+  @spec watch(String.t(), pid(), String.t()) :: :ok | {:error, term()}
+  def watch(path, watcher \\ self(), service \\ @bluez) do
+    case ask({:watch, service, path, watcher}) do
       {:ok, answer} -> answer
       {:error, reason} -> {:error, reason}
     end
@@ -226,12 +259,18 @@ defmodule PiFi.Bluetooth.Bus do
     {:reply, not is_nil(state.connection), state}
   end
 
-  def handle_call(:objects, _from, %State{connection: nil} = state) do
+  def handle_call({:objects, _service}, _from, %State{connection: nil} = state) do
     {:reply, {:error, :not_connected}, state}
   end
 
-  def handle_call(:objects, _from, %State{} = state) do
-    {:reply, managed_objects(state.connection), state}
+  def handle_call({:objects, service}, _from, %State{} = state) do
+    case proxy_for(service, root_of(service), state) do
+      {:ok, proxy, state} ->
+        {:reply, invoke(proxy, @object_manager, "GetManagedObjects", []), state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(
@@ -240,6 +279,23 @@ defmodule PiFi.Bluetooth.Bus do
         %State{connection: nil} = state
       ) do
     {:reply, {:error, :not_connected}, state}
+  end
+
+  def handle_call({:watch, _service, _path, _watcher}, _from, %State{connection: nil} = state) do
+    {:reply, {:error, :not_connected}, state}
+  end
+
+  # **The subscription goes through the proxy of the path being watched.** `AddMatch`
+  # belongs to the bus daemon and not to BlueZ, and the six-argument `connect_signal`
+  # sends it to whatever the proxy points at — which answered
+  # `Method "AddMatch" ... doesn't exist` from `org.bluez`. The two-argument one reaches
+  # into the proxy for the bus connection and asks that instead, and it matches on the
+  # proxy's own path as a namespace, which is every device of an adapter.
+  def handle_call({:watch, service, path, watcher}, _from, %State{} = state) do
+    case proxy_for(service, path, state) do
+      {:ok, proxy, state} -> {:reply, subscribe(proxy, watcher), state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:call, path, interface, method, arguments}, _from, %State{} = state) do
@@ -311,8 +367,17 @@ defmodule PiFi.Bluetooth.Bus do
       nil
   end
 
+  defp subscribe(proxy, watcher) do
+    :dbus_proxy.connect_signal(proxy, watcher)
+  rescue
+    exception -> {:error, exception}
+  catch
+    :throw, thrown -> answered(thrown)
+    :exit, reason -> {:error, reason}
+  end
+
   defp invoke(proxy, interface, method, arguments) do
-    :dbus_proxy.call(proxy, interface, method, arguments) |> answered()
+    :dbus_proxy.call(proxy, interface, method, arguments, @method_timeout) |> answered()
   rescue
     exception -> {:error, exception}
   catch
@@ -330,37 +395,40 @@ defmodule PiFi.Bluetooth.Bus do
   # process against this one every time, and stopping it after the call ends the
   # discovery BlueZ started on it — a scan that reported `:ok` and then found nothing.
   # So they are held here, and `handle_info/2` drops one that has died.
-  defp proxy_for(path, %State{} = state) do
-    case Map.get(state.proxies, path) do
+  # **BlueALSA answers `GetManagedObjects` on its own path and not on `/`.** BlueZ takes
+  # the root, and asking BlueALSA there answers nothing at all.
+  defp root_of(@bluez), do: @root
+  defp root_of(_service), do: "/org/bluealsa"
+
+  defp proxy_for(path, %State{} = state), do: proxy_for(@bluez, path, state)
+
+  defp proxy_for(service, path, %State{} = state) do
+    case Map.get(state.proxies, {service, path}) do
       proxy when is_pid(proxy) ->
         if Process.alive?(proxy),
           do: {:ok, proxy, state},
-          else: make_proxy(path, %State{state | proxies: Map.delete(state.proxies, path)})
+          else:
+            make_proxy(
+              service,
+              path,
+              %State{state | proxies: Map.delete(state.proxies, {service, path})}
+            )
 
       nil ->
-        make_proxy(path, state)
+        make_proxy(service, path, state)
     end
   end
 
-  defp make_proxy(path, %State{} = state) do
-    case :dbus_proxy.start_link(state.connection, @bluez, path) do
-      {:ok, proxy} -> {:ok, proxy, %State{state | proxies: Map.put(state.proxies, path, proxy)}}
-      {:error, reason} -> {:error, reason}
-      other -> {:error, other}
-    end
-  rescue
-    exception -> {:error, exception}
-  catch
-    :exit, reason -> {:error, reason}
-  end
+  defp make_proxy(service, path, %State{} = state) do
+    case :dbus_proxy.start_link(state.connection, service, path) do
+      {:ok, proxy} ->
+        {:ok, proxy, %State{state | proxies: Map.put(state.proxies, {service, path}, proxy)}}
 
-  defp managed_objects(connection) do
-    with {:ok, proxy} <- :dbus_proxy.start_link(connection, @bluez, "/"),
-         {:ok, objects} <- :dbus_proxy.call(proxy, @object_manager, "GetManagedObjects", []) do
-      {:ok, objects}
-    else
-      {:error, reason} -> {:error, reason}
-      other -> {:error, other}
+      {:error, reason} ->
+        {:error, reason}
+
+      other ->
+        {:error, other}
     end
   rescue
     exception -> {:error, exception}

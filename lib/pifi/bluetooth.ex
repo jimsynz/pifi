@@ -181,7 +181,7 @@ defmodule PiFi.Bluetooth do
     keep_pairings()
     name_the_plugin()
 
-    for child <- [dbus_daemon(), bluetoothd(), bluealsa(), client(), agent()],
+    for child <- [dbus_daemon(), bluetoothd(), bluealsa(), client(), agent(), watcher()],
         do: start_child(child)
 
     :ok
@@ -250,7 +250,14 @@ defmodule PiFi.Bluetooth do
   end
 
   defp stop_daemons do
-    for id <- [PiFi.Bluetooth.Agent, PiFi.Bluetooth.Bus, :bluealsa, :bluetoothd, :dbus] do
+    for id <- [
+          PiFi.Bluetooth.Watcher,
+          PiFi.Bluetooth.Agent,
+          PiFi.Bluetooth.Bus,
+          :bluealsa,
+          :bluetoothd,
+          :dbus
+        ] do
       Supervisor.terminate_child(__MODULE__, id)
       Supervisor.delete_child(__MODULE__, id)
     end
@@ -315,6 +322,12 @@ defmodule PiFi.Bluetooth do
   # agent BlueZ is told about and cannot call. See `PiFi.Bluetooth.Agent`.
   defp agent do
     %{id: PiFi.Bluetooth.Agent, start: {PiFi.Bluetooth.Agent, :start_link, [[]]}}
+  end
+
+  # It comes after the bus for the reason the agent does: it subscribes on that
+  # connection. See `PiFi.Bluetooth.Watcher`.
+  defp watcher do
+    %{id: PiFi.Bluetooth.Watcher, start: {PiFi.Bluetooth.Watcher, :start_link, [[]]}}
   end
 
   defp bluetoothd do

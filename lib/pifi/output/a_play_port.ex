@@ -239,7 +239,11 @@ defmodule PiFi.Output.APlayPort do
   def handle_call({:hold, program, arguments}, _from, state) do
     case state do
       %{key: {^program, ^arguments}, port: port} when is_port(port) ->
-        {:reply, {:ok, port}, state}
+        if alive?(port) do
+          {:reply, {:ok, port}, state}
+        else
+          open(program, arguments, ended(abandon(state, "the program was gone")))
+        end
 
       _other ->
         open(program, arguments, ended(abandon(state, "the format changed")))
@@ -362,6 +366,14 @@ defmodule PiFi.Output.APlayPort do
 
     {:noreply, %{state | last_at: nil}}
   end
+
+  # **A port that has closed is still a port, and `is_port/1` says so.** `aplay` writing
+  # to a Bluetooth device that was switched off does not always exit with a status, so
+  # nothing cleared what is held, and the next play was handed a port with no program
+  # behind it: `aplay is gone, so this pipeline ends`, five times, and then the track
+  # was dropped. Pressing play on the device afterwards failed the same way.
+  # `Port.info/1` is the one answer that distinguishes the two.
+  defp alive?(port), do: Port.info(port) != nil
 
   @doc false
   @impl GenServer
