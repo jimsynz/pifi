@@ -41,6 +41,12 @@ defmodule PiFi.Bluetooth do
   `bluetoothd` writes the keys under `/var/lib/bluetooth`, which is read-only squashfs
   here. Version 0.2.0 of the system points that at `/root/bluetooth`, which is the
   writable partition, so a speaker pairs once and not at every boot.
+
+  **The symlink is half of it and this side is the other half.** `/root` is its own
+  partition and a fresh one is empty, so nothing the image ships can put a directory
+  there. Until `keep_pairings/0` makes it the link dangles, `bluetoothd` has nowhere to
+  write, and it reports that to nobody: a board paired a headset, rebooted, and knew
+  nothing about it.
   """
 
   use Supervisor
@@ -53,6 +59,9 @@ defmodule PiFi.Bluetooth do
   alias PiFi.Settings
 
   @enabled_key "bluetooth.enabled"
+
+  # Where the system's `/var/lib/bluetooth` symlink points. See `keep_pairings/0`.
+  @state_directory "/root/bluetooth"
 
   # A stereo sends audio to a speaker. Taking audio from a telephone is the other half
   # of Bluetooth audio and a separate feature, and a daemon that was told both would
@@ -164,9 +173,31 @@ defmodule PiFi.Bluetooth do
   # leaves the two above it talking to a bus that no longer holds their names. Each one
   # therefore takes the ones after it with it.
   defp start_daemons do
-    for child <- [dbus_daemon(), bluetoothd(), bluealsa(), client()], do: start_child(child)
+    keep_pairings()
+
+    for child <- [dbus_daemon(), bluetoothd(), bluealsa(), client(), agent()],
+        do: start_child(child)
 
     :ok
+  end
+
+  # **The system points `/var/lib/bluetooth` at `/root/bluetooth` and cannot create it.**
+  # `/root` is its own partition and it starts empty, so the symlink the image ships
+  # dangles until something on this side makes the directory. A board paired a headset,
+  # rebooted, and knew nothing about it: `bluetoothd` had nowhere to write the keys and
+  # said so to nobody. This is the same job `PiFi.Migrator` and `PiFi.DeviceSecrets` do
+  # for their own files.
+  defp keep_pairings do
+    case File.mkdir_p(@state_directory) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Bluetooth cannot keep pairings in #{@state_directory}: #{:file.format_error(reason)}. " <>
+            "A speaker will pair again at each boot."
+        )
+    end
   end
 
   defp start_child(child) do
@@ -188,7 +219,7 @@ defmodule PiFi.Bluetooth do
   end
 
   defp stop_daemons do
-    for id <- [PiFi.Bluetooth.Bus, :bluealsa, :bluetoothd, :dbus] do
+    for id <- [PiFi.Bluetooth.Agent, PiFi.Bluetooth.Bus, :bluealsa, :bluetoothd, :dbus] do
       Supervisor.terminate_child(__MODULE__, id)
       Supervisor.delete_child(__MODULE__, id)
     end
@@ -246,6 +277,13 @@ defmodule PiFi.Bluetooth do
   # connection to a daemon that is no longer there is worse than no connection at all.
   defp client do
     %{id: PiFi.Bluetooth.Bus, start: {PiFi.Bluetooth.Bus, :start_link, [[]]}}
+  end
+
+  # **It comes after the bus and not before it.** The agent registers an object on that
+  # connection and then tells BlueZ where to find it, so a bus that is not up yet is an
+  # agent BlueZ is told about and cannot call. See `PiFi.Bluetooth.Agent`.
+  defp agent do
+    %{id: PiFi.Bluetooth.Agent, start: {PiFi.Bluetooth.Agent, :start_link, [[]]}}
   end
 
   defp bluetoothd do

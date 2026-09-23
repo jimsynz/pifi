@@ -165,26 +165,56 @@ defmodule PiFi.Bluetooth.Devices do
   """
   @spec discover() :: :ok | {:error, term()}
   def discover do
-    with {:ok, %{path: path}} <- adapter(),
-         {:ok, _answer} <- Bus.call(path, @adapter_interface, "StartDiscovery") do
-      :ok
-    else
+    case adapter() do
+      {:ok, %{path: path}} -> started(path, Bus.call(path, @adapter_interface, "StartDiscovery"))
       :error -> {:error, :no_adapter}
-      {:error, reason} -> {:error, reason}
     end
   end
+
+  defp started(path, answer, clear? \\ true)
+
+  defp started(_path, {:ok, _answer}, _clear?), do: :ok
+
+  # **BlueZ says a scan is running when there is none.** A board reported
+  # `InProgress` while the adapter's own `Discovering` read false, and the
+  # `StopDiscovery` that followed answered `No discovery started` — the two halves of
+  # bluetoothd disagreeing with each other. It happens after whatever asked for the
+  # last scan went away without ending it, and the session is stuck until something
+  # clears it. So this believes the adapter rather than the answer: if it really is
+  # scanning, asking twice is not a failure, and if it is not, the phantom is cleared
+  # and a fresh scan started.
+  defp started(path, {:error, {:"org.bluez.Error.InProgress", _message}} = answer, clear?) do
+    case {adapter(), clear?} do
+      {{:ok, %{discovering?: true}}, _clear?} ->
+        :ok
+
+      # Once. A daemon that says this twice is one nothing here can talk round, and
+      # clearing it again would be a loop rather than a recovery.
+      {_otherwise, true} ->
+        Bus.call(path, @adapter_interface, "StopDiscovery")
+
+        started(path, Bus.call(path, @adapter_interface, "StartDiscovery"), false)
+
+      {_otherwise, false} ->
+        {:error, elem(answer, 1)}
+    end
+  end
+
+  defp started(_path, {:error, reason}, _clear?), do: {:error, reason}
 
   @doc "Stop looking."
   @spec stop_discovery() :: :ok | {:error, term()}
   def stop_discovery do
-    with {:ok, %{path: path}} <- adapter(),
-         {:ok, _answer} <- Bus.call(path, @adapter_interface, "StopDiscovery") do
-      :ok
-    else
+    case adapter() do
+      {:ok, %{path: path}} -> stopped(Bus.call(path, @adapter_interface, "StopDiscovery"))
       :error -> {:error, :no_adapter}
-      {:error, reason} -> {:error, reason}
     end
   end
+
+  # A scan that was not running is one that is stopped, which is what the caller wanted.
+  defp stopped({:ok, _answer}), do: :ok
+  defp stopped({:error, {:"org.bluez.Error.Failed", "No discovery started"}}), do: :ok
+  defp stopped({:error, reason}), do: {:error, reason}
 
   @doc """
   Pair with one device, and trust it.
@@ -208,7 +238,12 @@ defmodule PiFi.Bluetooth.Devices do
   """
   @spec trust(String.t()) :: :ok | {:error, term()}
   def trust(path) do
-    case Bus.call(path, @properties, "Set", [@device_interface, "Trusted", {:boolean, true}]) do
+    # **`Set` takes a variant, and a variant is a record and not a pair.** A board
+    # answered `Invalid signature for 'Trusted'` for `{:boolean, true}`: the pairing had
+    # already worked, and only the trust that follows it failed.
+    trusted = {:dbus_variant, :boolean, true}
+
+    case Bus.call(path, @properties, "Set", [@device_interface, "Trusted", trusted]) do
       {:ok, _answer} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -228,8 +263,12 @@ defmodule PiFi.Bluetooth.Devices do
   @spec forget(String.t()) :: :ok | {:error, term()}
   def forget(path) do
     case adapter() do
+      # **`RemoveDevice` takes a plain object path and not a tagged one.** The library
+      # reads the signature out of the introspection and marshals the string itself, so
+      # `{:object_path, path}` gave `InvalidParameters "o"`. Only `Set` needs a tag,
+      # because only `Set` takes a variant.
       {:ok, %{path: adapter}} ->
-        acted(Bus.call(adapter, @adapter_interface, "RemoveDevice", [{:object_path, path}]))
+        acted(Bus.call(adapter, @adapter_interface, "RemoveDevice", [path]))
 
       :error ->
         {:error, :no_adapter}

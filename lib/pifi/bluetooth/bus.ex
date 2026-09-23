@@ -47,9 +47,9 @@ defmodule PiFi.Bluetooth.Bus do
   defmodule State do
     @moduledoc false
 
-    @type t :: %__MODULE__{connection: term() | nil}
+    @type t :: %__MODULE__{connection: term() | nil, proxies: %{optional(String.t()) => pid()}}
 
-    defstruct connection: nil
+    defstruct connection: nil, proxies: %{}
   end
 
   @doc false
@@ -143,6 +143,58 @@ defmodule PiFi.Bluetooth.Bus do
     :exit, reason -> {:error, reason}
   end
 
+  @doc """
+  Turn what the library answers into something a caller can read.
+
+  It is public for the reason `PiFi.Bluetooth.Devices.parse/1` is: this is the whole of
+  the reading, and a test should not need a bus to check it.
+
+  **Most of what BlueZ does answers with nothing at all.** `Pair`, `Connect`,
+  `StartDiscovery` and the rest are void methods, and `:dbus_proxy` answers a bare `:ok`
+  for them rather than `{:ok, nil}`. Every caller reads `{:ok, _}`, so without this the
+  whole of the device API raised on the path where it had worked — which is the state it
+  was in until a real headset was put in front of it.
+
+      iex> PiFi.Bluetooth.Bus.answered(:ok)
+      {:ok, nil}
+
+      iex> PiFi.Bluetooth.Bus.answered({:ok, "something"})
+      {:ok, "something"}
+
+  **A BlueZ error arrives as the death of the proxy that carried it.** The library's
+  proxy is a `gen_server` and it answers an error by returning it from a callback, which
+  is not a reply, so it stops with `bad_return_value` and the caller sees an exit. The
+  name of the error is in there, buried two levels down, and it is the only part worth
+  anything — so it is dug out rather than passed on as a wall of `GenServer.call`.
+
+      iex> PiFi.Bluetooth.Bus.answered(
+      ...>   {:error,
+      ...>    {{:bad_return_value, {:"org.bluez.Error.InProgress", "Operation already in progress"}},
+      ...>     {GenServer, :call, [self(), :whatever, 60_000]}}}
+      ...> )
+      {:error, {:"org.bluez.Error.InProgress", "Operation already in progress"}}
+
+      iex> PiFi.Bluetooth.Bus.answered({:"org.bluez.Error.Failed", "No discovery started"})
+      {:error, {:"org.bluez.Error.Failed", "No discovery started"}}
+
+      iex> PiFi.Bluetooth.Bus.answered({:error, :not_connected})
+      {:error, :not_connected}
+  """
+  @spec answered(term()) :: {:ok, term()} | {:error, term()}
+  def answered(:ok), do: {:ok, nil}
+  def answered({:ok, answer}), do: {:ok, answer}
+
+  def answered({:error, {{:bad_return_value, {name, message}}, _call}}) do
+    {:error, {name, message}}
+  end
+
+  def answered({:error, reason}), do: {:error, reason}
+
+  def answered({name, message}) when is_atom(name) and is_binary(message),
+    do: {:error, {name, message}}
+
+  def answered(other), do: {:error, other}
+
   @doc false
   @impl GenServer
   def init(_options) do
@@ -151,6 +203,13 @@ defmodule PiFi.Bluetooth.Bus do
     # than assuming it.
     Application.put_env(:dbus, :external_cookie, external_cookie(uid()))
     System.put_env("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=" <> @socket)
+
+    # **A proxy that dies must not take this process with it.** `:dbus_proxy.start_link/3`
+    # is the only way the library makes one, and a proxy stops with `bad_return_value`
+    # whenever BlueZ answers with an error. Without this, one refused call kills the bus
+    # connection — and BlueZ ends the discovery that connection started, so a scan
+    # stops the first time anything goes wrong.
+    Process.flag(:trap_exit, true)
 
     {:ok, %State{}, {:continue, :connect}}
   end
@@ -184,7 +243,44 @@ defmodule PiFi.Bluetooth.Bus do
   end
 
   def handle_call({:call, path, interface, method, arguments}, _from, %State{} = state) do
-    {:reply, invoke(state.connection, path, interface, method, arguments), state}
+    case proxy_for(path, state) do
+      {:ok, proxy, state} -> {:reply, invoke(proxy, interface, method, arguments), state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @doc false
+  @impl GenServer
+  # **Trapping exits turns two very different deaths into the same message.** A proxy
+  # stops with `bad_return_value` every time BlueZ answers with an error, and
+  # `invoke/5` has already turned that into an answer for the caller. The connection
+  # dying is the other one, and it has to be noticed: the library links each proxy to
+  # the connection, so a refused call takes the bus down with it, and a process holding
+  # a dead connection answers `:noproc` to everything for ever after.
+  def handle_info({:EXIT, dead, reason}, %State{} = state) do
+    if connection_pid(state.connection) == dead do
+      Logger.warning("Bluetooth lost the system bus: #{inspect(reason)}. Connecting again.")
+
+      {:noreply, %State{state | connection: connect(), proxies: %{}}}
+    else
+      {:noreply, %State{state | proxies: without(state.proxies, dead)}}
+    end
+  end
+
+  def handle_info(_message, %State{} = state), do: {:noreply, state}
+
+  # **The connection is not a bare pid.** `:dbus_bus_connection.connect/1` answers
+  # `{:dbus_bus_connection, pid}`, and an earlier version of the clause above compared
+  # the whole term against the pid in the exit — so it never matched, and the bus sat
+  # holding a dead connection.
+  defp connection_pid({:dbus_bus_connection, pid}) when is_pid(pid), do: pid
+  defp connection_pid(pid) when is_pid(pid), do: pid
+  defp connection_pid(_other), do: nil
+
+  # A proxy stops whenever BlueZ answers with an error, so the one that died is dropped
+  # and the next call for that object makes a fresh one.
+  defp without(proxies, dead) do
+    proxies |> Enum.reject(fn {_path, proxy} -> proxy == dead end) |> Map.new()
   end
 
   # **A bus that is not there is not an error worth stopping for.** The daemons start
@@ -215,9 +311,42 @@ defmodule PiFi.Bluetooth.Bus do
       nil
   end
 
-  defp invoke(connection, path, interface, method, arguments) do
-    with {:ok, proxy} <- :dbus_proxy.start_link(connection, @bluez, path) do
-      :dbus_proxy.call(proxy, interface, method, arguments)
+  defp invoke(proxy, interface, method, arguments) do
+    :dbus_proxy.call(proxy, interface, method, arguments) |> answered()
+  rescue
+    exception -> {:error, exception}
+  catch
+    # **A BlueZ error is thrown, and the throw lands here rather than in the proxy.**
+    # `:dbus_proxy.call/4` ends in `may_throw/1`, which throws the error in whatever
+    # process called it. A `gen_server` treats a throw out of a callback as the value
+    # that callback returned, so this process stopped with `bad_return_value` — taking
+    # the bus connection with it, and with it every discovery BlueZ had tied to that
+    # connection. That is why a scan reported `:ok` and then quietly ended.
+    :throw, thrown -> answered(thrown)
+    :exit, reason -> answered({:error, reason})
+  end
+
+  # **One proxy for each object, kept and used again.** Making one per call leaks a
+  # process against this one every time, and stopping it after the call ends the
+  # discovery BlueZ started on it — a scan that reported `:ok` and then found nothing.
+  # So they are held here, and `handle_info/2` drops one that has died.
+  defp proxy_for(path, %State{} = state) do
+    case Map.get(state.proxies, path) do
+      proxy when is_pid(proxy) ->
+        if Process.alive?(proxy),
+          do: {:ok, proxy, state},
+          else: make_proxy(path, %State{state | proxies: Map.delete(state.proxies, path)})
+
+      nil ->
+        make_proxy(path, state)
+    end
+  end
+
+  defp make_proxy(path, %State{} = state) do
+    case :dbus_proxy.start_link(state.connection, @bluez, path) do
+      {:ok, proxy} -> {:ok, proxy, %State{state | proxies: Map.put(state.proxies, path, proxy)}}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, other}
     end
   rescue
     exception -> {:error, exception}
