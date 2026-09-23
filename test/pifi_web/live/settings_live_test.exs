@@ -1451,4 +1451,115 @@ defmodule PiFiWeb.SettingsLiveTest do
       refute Spotify.enabled?()
     end
   end
+
+  # **A radio that answers anything in range**, so it follows the rule the Plex player
+  # follows. The page is about pairing; choosing where audio goes stays on the output
+  # page, because a paired headset appears there by itself. See `PiFi.Bluetooth`.
+  #
+  # **A host cannot start the daemons**, which come from NBPR and write to `/root`, so a
+  # test that needs the page to look switched on sets the setting rather than pressing
+  # the control. Pressing it is covered too, by the answer it gives here.
+  describe "the Bluetooth section" do
+    setup do
+      on_exit(fn ->
+        case Settings.fetch(PiFi.Bluetooth.enabled_key()) do
+          {:ok, setting} -> Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    defp bluetooth_on, do: Settings.put!(PiFi.Bluetooth.enabled_key(), "true")
+
+    test "a device that no person changed says off", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/bluetooth")
+
+      assert has_element?(view, "#toggle-bluetooth[aria-pressed='false']")
+    end
+
+    # A person deciding whether to turn a radio on should be told what they get.
+    test "says what it is for and what it costs", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/settings/bluetooth")
+
+      assert html =~ "headphones"
+      assert html =~ "SBC"
+    end
+
+    # **The daemons are three programs and a bus, and any of them can fail to start.**
+    # This used to raise out of `enable/1` and take the page with it. A person who asks
+    # for a radio that will not start must be told.
+    test "a radio that will not start says so and stays off", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/bluetooth")
+
+      html = view |> element("#toggle-bluetooth") |> render_click()
+
+      assert html =~ "did not start"
+      assert has_element?(view, "#toggle-bluetooth[aria-pressed='false']")
+    end
+
+    # **The setting follows the daemons and does not lead them.** Otherwise the page says
+    # off, the setting says on, and a refresh swaps them over.
+    test "a radio that will not start is not remembered as on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/bluetooth")
+
+      view |> element("#toggle-bluetooth") |> render_click()
+
+      refute PiFi.Bluetooth.enabled?()
+    end
+
+    test "a person turns it off again", %{conn: conn} do
+      bluetooth_on()
+
+      {:ok, view, _html} = live(conn, ~p"/settings/bluetooth")
+
+      assert has_element?(view, "#toggle-bluetooth[aria-pressed='true']")
+
+      html = view |> element("#toggle-bluetooth") |> render_click()
+
+      assert html =~ "Bluetooth is off"
+      refute PiFi.Bluetooth.enabled?()
+    end
+
+    # **Looking is the control, and it only exists once the radio is on.** There is
+    # nothing to scan with otherwise.
+    test "the scan control appears only when it is on", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/bluetooth")
+
+      refute has_element?(view, "#scan-bluetooth")
+
+      bluetooth_on()
+      {:ok, view, _html} = live(conn, ~p"/settings/bluetooth")
+
+      assert has_element?(view, "#scan-bluetooth")
+    end
+
+    # **This is the commonest failure by a distance**, so the page says it rather than
+    # leaving a person to guess why nothing appeared.
+    test "tells a person to put the headphones in pairing mode", %{conn: conn} do
+      bluetooth_on()
+
+      {:ok, _view, html} = live(conn, ~p"/settings/bluetooth")
+
+      assert html =~ "pairing mode"
+    end
+
+    test "says nothing is paired when nothing is", %{conn: conn} do
+      bluetooth_on()
+
+      {:ok, view, _html} = live(conn, ~p"/settings/bluetooth")
+
+      assert has_element?(view, "#no-bluetooth-devices")
+    end
+
+    # The same image runs on a board with a radio and on one without, and the row is for
+    # the ones that have one. A developer's laptop usually does, so this asks the same
+    # question the page asks rather than assuming an answer.
+    test "the menu shows the row when this machine has a radio", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings")
+
+      assert has_element?(view, "#bluetooth-row") == PiFi.Bluetooth.adapter?()
+    end
+  end
 end

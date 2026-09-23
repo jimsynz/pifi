@@ -124,11 +124,25 @@ defmodule PiFi.Bluetooth do
   It starts the three daemons, or it stops them, so a person sees the change without a
   restart.
   """
-  @spec enable(boolean()) :: :ok
-  def enable(enabled?) do
-    Settings.put!(@enabled_key, to_string(enabled?))
+  @spec enable(boolean()) :: :ok | {:error, term()}
+  # **The setting follows the daemons and does not lead them.** Writing `true` for a
+  # radio that then failed to start leaves a page saying off, a setting saying on, and
+  # the two swapping places at the next refresh.
+  def enable(true) do
+    case start_daemons() do
+      :ok ->
+        Settings.put!(@enabled_key, "true")
 
-    if enabled?, do: start_daemons(), else: stop_daemons()
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def enable(false) do
+    Settings.put!(@enabled_key, "false")
+    stop_daemons()
 
     :ok
   end
@@ -177,6 +191,11 @@ defmodule PiFi.Bluetooth do
   # starts, and `bluealsa` finds the adapter through BlueZ, so a bus that restarts
   # leaves the two above it talking to a bus that no longer holds their names. Each one
   # therefore takes the ones after it with it.
+  # **Every step of this writes to `/root` or names a binary of NBPR**, and a machine
+  # that is not the board has neither. It used to raise, which was invisible while
+  # nothing but a boot called it — and then a settings page did, and turning Bluetooth
+  # on took the page down. A person who asks for a radio that will not start must be
+  # told, not dropped.
   defp start_daemons do
     keep_pairings()
     name_the_plugin()
@@ -185,6 +204,16 @@ defmodule PiFi.Bluetooth do
         do: start_child(child)
 
     :ok
+  rescue
+    exception -> refused(exception)
+  catch
+    :exit, reason -> refused(reason)
+  end
+
+  defp refused(reason) do
+    Logger.warning("Bluetooth did not start: #{inspect(reason)}")
+
+    {:error, reason}
   end
 
   # **ALSA ships with no idea what `bluealsa:` means.** The plugin is in the package's
@@ -198,17 +227,26 @@ defmodule PiFi.Bluetooth do
   # that as well as `/etc/asound.conf`, so `rate48` and the USB DAC are untouched, and
   # `$HOME` on this device is `/root`, which is the one writable partition.
   defp name_the_plugin do
-    conf = Path.join(:code.priv_dir(:nbpr_bluez_alsa) |> to_string(), @plugin_config)
-
-    case File.write(@asoundrc, "<#{conf}>\n") do
-      :ok ->
-        :ok
-
+    with {:ok, conf} <- plugin_config(),
+         :ok <- File.write(@asoundrc, "<#{conf}>\n") do
+      :ok
+    else
       {:error, reason} ->
         Logger.warning(
           "Bluetooth could not name the ALSA plugin in #{@asoundrc}: " <>
-            "#{:file.format_error(reason)}. Playing to a speaker will not work."
+            "#{inspect(reason)}. Playing to a speaker will not work."
         )
+    end
+  end
+
+  # **`:code.priv_dir/1` answers `{:error, :bad_name}` for a package that is not there**,
+  # and `to_string/1` on that tuple raises. A host has no NBPR, so enabling Bluetooth
+  # from the settings page took the page down with it — the board has the package and
+  # never showed it.
+  defp plugin_config do
+    case :code.priv_dir(:nbpr_bluez_alsa) do
+      {:error, reason} -> {:error, {:nbpr_bluez_alsa, reason}}
+      priv -> {:ok, Path.join(to_string(priv), @plugin_config)}
     end
   end
 

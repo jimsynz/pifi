@@ -59,6 +59,7 @@ defmodule PiFiWeb.SettingsLive do
 
   alias PiFi.AirPlay.Server, as: AirPlay
   alias PiFi.AutoSync
+  alias PiFi.Bluetooth
   alias PiFi.Device
   alias PiFi.Device.Identity
   alias PiFi.Device.Timezone
@@ -70,6 +71,11 @@ defmodule PiFiWeb.SettingsLive do
   alias PiFi.Player.Crossfade
   alias PiFi.Source
   alias PiFi.SwitchOff
+
+  # **BlueZ ends a scan by itself after a while**, so the control goes back to saying
+  # "Look for devices" rather than claiming to still be looking. Generous, because a
+  # board found a headset at twenty-five seconds.
+  @bluetooth_scan :timer.seconds(30)
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
@@ -125,8 +131,23 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  # **A headset connecting changes the output list and this page as well.** The same
+  # event carries both: `PiFi.Bluetooth.Watcher` publishes it when a device arrives or
+  # goes. See `PiFi.Player.outputs_changed/0`.
   def handle_info(%Events.OutputChanged{} = event, socket) do
-    {:noreply, assign(socket, :output, Map.take(event, [:devices, :selected, :in_use]))}
+    socket = assign(socket, :output, Map.take(event, [:devices, :selected, :in_use]))
+
+    {:noreply, assign(socket, :bluetooth_devices, bluetooth_devices())}
+  end
+
+  def handle_info(:bluetooth_scanned, socket) do
+    {:noreply, socket |> assign(:bluetooth_scanning?, false) |> refresh()}
+  end
+
+  def handle_info({:bluetooth_done, outcome, result}, socket) do
+    socket = socket |> assign(:bluetooth_busy, nil) |> refresh()
+
+    {:noreply, bluetooth_said(socket, outcome, result)}
   end
 
   @impl Phoenix.LiveView
@@ -193,6 +214,58 @@ defmodule PiFiWeb.SettingsLive do
         else: "Home Assistant can no longer see this device."
 
     {:noreply, socket |> assign(:home_assistant?, enabled?) |> put_flash(:info, message)}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("toggle_bluetooth", _params, socket) do
+    enabled? = not socket.assigns.bluetooth?
+
+    case Bluetooth.enable(enabled?) do
+      :ok ->
+        message = if enabled?, do: "Bluetooth is on.", else: "Bluetooth is off."
+
+        {:noreply,
+         socket |> assign(:bluetooth?, enabled?) |> put_flash(:info, message) |> refresh()}
+
+      # Saying it is on while three daemons failed to start would send a person looking
+      # for a headset that this device cannot see.
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(:bluetooth?, false)
+         |> put_flash(:error, "Bluetooth did not start.")
+         |> refresh()}
+    end
+  end
+
+  # **A scan takes about half a minute and BlueZ ends it by itself.** The control says
+  # so rather than appearing to have found nothing, and pressing it again is safe:
+  # `PiFi.Bluetooth.Devices.discover/0` answers a scan that is already running with
+  # `:ok`.
+  @impl Phoenix.LiveView
+  def handle_event("scan_bluetooth", _params, socket) do
+    case Bluetooth.Devices.discover() do
+      :ok ->
+        Process.send_after(self(), :bluetooth_scanned, @bluetooth_scan)
+
+        {:noreply, assign(socket, :bluetooth_scanning?, true)}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Could not look for devices.")}
+    end
+  end
+
+  # **Pairing waits for a person to press a button on a headset**, so it cannot run
+  # here: a `GenServer.call` that takes twenty seconds is a page that answers nothing
+  # for twenty seconds. The work goes to a task and the answer comes back as a message.
+  @impl Phoenix.LiveView
+  def handle_event("pair_bluetooth", %{"path" => path}, socket) do
+    {:noreply, bluetooth_task(socket, path, :paired, fn -> Bluetooth.Devices.pair(path) end)}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("forget_bluetooth", %{"path" => path}, socket) do
+    {:noreply, bluetooth_task(socket, path, :forgotten, fn -> Bluetooth.Devices.forget(path) end)}
   end
 
   @impl Phoenix.LiveView
@@ -483,6 +556,16 @@ defmodule PiFiWeb.SettingsLive do
 
       <.row id="airplay-row" to={~p"/settings/airplay"} icon="ph-airplay" title="AirPlay">
         {if @airplay?, do: "On", else: "Off"}
+      </.row>
+
+      <.row
+        :if={@bluetooth_adapter?}
+        id="bluetooth-row"
+        to={~p"/settings/bluetooth"}
+        icon="ph-bluetooth"
+        title="Bluetooth"
+      >
+        {bluetooth_summary(@bluetooth?, @bluetooth_devices)}
       </.row>
     </div>
     """
@@ -1240,6 +1323,113 @@ defmodule PiFiWeb.SettingsLive do
     """
   end
 
+  # **A radio that answers anything in range**, so the page says what turning it on
+  # means. Choosing where audio goes stays on the output page: a paired headset appears
+  # there by itself. See `PiFi.Bluetooth`.
+  @impl Phoenix.LiveView
+  def render(%{live_action: :bluetooth} = assigns) do
+    ~H"""
+    <.section id="settings-bluetooth" title="Bluetooth" back={~p"/settings"}>
+      <p class="text-sm text-ink-dim">
+        Pair a speaker or a pair of headphones. Once paired, it shows up under
+        <.link navigate={~p"/settings/output"} class="underline">Output device</.link>
+        whenever it is switched on.
+      </p>
+
+      <p class="mt-2 text-sm text-ink-dim">
+        Bluetooth carries SBC only, so a headset will not sound as good as the USB DAC.
+      </p>
+
+      <div class="mt-4 flex gap-2">
+        <button
+          id="toggle-bluetooth"
+          type="button"
+          phx-click="toggle_bluetooth"
+          aria-pressed={to_string(@bluetooth?)}
+          class={[
+            "control rounded-lg px-3 py-2 text-sm",
+            if(@bluetooth?, do: "control-on", else: "")
+          ]}
+        >
+          {if @bluetooth?, do: "Disable", else: "Enable"}
+        </button>
+
+        <button
+          :if={@bluetooth?}
+          id="scan-bluetooth"
+          type="button"
+          phx-click="scan_bluetooth"
+          disabled={@bluetooth_scanning?}
+          class="control rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+        >
+          {if @bluetooth_scanning?, do: "Looking…", else: "Look for devices"}
+        </button>
+      </div>
+
+      <p :if={@bluetooth_scanning?} id="bluetooth-looking" class="mt-3 text-sm text-ink-dim">
+        Hold the button on your headphones until the light flashes. This takes about half
+        a minute.
+      </p>
+
+      <p
+        :if={@bluetooth? and not @bluetooth_scanning? and @bluetooth_devices == []}
+        id="no-bluetooth-devices"
+        class="mt-3 text-sm text-ink-dim"
+      >
+        Nothing paired yet. Put your headphones into pairing mode and look for devices.
+      </p>
+
+      <ul :if={@bluetooth_devices != []} class="mt-3 divide-y divide-edge">
+        <li
+          :for={device <- @bluetooth_devices}
+          id={"bluetooth-#{bluetooth_slug(device)}"}
+          class="flex items-center gap-3 py-2 first:pt-0 last:pb-0"
+        >
+          <.icon
+            name={if device.connected?, do: "ph-bluetooth-connected", else: "ph-bluetooth"}
+            class={[
+              "size-5 shrink-0",
+              if(device.connected?, do: "text-accent", else: "text-ink-faint")
+            ]}
+          />
+
+          <span class="min-w-0 grow">
+            <span class="block truncate text-ink">{device.name}</span>
+            <span class="block truncate text-xs text-ink-faint">
+              {bluetooth_state(device, @bluetooth_busy)}
+            </span>
+          </span>
+
+          <button
+            :if={not device.paired?}
+            type="button"
+            id={"pair-#{bluetooth_slug(device)}"}
+            phx-click="pair_bluetooth"
+            phx-value-path={device.path}
+            disabled={@bluetooth_busy != nil}
+            class="control shrink-0 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50"
+          >
+            Pair
+          </button>
+
+          <button
+            :if={device.paired?}
+            type="button"
+            id={"forget-#{bluetooth_slug(device)}"}
+            phx-click="forget_bluetooth"
+            phx-value-path={device.path}
+            disabled={@bluetooth_busy != nil}
+            data-confirm={"PiFi will forget #{device.name}. You can pair it again."}
+            class="control shrink-0 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50"
+          >
+            Forget
+          </button>
+        </li>
+      </ul>
+    </.section>
+    """
+  end
+
   # **This opens a port too**, so the page says the same things the Home Assistant one
   # does. See `PiFi.AirPlay.Server`.
   @impl Phoenix.LiveView
@@ -1537,6 +1727,71 @@ defmodule PiFiWeb.SettingsLive do
     end
   end
 
+  # **It is not supervised and it is not linked, and both are on purpose.** Linked would
+  # take this page down with a pairing that raised, and supervised would mean another
+  # child in `PiFi.Application` for a button. What matters is that the page hears back,
+  # so the work is wrapped and an answer is sent whatever happens — a page that sat on
+  # "Working…" for ever would be worse than either.
+  defp bluetooth_task(socket, path, outcome, work) do
+    parent = self()
+
+    Task.start(fn ->
+      result =
+        try do
+          work.()
+        rescue
+          exception -> {:error, exception}
+        catch
+          :exit, reason -> {:error, reason}
+        end
+
+      send(parent, {:bluetooth_done, outcome, result})
+    end)
+
+    assign(socket, :bluetooth_busy, path)
+  end
+
+  defp bluetooth_said(socket, :paired, :ok), do: put_flash(socket, :info, "Paired.")
+
+  # **A headset that has gone to sleep is the commonest failure, by a distance.** Saying
+  # so is more use than the name of a D-Bus error.
+  defp bluetooth_said(socket, :paired, {:error, _reason}) do
+    put_flash(socket, :error, "Could not pair. Check it is still in pairing mode and try again.")
+  end
+
+  defp bluetooth_said(socket, :forgotten, :ok), do: put_flash(socket, :info, "Forgotten.")
+
+  defp bluetooth_said(socket, :forgotten, {:error, _reason}) do
+    put_flash(socket, :error, "Could not forget that one.")
+  end
+
+  defp bluetooth_summary(false, _devices), do: "Off"
+
+  defp bluetooth_summary(true, devices) do
+    case Enum.count(devices, & &1.paired?) do
+      0 -> "On, nothing paired"
+      1 -> "On, 1 device"
+      count -> "On, #{count} devices"
+    end
+  end
+
+  # **A path is an object path of D-Bus and not a thing to put in an identifier.**
+  # `/org/bluez/hci0/dev_70_BF_92_04_AC_5A` in an `id` is a selector that no test can
+  # write without escaping every slash and colon in it.
+  defp bluetooth_slug(%{address: address}), do: String.replace(address, ":", "-")
+
+  defp bluetooth_state(%{path: path}, busy) when path == busy, do: "Working…"
+  defp bluetooth_state(%{connected?: true}, _busy), do: "Connected"
+  defp bluetooth_state(%{paired?: true}, _busy), do: "Paired"
+  defp bluetooth_state(_device, _busy), do: "Not paired"
+
+  defp bluetooth_devices do
+    case Bluetooth.Devices.list() do
+      {:ok, devices} -> devices
+      {:error, _reason} -> []
+    end
+  end
+
   # A person who opens the page has had no event yet, and a person who changed
   # something wants to see the answer of that change now.
   defp refresh(socket) do
@@ -1556,6 +1811,11 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:upgrade, Device.upgrade!())
     |> assign(:home_assistant?, HomeAssistant.enabled?())
     |> assign(:airplay?, AirPlay.enabled?())
+    |> assign(:bluetooth?, Bluetooth.enabled?())
+    |> assign(:bluetooth_adapter?, Bluetooth.adapter?())
+    |> assign(:bluetooth_devices, bluetooth_devices())
+    |> assign_new(:bluetooth_scanning?, fn -> false end)
+    |> assign_new(:bluetooth_busy, fn -> nil end)
     |> assign(:source_list, source_list())
     |> assign(:peripheral_list, peripheral_list())
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())

@@ -70,10 +70,19 @@ defmodule PiFi.AirPlay.Server do
   read, is something a person needs telling about.
   """
   @spec enable(boolean()) :: :ok | {:error, term()}
+  # **The setting follows the listener and does not lead it**, for the reason
+  # `PiFi.Bluetooth.enable/1` gives: a port that another program holds would otherwise
+  # leave a page saying off and a setting saying on.
   def enable(true) do
-    Settings.put!(@enabled_key, "true")
+    case start_listener() do
+      :ok ->
+        Settings.put!(@enabled_key, "true")
 
-    start_listener()
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   def enable(false) do
