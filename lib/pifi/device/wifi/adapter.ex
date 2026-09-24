@@ -21,24 +21,19 @@ if Mix.target() != :host do
     accumulated rather than the result of one sweep, and the settings page asks again
     every few seconds while a person is choosing.
 
-    ## Reading the security off an access point
+    ## Nothing here decides anything
 
-    `wpa_supplicant` reports flags, and `VintageNetWiFi` parses them twice: once into the
-    granular atoms below, and once into the older combined ones it keeps for
-    compatibility. Both end up in the same list. Reading the granular ones is what makes
-    a network that offers WPA2 and WPA3 together come out as WPA3, and it is why the
-    fast-transition spellings are named here too — an access point that advertises only
-    `FT/PSK` carries no plain `:psk`, and reading it as open would offer to join a
-    secured network without a passphrase.
+    **This module cannot be tested.** `vintage_net` is a target dependency, so it does
+    not exist on a host and nothing on a host can call it — which is how a `Map.values/1`
+    over a list reached a board and took the whole settings page down with it. Every
+    judgement, including reading the security off an access point, is in
+    `PiFi.Device.Wifi` where a test can reach it. What is left here is calls into
+    VintageNet.
     """
 
     @behaviour PiFi.Device.Wifi
 
     alias PiFi.Device.Wifi
-
-    @enterprise [:eap, :eap_sha256, :eap_suite_b, :eap_suite_b_192, :ft_eap]
-    @wpa3 [:sae, :ft_sae]
-    @wpa2 [:psk, :psk_sha256, :ft_psk]
 
     # wpa_supplicant refuses anything shorter, so it is worth saying so here rather than
     # persisting a configuration that will never associate.
@@ -65,18 +60,9 @@ if Mix.target() != :host do
           []
 
         {:ok, interface} ->
-          known = known()
-
           ["interface", interface, "wifi", "access_points"]
           |> VintageNet.get()
-          |> Kernel.||(%{})
-          |> Map.values()
-          # A hidden network reports an empty name, and there is nothing to show or to
-          # join it by.
-          |> Enum.reject(&(&1.ssid in [nil, ""]))
-          |> Enum.group_by(& &1.ssid)
-          |> Enum.map(fn {ssid, points} -> strongest(ssid, points, known) end)
-          |> Enum.sort_by(&{&1.signal_percent, &1.ssid}, :desc)
+          |> Wifi.networks(known())
       end
     end
 
@@ -180,29 +166,6 @@ if Mix.target() != :host do
       case Enum.find(seen(), &(&1.ssid == ssid)) do
         nil -> :wpa2
         network -> network.security
-      end
-    end
-
-    # One network is several access points in a house with more than one of them, and a
-    # person picks a name rather than a radio.
-    defp strongest(ssid, points, known) do
-      point = Enum.max_by(points, & &1.signal_percent)
-
-      %{
-        ssid: ssid,
-        signal_percent: point.signal_percent,
-        security: security_of(point.flags),
-        known?: ssid in known
-      }
-    end
-
-    defp security_of(flags) do
-      cond do
-        Enum.any?(@enterprise, &(&1 in flags)) -> :enterprise
-        Enum.any?(@wpa3, &(&1 in flags)) -> :wpa3
-        Enum.any?(@wpa2, &(&1 in flags)) -> :wpa2
-        :wep in flags -> :wep
-        true -> :open
       end
     end
   end
