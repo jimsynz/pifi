@@ -18,6 +18,37 @@ defmodule PiFi.Output.APlayPortTest do
 
   alias PiFi.Output.APlayPort
 
+  # **Everything this suite lets `cat` write goes in one directory, and the directory
+  # goes at the end.**
+  #
+  # These files used to be named with `System.unique_integer/1` alone and removed one at
+  # a time. Both halves of that were wrong, and together they made the ramp test below
+  # flaky.
+  #
+  # They leaked, because `on_exit` runs the callback it was given last first: the removal
+  # ran while `cat` was still alive, and a shell that had not opened its file yet created
+  # it again afterwards. `/tmp` held 769 of them, dating back weeks.
+  #
+  # And they collided, because `System.unique_integer/1` counts from near zero again in
+  # every new VM. A path one run of the suite used was handed to the next one, which
+  # found it already holding 32 bytes of plausible audio — exactly the size the ramp test
+  # waits for, so it read the previous run's crossfade and failed on the shape of it.
+  #
+  # A directory named with random bytes cannot be handed to another run, and removing the
+  # whole of it takes the files whatever order anything else happens in.
+  setup_all do
+    scratch =
+      Path.join(
+        System.tmp_dir!(),
+        "a_play_port_test_#{Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)}"
+      )
+
+    File.mkdir_p!(scratch)
+    on_exit(fn -> File.rm_rf!(scratch) end)
+
+    %{scratch: scratch}
+  end
+
   setup do
     on_exit(fn -> APlayPort.close() end)
 
@@ -111,9 +142,8 @@ defmodule PiFi.Output.APlayPortTest do
     # that this test read was therefore the count of a port of another test now and
     # then. The bytes that the program itself wrote answer the question and nothing
     # else does.
-    test "a write from another process reaches the program" do
-      path = Path.join(System.tmp_dir!(), "a_play_port_#{System.unique_integer([:positive])}")
-      on_exit(fn -> File.rm(path) end)
+    test "a write from another process reaches the program", %{scratch: scratch} do
+      path = Path.join(scratch, "write_#{System.unique_integer([:positive])}")
 
       {:ok, port} = APlayPort.hold("sh", ["-c", "cat -u > #{path}"])
 
@@ -184,9 +214,8 @@ defmodule PiFi.Output.APlayPortTest do
   # This process is where they meet. `PiFi.Output.Mixer` holds the arithmetic and a test
   # of its own; these cover the pairing, the pacing and every way that a fade gives up.
   describe "the crossfade" do
-    setup do
-      path = Path.join(System.tmp_dir!(), "a_play_fade_#{System.unique_integer([:positive])}")
-      on_exit(fn -> File.rm(path) end)
+    setup %{scratch: scratch} do
+      path = Path.join(scratch, "fade_#{System.unique_integer([:positive])}")
 
       {:ok, _port} = APlayPort.hold("sh", ["-c", "cat -u > #{path}"])
 
@@ -205,13 +234,10 @@ defmodule PiFi.Output.APlayPortTest do
       assert Task.await(incoming) == :finished
     end
 
-    # **The ramp reads the clock and this blend can finish inside one tick of it.** When
-    # it does, the fade reads as 0% for every frame and every sample comes out as the
-    # outgoing track, so `List.last(values)` is 1000 rather than something below zero.
-    # It fails about one run in thirty, and more readily on a quiet machine than a busy
-    # one. The fix is for the ramp to count frames rather than read a clock, which is a
-    # change to `PiFi.Output.APlayPort` and not to this. Take the tag off with it.
-    @tag :skip
+    # **The whole ramp, read off the card.** The other tests here take the return value
+    # of `blend/2` for an answer, and that says a fade happened without saying it went
+    # the right way: the gains could be reversed, or stuck, and every one of them would
+    # still pass. This is the one that reads the samples.
     test "the ramp starts at the outgoing track and ends at the incoming one", %{path: path} do
       :ok = APlayPort.fade(8)
       :ok = APlayPort.fading(:outgoing, format())
