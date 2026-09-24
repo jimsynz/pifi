@@ -99,7 +99,7 @@ defmodule PiFiWeb.SettingsLiveTest do
     test "each row says what the section holds", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
-      assert html =~ "1 of 5 enabled"
+      assert html =~ "1 of 6 enabled"
       assert html =~ "free of"
     end
 
@@ -1334,12 +1334,15 @@ defmodule PiFiWeb.SettingsLiveTest do
 
   # **This opens a port as well**, and anyone on the network can send to it, so it
   # follows the same rule. See `PiFi.AirPlay.Server`.
-  describe "the AirPlay section" do
+  # **The switch used to be in a section of its own**, and it moved for the reason
+  # `PiFi.Source.Spotify` records: a person looking for where to turn AirPlay on had to
+  # already know it was not with the other music services. See `PiFi.Source.AirPlay`.
+  describe "AirPlay, as a source" do
     setup do
       on_exit(fn ->
         AirPlay.enable(false)
 
-        case Settings.fetch(AirPlay.enabled_key()) do
+        case Settings.fetch(Source.enabled_key(Source.AirPlay)) do
           {:ok, setting} -> Settings.delete!(setting)
           {:error, _reason} -> :ok
         end
@@ -1348,39 +1351,48 @@ defmodule PiFiWeb.SettingsLiveTest do
       :ok
     end
 
-    test "a device that no person changed says off", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings/airplay")
+    test "it is listed with the other sources", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources")
 
-      assert has_element?(view, "#toggle-airplay[aria-pressed='false']")
-      assert render(view) =~ to_string(AirPlay.port())
+      assert has_element?(view, "#source-row-air-play")
     end
 
-    test "a person turns it on and off again", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings/airplay")
+    test "a device that no person changed has it off", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/air-play")
 
-      html = view |> element("#toggle-airplay") |> render_click()
-
-      assert html =~ "over AirPlay now"
-      assert AirPlay.enabled?()
-      assert has_element?(view, "#toggle-airplay[aria-pressed='true']")
-
-      html = view |> element("#toggle-airplay") |> render_click()
-
-      assert html =~ "AirPlay is off"
+      assert has_element?(view, "#enable-source-air-play", "Enable")
       refute AirPlay.enabled?()
     end
 
     # A person deciding whether to open a port should be told that it is one.
     test "says what a person is agreeing to", %{conn: conn} do
-      {:ok, _view, html} = live(conn, ~p"/settings/airplay")
+      {:ok, _view, html} = live(conn, ~p"/settings/sources/air-play")
 
       assert html =~ "Anyone on your network"
     end
 
-    test "the menu says whether it is on", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings")
+    # The card plays one thing at a time, and a person meeting that with no warning
+    # would read it as the feature being broken.
+    test "it says that the card plays one thing at a time", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/settings/sources/air-play")
 
-      assert has_element?(view, "#airplay-row", "Off")
+      assert html =~ "one thing at a time"
+    end
+
+    # **The switch and the port cannot be allowed to disagree.** The listener follows
+    # the setting, and `PiFi.AirPlay.Monitor` is what carries it across.
+    test "turning it on opens the port, and turning it off shuts it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/air-play")
+
+      view |> element("#enable-source-air-play") |> render_click()
+
+      assert Source.enabled?(Source.AirPlay)
+      assert eventually(fn -> AirPlay.running?() end)
+
+      view |> element("#enable-source-air-play") |> render_click()
+
+      refute Source.enabled?(Source.AirPlay)
+      assert eventually(fn -> not AirPlay.running?() end)
     end
   end
 

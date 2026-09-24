@@ -23,6 +23,7 @@ defmodule PiFi.Player.Pipeline do
 
   use Membrane.Pipeline
 
+  alias PiFi.AirPlay
   alias PiFi.Player.FileSource
   alias PiFi.Player.Hls
   alias PiFi.Player.HttpSource
@@ -187,6 +188,18 @@ defmodule PiFi.Player.Pipeline do
   # `PiFi.Spotify.Loopback`.
   defp source(%{transport: :capture} = playable, _buffer_bytes) do
     child(:source, %PiFi.Spotify.CaptureSource{device: playable.uri, command: "arecord"})
+  end
+
+  # **An AirPlay stream is a telephone sending audio**, so there is no network to read
+  # and no file to seek in: the packets arrive and `PiFi.AirPlay.PlaybackSource` decodes
+  # them. The socket is asked for here rather than carried in the playable, because a
+  # session lasts as long as one telephone stays connected and this pipeline is built
+  # again whenever the output changes. See `PiFi.AirPlay.Monitor`.
+  defp source(%{transport: :airplay}, _buffer_bytes) do
+    case AirPlay.Monitor.socket() do
+      nil -> raise "No telephone is sending AirPlay audio."
+      socket -> child(:source, %AirPlay.PlaybackSource{socket: socket})
+    end
   end
 
   defp source(%{transport: :hls} = playable, _buffer_bytes) do

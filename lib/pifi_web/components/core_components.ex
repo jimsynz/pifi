@@ -33,6 +33,7 @@ defmodule PiFiWeb.CoreComponents do
   # the Plex logo of 2022 is the word `plex`, and 20 pixels of it is a smudge beside a
   # label that already says Plex. `brand/plex.svg` is therefore the chevron.
   @source_icons %{
+    airplay: "ph-airplay",
     cloud: "ph-cloud",
     jellyfin: "brand-jellyfin",
     library: "ph-stack",

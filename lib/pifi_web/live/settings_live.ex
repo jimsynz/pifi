@@ -57,7 +57,6 @@ defmodule PiFiWeb.SettingsLive do
   # compiler warning that no Elixir code reads the attribute.
   Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
 
-  alias PiFi.AirPlay.Server, as: AirPlay
   alias PiFi.AutoSync
   alias PiFi.Bluetooth
   alias PiFi.Device
@@ -336,29 +335,6 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
-  def handle_event("toggle_airplay", _params, socket) do
-    enabled? = not socket.assigns.airplay?
-
-    case AirPlay.enable(enabled?) do
-      :ok ->
-        message =
-          if enabled?,
-            do: "You can send audio to this device over AirPlay now.",
-            else: "AirPlay is off."
-
-        {:noreply, socket |> assign(:airplay?, enabled?) |> put_flash(:info, message)}
-
-      # Saying it is on while nothing is listening would send a person looking at their
-      # telephone for a device that was never there.
-      {:error, _reason} ->
-        {:noreply,
-         socket
-         |> assign(:airplay?, false)
-         |> put_flash(:error, "AirPlay couldn't start. Something else may be using the port.")}
-    end
-  end
-
-  @impl Phoenix.LiveView
   def handle_event("save_device_name", %{"device" => %{"name" => name}}, socket) do
     case Identity.put_name(name) do
       :ok ->
@@ -619,10 +595,6 @@ defmodule PiFiWeb.SettingsLive do
         title="Home Assistant"
       >
         {if @home_assistant?, do: "On", else: "Off"}
-      </.row>
-
-      <.row id="airplay-row" to={~p"/settings/airplay"} icon="ph-airplay" title="AirPlay">
-        {if @airplay?, do: "On", else: "Off"}
       </.row>
 
       <.row
@@ -1597,38 +1569,6 @@ defmodule PiFiWeb.SettingsLive do
     """
   end
 
-  # **This opens a port too**, so the page says the same things the Home Assistant one
-  # does. See `PiFi.AirPlay.Server`.
-  @impl Phoenix.LiveView
-  def render(%{live_action: :airplay} = assigns) do
-    ~H"""
-    <.section id="settings-airplay" title="AirPlay" back={~p"/settings"}>
-      <p class="text-sm text-ink-dim">
-        Send audio to this device from an iPhone, an iPad or a Mac. It appears in the
-        AirPlay list the same way a speaker does.
-      </p>
-
-      <p class="mt-2 text-sm text-ink-dim">
-        The device listens on port {AirPlay.port()} while this is on, and on no port at
-        all while it is off. Anyone on your network can send to it, which is how AirPlay
-        works everywhere.
-      </p>
-
-      <div class="mt-4">
-        <button
-          id="toggle-airplay"
-          type="button"
-          phx-click="toggle_airplay"
-          aria-pressed={to_string(@airplay?)}
-          class={["control rounded-lg px-3 py-2 text-sm", if(@airplay?, do: "control-on", else: "")]}
-        >
-          {if @airplay?, do: "Disable", else: "Enable"}
-        </button>
-      </div>
-    </.section>
-    """
-  end
-
   attr(:usage, :list, required: true)
   attr(:used_bytes, :integer, required: true)
 
@@ -2053,7 +1993,6 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:storage, Device.storage!())
     |> assign(:upgrade, Device.upgrade!())
     |> assign(:home_assistant?, HomeAssistant.enabled?())
-    |> assign(:airplay?, AirPlay.enabled?())
     |> assign(:bluetooth?, Bluetooth.enabled?())
     |> assign(:bluetooth_adapter?, Bluetooth.adapter?())
     |> assign(:bluetooth_devices, bluetooth_devices())

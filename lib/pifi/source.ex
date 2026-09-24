@@ -605,7 +605,8 @@ defmodule PiFi.Source do
       PiFi.Source.Podcasts,
       PiFi.Source.Jellyfin,
       PiFi.Source.Plex,
-      PiFi.Source.Spotify
+      PiFi.Source.Spotify,
+      PiFi.Source.AirPlay
     ])
   end
 
