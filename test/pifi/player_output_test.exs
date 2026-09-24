@@ -149,4 +149,81 @@ defmodule PiFi.PlayerOutputTest do
       refute_receive %Events.Paused{}, 500
     end
   end
+
+  # **Something has to go looking, and this says whether it is worth it.**
+  # `PiFi.Bluetooth.Watcher` reconnects a headset a person switched off, and a radio that
+  # reached for a device nobody is waiting on would be poking at a headset in a drawer.
+  describe "what is waiting for an output" do
+    test "nothing is waiting when nothing was lost" do
+      chose_the_silent_card()
+      playing()
+
+      assert Player.waiting_for_output() == nil
+    end
+
+    test "the chosen output is waiting once it goes" do
+      chose_the_silent_card()
+      playing()
+
+      SilentOutput.vanish()
+      Player.outputs_changed()
+      assert_receive %Events.Paused{}, 2000
+
+      assert Player.waiting_for_output() == SilentOutput.device!().id
+    end
+
+    # **A person who put the device to sleep is not waiting for music**, whatever is
+    # paused behind it.
+    test "standby is nobody waiting" do
+      chose_the_silent_card()
+      playing()
+
+      SilentOutput.vanish()
+      Player.outputs_changed()
+      assert_receive %Events.Paused{}, 2000
+
+      Player.standby(true)
+
+      assert Player.waiting_for_output() == nil
+    end
+
+    test "a person who paused on purpose is not waiting either" do
+      chose_the_silent_card()
+      playing()
+
+      assert :ok = Player.pause(true)
+      assert_receive %Events.Paused{}, 2000
+
+      assert Player.waiting_for_output() == nil
+    end
+
+    test "nothing is waiting once the output comes back" do
+      chose_the_silent_card()
+      playing()
+
+      SilentOutput.vanish()
+      Player.outputs_changed()
+      assert_receive %Events.Paused{}, 2000
+
+      SilentOutput.appear()
+      Player.outputs_changed()
+      assert_receive %Events.Started{}, 2000
+
+      assert Player.waiting_for_output() == nil
+    end
+
+    # A stop is a person saying they are finished with it.
+    test "a stop clears what was waiting" do
+      chose_the_silent_card()
+      playing()
+
+      SilentOutput.vanish()
+      Player.outputs_changed()
+      assert_receive %Events.Paused{}, 2000
+
+      Player.stop()
+
+      assert Player.waiting_for_output() == nil
+    end
+  end
 end

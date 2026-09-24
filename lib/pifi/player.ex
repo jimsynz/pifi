@@ -235,6 +235,21 @@ defmodule PiFi.Player do
   def outputs_changed, do: GenServer.cast(__MODULE__, :outputs_changed)
 
   @doc """
+  The output a paused track is waiting for, if there is one.
+
+  **Something has to go looking, and this says whether it is worth it.**
+  `PiFi.Bluetooth.Watcher` reconnects a headset that a person switched off, and a radio
+  that reached for a device nobody is waiting on would be a device poking at a headset
+  in a drawer.
+
+  It answers `nil` unless a track was paused because its output went. **Standby counts
+  as nobody waiting**: a person who put the device to sleep is not waiting for music,
+  whatever is paused behind it.
+  """
+  @spec waiting_for_output() :: String.t() | nil
+  def waiting_for_output, do: GenServer.call(__MODULE__, :waiting_for_output, 5_000)
+
+  @doc """
   Play the row after the one that plays now.
 
   The queue decides the order. See `PiFi.Playback.Queue`.
@@ -564,6 +579,13 @@ defmodule PiFi.Player do
        crossfading?: state.previous != nil
      }, state}
   end
+
+  @impl GenServer
+  def handle_call(:waiting_for_output, _from, %State{output_lost?: true, standby?: false} = state) do
+    {:reply, chosen_device(), state}
+  end
+
+  def handle_call(:waiting_for_output, _from, %State{} = state), do: {:reply, nil, state}
 
   @impl GenServer
   def handle_call(:output, _from, %State{} = state), do: {:reply, output_report(), state}
