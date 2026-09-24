@@ -15,23 +15,38 @@ defmodule PiFi.AirPlay.Router do
   state it refers to is not there, and a receiver that matched on the message alone
   would carry on with `nil` where a salt should be.
 
-  ## What it answers now
+  ## What it answers
 
-  `GET /info`, `POST /fp-setup`, `POST /pair-setup` and `POST /pair-verify`, which is
-  everything between a telephone finding this device and being paired with it.
-  `OPTIONS` answers with the list. Anything else is `501`, because a receiver that
-  answered `200` to a `SETUP` it cannot do would have the telephone waiting for audio
-  that is never coming.
+  `GET /info`, `POST /fp-setup` and the two pairing routes carry a telephone from finding
+  this device to being paired with it. `SETUP`, `RECORD` and `TEARDOWN` carry it from
+  there to sending audio.
+
+  **`SETUP` answered `501` until there was audio at the other end of it**, on the
+  argument that a receiver claiming to be ready would leave a telephone showing it as
+  playing while nothing came out. There is now: the ports open, the packets are decrypted
+  and decoded, and `PiFi.AirPlay.Monitor` hands the stream to the player. What is not
+  there yet is PTP, which is how several speakers agree with each other and which one
+  speaker has nothing to agree with.
+
+  `FLUSH`, `SET_PARAMETER` and `GET_PARAMETER` answer `200` and do nothing. A sender that
+  skips has nothing held here to throw away — the jitter buffer holds a fraction of a
+  second and every packet after it carries its own sequence number — and answering `501`
+  to a method a sender expects to succeed stops the session over nothing.
   """
 
+  alias PiFi.AirPlay.BinaryPlist
   alias PiFi.AirPlay.FairPlay
   alias PiFi.AirPlay.Info
+  alias PiFi.AirPlay.Monitor
   alias PiFi.AirPlay.PairSetup
   alias PiFi.AirPlay.PairVerify
   alias PiFi.AirPlay.Rtsp
   alias PiFi.AirPlay.Rtsp.Request
   alias PiFi.AirPlay.SecureChannel
+  alias PiFi.AirPlay.Session, as: Audio
   alias PiFi.AirPlay.Tlv8
+
+  require Logger
 
   @state 0x06
 
@@ -47,10 +62,11 @@ defmodule PiFi.AirPlay.Router do
             data_dir: Path.t(),
             setup: term(),
             verify: term(),
-            keys: term()
+            keys: term(),
+            audio: Audio.t()
           }
 
-    defstruct [:device, :sender, :data_dir, :setup, :verify, :keys]
+    defstruct [:device, :sender, :data_dir, :setup, :verify, :keys, audio: %Audio{}]
   end
 
   @doc """
@@ -92,9 +108,58 @@ defmodule PiFi.AirPlay.Router do
     pair_verify(request, session, step(request.body))
   end
 
+  # **This is where a sender stops asking and starts sending.** It arrives twice: the
+  # first describes the session and asks where to send events, the second describes the
+  # audio and asks where to send it. `PiFi.AirPlay.Session` opens the ports and says what
+  # to answer with.
+  def route(%Request{method: "SETUP"} = request, session) do
+    case Audio.setup(session.audio, request.body) do
+      {:ok, reply, audio} ->
+        streaming(audio)
+
+        {Rtsp.reply_to(request, 200, %{"content-type" => @binary}, BinaryPlist.encode(reply)),
+         %{session | audio: audio}}
+
+      {:error, reason} ->
+        Logger.warning("An AirPlay SETUP was refused: #{inspect(reason)}.")
+
+        {Rtsp.reply_to(request, 400), session}
+    end
+  end
+
+  # **Nothing to do, and that is the whole of it for AirPlay 2.** The latency of the
+  # classic protocol was this receiver telling a sender how far ahead to run; a version 2
+  # sender works that out from the timing channel, so every receiver answers zero.
+  def route(%Request{method: "RECORD"} = request, session) do
+    {Rtsp.reply_to(request, 200, %{"audio-latency" => "0"}), session}
+  end
+
+  # A sender that is finished says so. One that crashed says nothing, and the connection
+  # ending is what closes the ports in that case.
+  def route(%Request{method: "TEARDOWN"} = request, session) do
+    stopped(session.audio)
+
+    {Rtsp.reply_to(request, 200), %{session | audio: Audio.close(session.audio)}}
+  end
+
+  # `FLUSH` is a sender skipping, and there is nothing held here to throw away: the
+  # jitter buffer holds a fraction of a second and the packets after it carry their own
+  # sequence numbers. Answering 200 is honest, and answering 501 would stop a sender.
+  def route(%Request{method: method} = request, session)
+      when method in ["FLUSH", "SET_PARAMETER", "GET_PARAMETER"] do
+    {Rtsp.reply_to(request, 200), session}
+  end
+
   def route(%Request{} = request, session) do
     {Rtsp.reply_to(request, 501), session}
   end
+
+  # The player is told once the audio socket exists, which is the second `SETUP`.
+  defp streaming(%Audio{audio: nil}), do: :ok
+  defp streaming(%Audio{audio: socket}), do: Monitor.started(socket)
+
+  defp stopped(%Audio{audio: nil}), do: :ok
+  defp stopped(%Audio{audio: socket}), do: Monitor.stopped(socket)
 
   defp pair_setup(request, session, 1) do
     case PairSetup.start(identifier(session), request.body) do

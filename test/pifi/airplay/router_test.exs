@@ -8,6 +8,7 @@ defmodule PiFi.AirPlay.RouterTest do
   alias PiFi.AirPlay.Router
   alias PiFi.AirPlay.Rtsp
   alias PiFi.AirPlay.SecureChannel
+  alias PiFi.AirPlay.Session, as: Audio
   alias PiFi.AirPlay.Srp
   alias PiFi.AirPlay.Tlv8
 
@@ -96,15 +97,59 @@ defmodule PiFi.AirPlay.RouterTest do
     end
   end
 
-  describe "answering what it does not know" do
-    # A receiver that answered 200 to a SETUP it cannot do leaves the telephone waiting
-    # for audio that is never coming.
-    test "a method it has not built yet is 501", %{session: session} do
-      {reply, _session} = Router.route(request("SETUP", "rtsp://host/stream"), session)
+  describe "the audio methods" do
+    # **`SETUP` answered 501 until there was audio at the other end of it.** This is the
+    # test that said so, and it now says the opposite: the ports open and a sender is
+    # told where to send.
+    test "a first SETUP names a port for the event channel", %{session: session} do
+      asked = BinaryPlist.encode(%{"name" => "A telephone", "timingProtocol" => "PTP"})
 
-      assert status(reply) == 501
+      {reply, session} = Router.route(request("SETUP", "rtsp://host/stream", asked), session)
+
+      on_exit(fn -> Audio.close(session.audio) end)
+
+      assert status(reply) == 200
+      assert {:ok, %{"eventPort" => port}} = BinaryPlist.decode(body(reply))
+      assert is_integer(port) and port > 0
     end
 
+    test "a SETUP it cannot read is 400 rather than a crash", %{session: session} do
+      {reply, _session} = Router.route(request("SETUP", "rtsp://host/stream", "rubbish"), session)
+
+      assert status(reply) == 400
+    end
+
+    # A version 2 sender works the latency out from the timing channel, so every
+    # receiver answers zero.
+    test "RECORD is 200 and says no latency of its own", %{session: session} do
+      {reply, _session} = Router.route(request("RECORD", "rtsp://host/stream"), session)
+
+      assert status(reply) == 200
+      assert reply =~ "audio-latency: 0"
+    end
+
+    test "TEARDOWN is 200 and gives the ports back", %{session: session} do
+      asked = BinaryPlist.encode(%{"timingProtocol" => "PTP"})
+      {_reply, session} = Router.route(request("SETUP", "rtsp://host/stream", asked), session)
+
+      {reply, session} = Router.route(request("TEARDOWN", "rtsp://host/stream"), session)
+
+      assert status(reply) == 200
+      assert session.audio == %Audio{}
+    end
+
+    # A sender that skips has nothing held here to throw away, and answering 501 to a
+    # method it expects to succeed would stop the session over nothing.
+    test "the methods that need no work are 200", %{session: session} do
+      for method <- ["FLUSH", "SET_PARAMETER", "GET_PARAMETER"] do
+        {reply, _session} = Router.route(request(method, "rtsp://host/stream"), session)
+
+        assert status(reply) == 200
+      end
+    end
+  end
+
+  describe "answering what it does not know" do
     test "a path it does not serve is 501", %{session: session} do
       {reply, _session} = Router.route(request("GET", "/nonsense"), session)
 
