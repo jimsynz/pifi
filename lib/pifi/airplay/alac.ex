@@ -42,12 +42,17 @@ defmodule PiFi.AirPlay.Alac do
   the working buffers of one stream, so making a new one for each frame would throw that
   away and allocate on every packet of the audio. **One session, one decoder.**
 
-  ## The configuration comes from the sender
+  ## Where the configuration comes from
 
-  A sender names the frame length, the bit depth and the rice parameters in its `SETUP`,
-  as twenty-four bytes the specification calls the magic cookie. Nothing here guesses
-  them: a receiver that assumed 4096 frames of sixteen bits would decode noise from a
-  sender that said otherwise, and it would decode it confidently.
+  A file carries twenty-four bytes the specification calls the magic cookie: the frame
+  length, the bit depth and the rice parameters. `describe/1` reads one and `start/1`
+  refuses a stream whose numbers this cannot decode, because a receiver that assumed
+  4096 frames of sixteen bits would decode noise from a sender that said otherwise, and
+  it would decode it confidently.
+
+  **The realtime path of AirPlay 2 sends no cookie at all.** A sender gives the sample
+  rate and the frames per packet in its `SETUP` and then sends ALAC, and a receiver is
+  expected to already know the rest. `config/1` is that knowledge written down.
 
   ## What it does with a frame it cannot read
 
@@ -62,6 +67,16 @@ defmodule PiFi.AirPlay.Alac do
   @config_bytes 24
   @max_frame_length 4096
   @max_channels 2
+
+  # The rice parameters of the realtime stream, and the frame length it uses. A sender
+  # sends none of these: `pb`, `mb` and `kb` are what its encoder used, and Shairport
+  # Sync hardcodes the same three. They are also exactly what `ffmpeg` writes into the
+  # cookie of a file it encodes, which is how this was confirmed rather than assumed.
+  @pb 40
+  @mb 10
+  @kb 14
+  @max_run 255
+  @realtime_frame_length 352
 
   @typedoc "A decoder for one stream. It is a resource of the NIF and not a process."
   @opaque t :: reference()
@@ -97,6 +112,33 @@ defmodule PiFi.AirPlay.Alac do
   end
 
   def describe(_config), do: {:error, :bad_config}
+
+  @doc """
+  Build the twenty-four byte configuration, for a stream whose sender sent none.
+
+  **The realtime path of AirPlay 2 sends no cookie at all.** A sender names `sr` and
+  `spf` in its `SETUP` and then sends ALAC, and a receiver is expected to already know
+  the rest. Shairport Sync hardcodes the same numbers, and they are not arbitrary: `pb`,
+  `mb` and `kb` are the rice parameters the encoder used, so a decoder that guessed them
+  differently would produce noise rather than an error.
+
+  The defaults are what that realtime stream carries.
+
+      iex> PiFi.AirPlay.Alac.config() |> PiFi.AirPlay.Alac.describe()
+      {:ok, %{frame_length: 352, bit_depth: 16, channels: 2, sample_rate: 44100}}
+
+  A sender that asked for something else is taken at its word.
+
+      iex> PiFi.AirPlay.Alac.config(frame_length: 4096, sample_rate: 48_000)
+      ...> |> PiFi.AirPlay.Alac.describe()
+      {:ok, %{frame_length: 4096, bit_depth: 16, channels: 2, sample_rate: 48000}}
+  """
+  @spec config(keyword()) :: binary()
+  def config(options \\ []) do
+    <<Keyword.get(options, :frame_length, @realtime_frame_length)::32, 0,
+      Keyword.get(options, :bit_depth, 16), @pb, @mb, @kb, Keyword.get(options, :channels, 2)::8,
+      @max_run::16, 0::32, 0::32, Keyword.get(options, :sample_rate, 44_100)::32>>
+  end
 
   @doc """
   A decoder for one stream, from the configuration its sender gave.
