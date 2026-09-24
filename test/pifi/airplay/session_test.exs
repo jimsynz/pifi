@@ -142,28 +142,23 @@ defmodule PiFi.AirPlay.SessionTest do
   end
 
   describe "closing" do
-    test "gives every port back" do
-      assert {:ok, event_reply, session} = Session.setup(Session.new(), first())
-      assert {:ok, reply, session} = Session.setup(session, second())
+    # **Each socket is asked, not its port number.** Binding a number again is a race
+    # against every other socket in the suite, because the operating system may hand that
+    # ephemeral number to one of them in between. `Port.info/1` answers `nil` for a
+    # socket that is closed.
+    test "gives every socket back" do
+      assert {:ok, _event_reply, session} = Session.setup(Session.new(), first())
+      assert {:ok, _reply, session} = Session.setup(session, second())
 
-      [%{"dataPort" => data, "controlPort" => control}] = reply["streams"]
-      event = event_reply["eventPort"]
       audio = session.audio
+      sockets = [session.event, session.control, :sys.get_state(audio).socket]
+
+      for socket <- sockets, do: assert(Port.info(socket))
 
       assert Session.close(session) == Session.new()
 
       refute Process.alive?(audio)
-
-      # Binding each again is the only honest proof they were given back.
-      for {port, open} <- [
-            {event, &:gen_tcp.listen/2},
-            {data, &:gen_udp.open/2},
-            {control, &:gen_udp.open/2}
-          ] do
-        assert {:ok, reopened} = open.(port, [:binary, reuseaddr: true])
-
-        :erlang.port_close(reopened)
-      end
+      for socket <- sockets, do: refute(Port.info(socket))
     end
 
     # **Closing the listener is not enough.** A sender has already connected to the event

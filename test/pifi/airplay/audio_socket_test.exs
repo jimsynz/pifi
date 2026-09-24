@@ -262,16 +262,21 @@ defmodule PiFi.AirPlay.AudioSocketTest do
   end
 
   describe "a session that ends" do
-    test "gives the port back" do
-      %{receiver: receiver, port: port} = listening()
+    # **The socket itself is asked, not the port number.** Binding the number again
+    # looked like the honest proof and is a race: the operating system is free to hand
+    # that ephemeral number to any other socket in the meantime, and this suite opens a
+    # great many. `Port.info/1` answers `nil` for a socket that is closed and nothing
+    # else can make it lie.
+    test "gives the socket back" do
+      %{receiver: receiver} = listening()
+      socket = :sys.get_state(receiver).socket
+
+      assert Port.info(socket)
 
       stop_supervised!(AudioSocket)
+
       refute Process.alive?(receiver)
-
-      # Binding it again is the only honest proof the socket was closed.
-      assert {:ok, reopened} = :gen_udp.open(port, [:binary])
-
-      :gen_udp.close(reopened)
+      refute Port.info(socket)
     end
   end
 

@@ -16,9 +16,15 @@ defmodule PiFi.AirPlay.MonitorTest do
   alias PiFi.Source
 
   setup do
-    # **One monitor for the whole node**, so a session another test started is still the
-    # current one here.
+    # **One monitor and one listener for the whole node**, so whatever another test left
+    # behind is still here. The setup establishes what each test assumes rather than
+    # trusting the previous one's `on_exit` to have finished: a test that refutes the
+    # listener is running fails if it was already running when it started, and that is
+    # how it failed in CI.
     if socket = Monitor.socket(), do: Monitor.stopped(socket)
+
+    Server.enable(false)
+    assert eventually(fn -> not Server.running?() end)
 
     on_exit(fn ->
       PiFi.Player.stop()
