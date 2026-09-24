@@ -49,6 +49,10 @@ defmodule PiFi.MixProject do
       aliases: aliases(),
       app: @app,
       archives: [nerves_bootstrap: "~> 1.17"],
+      # **The only native code this project builds is the ALAC decoder.** Bundlex
+      # already cross-compiles the Membrane NIFs for this target, so it is the
+      # toolchain the project has rather than a new one. See `bundlex.exs`.
+      compilers: [:bundlex] ++ Mix.compilers(),
       consolidate_protocols: Mix.env() != :dev,
       deps: deps(),
       elixir: "~> 1.20",
@@ -150,6 +154,9 @@ defmodule PiFi.MixProject do
        override: true},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
+      # It builds `c_src/pifi/alac`, which is the one piece of native code here. There is no
+      # ALAC decoder on Hex and AirPlay sends ALAC. See `bundlex.exs`.
+      {:bundlex, "~> 1.5"},
       # AirPlay speaks RTSP and not HTTP, so the receiver needs the acceptor pool
       # under Bandit rather than Bandit itself. See `PiFi.AirPlay.Server`.
       {:thousand_island, "~> 1.5"},
@@ -334,6 +341,7 @@ defmodule PiFi.MixProject do
         &Nerves.Release.init/1,
         &stamp_environment/1,
         &prune_foreign_precompiled/1,
+        &drop_native_objects/1,
         :assemble
       ],
       strip_beams: Mix.env() == :prod or [keep: ["Docs"]]
@@ -478,6 +486,22 @@ defmodule PiFi.MixProject do
     end
 
     prune_foreign_rustler(release)
+  end
+
+  # Bundlex leaves the object files it linked the NIF from in `priv`, beside the library,
+  # and everything in `priv` goes into the firmware. Nothing reads them after the link.
+  #
+  # Only this application's own. `_build/<target>/lib/<dep>/priv` is a symbolic link into
+  # `deps` for every dependency that builds a native, so the same wildcard across all of
+  # them reaches outside this build and makes the next one for another target rebuild
+  # what it deleted. `prune_foreign_precompiled/1` above records what that cost.
+  defp drop_native_objects(release) do
+    [Mix.Project.build_path(), "lib", "#{@app}", "priv", "bundlex", "*", "*_obj"]
+    |> Path.join()
+    |> Path.wildcard()
+    |> Enum.each(&File.rm_rf!/1)
+
+    release
   end
 
   # **`rustler_precompiled` shares one directory between targets, in the way that

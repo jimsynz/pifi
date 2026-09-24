@@ -45,3 +45,7 @@ test*.db*
 # `PiFi.Player.Download` writes an episode here while it reads it, and it moves
 # the file into the cache at the end. A target holds this at `/root/partial`.
 /partial/
+
+# Bundlex compiles the ALAC NIF into the project's own `priv`, and it writes one
+# directory for each target, so a host build and a firmware build both land here.
+/priv/bundlex/
