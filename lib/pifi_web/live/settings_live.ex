@@ -63,6 +63,7 @@ defmodule PiFiWeb.SettingsLive do
   alias PiFi.Device
   alias PiFi.Device.Identity
   alias PiFi.Device.Timezone
+  alias PiFi.Device.Wifi
   alias PiFi.Event
   alias PiFi.Event.Device, as: Events
   alias PiFi.Hardware
@@ -76,6 +77,11 @@ defmodule PiFiWeb.SettingsLive do
   # "Look for devices" rather than claiming to still be looking. Generous, because a
   # board found a headset at twenty-five seconds.
   @bluetooth_scan :timer.seconds(30)
+
+  # **An adapter reports a different subset of the neighbourhood on each sweep**, so the
+  # list fills in over several of them rather than arriving complete. This asks again
+  # while a person is choosing, and `VintageNet` suggests about this interval.
+  @wifi_scan :timer.seconds(8)
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
@@ -119,6 +125,22 @@ defmodule PiFiWeb.SettingsLive do
     {:noreply, push_navigate(socket, to: ~p"/settings")}
   end
 
+  # **Opening the page is the ask.** A person came here to see what is nearby, and making
+  # them press a button first to find out is a list that is empty for no reason.
+  @impl Phoenix.LiveView
+  def handle_params(_params, _uri, %{assigns: %{live_action: :network}} = socket) do
+    socket = title(socket)
+
+    if connected?(socket) and socket.assigns.wifi? and not socket.assigns.wifi_scanning? do
+      Wifi.scan()
+      Process.send_after(self(), :scan_wifi, @wifi_scan)
+
+      {:noreply, assign(socket, :wifi_scanning?, true)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl Phoenix.LiveView
   def handle_params(_params, _uri, socket), do: {:noreply, title(socket)}
 
@@ -148,6 +170,26 @@ defmodule PiFiWeb.SettingsLive do
     socket = socket |> assign(:bluetooth_busy, nil) |> refresh()
 
     {:noreply, bluetooth_said(socket, outcome, result)}
+  end
+
+  # **Only while a person is looking at the page.** A scan wakes the radio, and one every
+  # eight seconds forever would cost a portable device its cell for a list nobody is
+  # reading.
+  def handle_info(:scan_wifi, socket) do
+    if socket.assigns.live_action == :network and socket.assigns.wifi? do
+      Wifi.scan()
+      Process.send_after(self(), :scan_wifi, @wifi_scan)
+
+      {:noreply, refresh(socket)}
+    else
+      {:noreply, assign(socket, :wifi_scanning?, false)}
+    end
+  end
+
+  def handle_info({:wifi_done, outcome, result}, socket) do
+    socket = socket |> assign(:wifi_busy, nil) |> assign(:wifi_joining, nil) |> refresh()
+
+    {:noreply, wifi_said(socket, outcome, result)}
   end
 
   @impl Phoenix.LiveView
@@ -266,6 +308,31 @@ defmodule PiFiWeb.SettingsLive do
   @impl Phoenix.LiveView
   def handle_event("forget_bluetooth", %{"path" => path}, socket) do
     {:noreply, bluetooth_task(socket, path, :forgotten, fn -> Bluetooth.Devices.forget(path) end)}
+  end
+
+  # An open network needs nothing typed, so asking for a passphrase would be a form with
+  # one disabled field in it.
+  @impl Phoenix.LiveView
+  def handle_event("choose_wifi", %{"ssid" => ssid}, socket) do
+    case Enum.find(socket.assigns.wifi_networks, &(&1.ssid == ssid)) do
+      %{security: :open} -> {:noreply, join_wifi(socket, ssid, nil)}
+      _secured -> {:noreply, assign(socket, :wifi_joining, ssid)}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("cancel_wifi", _params, socket) do
+    {:noreply, assign(socket, :wifi_joining, nil)}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("join_wifi", %{"ssid" => ssid, "passphrase" => passphrase}, socket) do
+    {:noreply, join_wifi(socket, ssid, passphrase)}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("forget_wifi", %{"ssid" => ssid}, socket) do
+    {:noreply, wifi_task(socket, ssid, :forgotten, fn -> Wifi.forget(ssid) end)}
   end
 
   @impl Phoenix.LiveView
@@ -1181,6 +1248,106 @@ defmodule PiFiWeb.SettingsLive do
           </span>
         </li>
       </ul>
+
+      <div :if={@wifi?} id="wifi" class="mt-6">
+        <h3 class="text-xs uppercase tracking-widest text-ink-faint">Wi-Fi networks</h3>
+
+        <p class="mt-2 text-sm text-ink-dim">
+          PiFi remembers every network you join here, and picks whichever one it can see.
+        </p>
+
+        <p
+          :if={@wifi_scanning? and @wifi_networks == []}
+          id="wifi-looking"
+          class="mt-3 text-sm text-ink-dim"
+        >
+          Looking for networks. This takes a few seconds.
+        </p>
+
+        <p
+          :if={not @wifi_scanning? and @wifi_networks == []}
+          id="no-wifi-networks"
+          class="mt-3 text-sm text-ink-dim"
+        >
+          No networks nearby.
+        </p>
+
+        <ul :if={@wifi_networks != []} class="mt-3 divide-y divide-edge">
+          <li
+            :for={network <- @wifi_networks}
+            id={"wifi-#{wifi_slug(network.ssid)}"}
+            class="py-2 first:pt-0 last:pb-0"
+          >
+            <div class="flex items-center gap-3">
+              <.icon
+                name={wifi_strength(network.signal_percent)}
+                class={[
+                  "size-5 shrink-0",
+                  if(network.known?, do: "text-accent", else: "text-ink-faint")
+                ]}
+              />
+
+              <span class="min-w-0 grow">
+                <span class="block truncate text-ink">{network.ssid}</span>
+                <span class="block truncate text-xs text-ink-faint">
+                  {wifi_state(network, @wifi_busy)}
+                </span>
+              </span>
+
+              <button
+                :if={not network.known? and Wifi.joinable?(network.security)}
+                type="button"
+                id={"join-#{wifi_slug(network.ssid)}"}
+                phx-click="choose_wifi"
+                phx-value-ssid={network.ssid}
+                disabled={@wifi_busy != nil}
+                class="control shrink-0 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                Join
+              </button>
+
+              <button
+                :if={network.known?}
+                type="button"
+                id={"forget-wifi-#{wifi_slug(network.ssid)}"}
+                phx-click="forget_wifi"
+                phx-value-ssid={network.ssid}
+                disabled={@wifi_busy != nil}
+                data-confirm={"PiFi will forget #{network.ssid}. You can join it again."}
+                class="control shrink-0 rounded-lg px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                Forget
+              </button>
+            </div>
+
+            <form
+              :if={@wifi_joining == network.ssid}
+              id={"join-form-#{wifi_slug(network.ssid)}"}
+              phx-submit="join_wifi"
+              class="mt-2 flex gap-2"
+            >
+              <input type="hidden" name="ssid" value={network.ssid} />
+              <input
+                type="password"
+                name="passphrase"
+                autocomplete="off"
+                placeholder="Password"
+                class="control min-w-0 grow rounded-lg px-3 py-1.5 text-sm"
+              />
+              <button type="submit" class="control shrink-0 rounded-lg px-3 py-1.5 text-xs">
+                Join
+              </button>
+              <button
+                type="button"
+                phx-click="cancel_wifi"
+                class="control shrink-0 rounded-lg px-3 py-1.5 text-xs"
+              >
+                Cancel
+              </button>
+            </form>
+          </li>
+        </ul>
+      </div>
     </.section>
     """
   end
@@ -1765,6 +1932,77 @@ defmodule PiFiWeb.SettingsLive do
     put_flash(socket, :error, "Could not forget that one.")
   end
 
+  defp join_wifi(socket, ssid, passphrase) do
+    wifi_task(socket, ssid, :joined, fn -> Wifi.join(ssid, passphrase) end)
+  end
+
+  # **Associating takes seconds and can take longer**, and the page is served over the
+  # interface being reconfigured, so this cannot hold the LiveView process while it
+  # happens. The same shape as `bluetooth_task/4`, and for the same reason.
+  defp wifi_task(socket, ssid, outcome, work) do
+    parent = self()
+
+    Task.start(fn ->
+      result =
+        try do
+          work.()
+        rescue
+          exception -> {:error, exception}
+        catch
+          :exit, reason -> {:error, reason}
+        end
+
+      send(parent, {:wifi_done, outcome, result})
+    end)
+
+    assign(socket, :wifi_busy, ssid)
+  end
+
+  # **The device may be answering on the network it just left.** Saying that plainly is
+  # better than a page that looks like nothing happened while the browser reconnects.
+  defp wifi_said(socket, :joined, :ok) do
+    put_flash(socket, :info, "Joining. This page may take a moment to come back.")
+  end
+
+  defp wifi_said(socket, :joined, {:error, :passphrase_too_short}) do
+    put_flash(
+      socket,
+      :error,
+      "That password is too short. Wi-Fi passwords are 8 characters or more."
+    )
+  end
+
+  defp wifi_said(socket, :joined, {:error, {:unsupported_security, :enterprise}}) do
+    put_flash(socket, :error, "PiFi can't join a network that asks for a username.")
+  end
+
+  defp wifi_said(socket, :joined, {:error, _reason}) do
+    put_flash(socket, :error, "Could not join that network. Check the password and try again.")
+  end
+
+  defp wifi_said(socket, :forgotten, :ok), do: put_flash(socket, :info, "Forgotten.")
+
+  defp wifi_said(socket, :forgotten, {:error, _reason}) do
+    put_flash(socket, :error, "Could not forget that one.")
+  end
+
+  # An SSID holds anything a person can type, spaces and quotes included, so it is no
+  # more usable in an `id` than a D-Bus path is.
+  defp wifi_slug(ssid), do: Base.url_encode64(ssid, padding: false)
+
+  defp wifi_strength(percent) when percent >= 70, do: "ph-wifi-high"
+  defp wifi_strength(percent) when percent >= 40, do: "ph-wifi-medium"
+  defp wifi_strength(_percent), do: "ph-wifi-low"
+
+  defp wifi_state(%{ssid: ssid}, busy) when ssid == busy, do: "Working…"
+  defp wifi_state(%{known?: true, security: :open}, _busy), do: "Saved, open"
+  defp wifi_state(%{known?: true}, _busy), do: "Saved"
+  defp wifi_state(%{security: :open}, _busy), do: "Open"
+  defp wifi_state(%{security: :enterprise}, _busy), do: "Needs a username"
+  defp wifi_state(%{security: :wep}, _busy), do: "Uses WEP, which PiFi can't join"
+  defp wifi_state(%{security: :wpa3}, _busy), do: "WPA3"
+  defp wifi_state(_network, _busy), do: "Password needed"
+
   defp bluetooth_summary(false, _devices), do: "Off"
 
   defp bluetooth_summary(true, devices) do
@@ -1807,6 +2045,11 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:profile, Hardware.chosen())
     |> assign(:output, PiFi.Playback.output!())
     |> assign(:interfaces, Device.network!())
+    |> assign(:wifi?, Wifi.available?())
+    |> assign(:wifi_networks, Wifi.seen())
+    |> assign_new(:wifi_scanning?, fn -> false end)
+    |> assign_new(:wifi_busy, fn -> nil end)
+    |> assign_new(:wifi_joining, fn -> nil end)
     |> assign(:storage, Device.storage!())
     |> assign(:upgrade, Device.upgrade!())
     |> assign(:home_assistant?, HomeAssistant.enabled?())

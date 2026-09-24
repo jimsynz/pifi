@@ -26,6 +26,7 @@ defmodule PiFiWeb.SettingsLiveTest do
   alias PiFi.Test.Panel
   alias PiFi.Test.Stations
   alias PiFi.Test.TwoCardOutput
+  alias PiFi.Test.Wifi
 
   # One flat picture of 2 by 2 pixels, and a whole one. `PiFi.Artwork.put/1` runs
   # `vipsthumbnail` over the bytes, and a header alone does not answer that.
@@ -1560,6 +1561,200 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings")
 
       assert has_element?(view, "#bluetooth-row") == PiFi.Bluetooth.adapter?()
+    end
+  end
+
+  describe "the Wi-Fi networks on the network page" do
+    setup do
+      Wifi.use_it(
+        seen: [
+          Wifi.network("Home", signal_percent: 90),
+          Wifi.network("Neighbour", signal_percent: 30),
+          Wifi.network("Cafe", security: :open, signal_percent: 60)
+        ]
+      )
+    end
+
+    test "lists what is nearby, strongest first", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      assert has_element?(view, "#wifi")
+      assert has_element?(view, "#wifi-#{slug("Home")}")
+      assert has_element?(view, "#wifi-#{slug("Cafe")}")
+      assert has_element?(view, "#wifi-#{slug("Neighbour")}")
+
+      html = render(view)
+
+      places =
+        Enum.map(
+          ["Home", "Cafe", "Neighbour"],
+          fn ssid -> :binary.match(html, "wifi-#{slug(ssid)}") |> elem(0) end
+        )
+
+      assert places == Enum.sort(places)
+    end
+
+    # **Opening the page is the ask.** A person came to see what is nearby.
+    test "starts looking without being told to", %{conn: conn} do
+      {:ok, _view, _html} = live(conn, ~p"/settings/network")
+
+      assert Wifi.scans() >= 1
+    end
+
+    test "a network that needs a password asks for one before joining", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      refute has_element?(view, "#join-form-#{slug("Home")}")
+
+      view |> element("#join-#{slug("Home")}") |> render_click()
+
+      assert has_element?(view, "#join-form-#{slug("Home")}")
+      assert Wifi.joins() == []
+    end
+
+    test "submitting the password joins with it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      view |> element("#join-#{slug("Home")}") |> render_click()
+
+      view
+      |> form("#join-form-#{slug("Home")}", %{"passphrase" => "a good password"})
+      |> render_submit()
+
+      assert eventually(fn -> Wifi.joins() == [{"Home", "a good password"}] end)
+    end
+
+    # **An open network has nothing to type**, so a password box would be a field that
+    # does nothing.
+    test "an open network joins straight away", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      view |> element("#join-#{slug("Cafe")}") |> render_click()
+
+      refute has_element?(view, "#join-form-#{slug("Cafe")}")
+      assert eventually(fn -> Wifi.joins() == [{"Cafe", nil}] end)
+    end
+
+    test "cancelling puts the password box away again", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      view |> element("#join-#{slug("Home")}") |> render_click()
+      view |> element("#join-form-#{slug("Home")} button[type=button]") |> render_click()
+
+      refute has_element?(view, "#join-form-#{slug("Home")}")
+      assert Wifi.joins() == []
+    end
+
+    test "says the device may not answer for a moment", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      view |> element("#join-#{slug("Cafe")}") |> render_click()
+
+      assert eventually(fn -> render(view) =~ "may take a moment to come back" end)
+    end
+
+    test "a password the router would refuse is refused here", %{conn: conn} do
+      Wifi.use_it(
+        seen: [Wifi.network("Home")],
+        join_answer: {:error, :passphrase_too_short}
+      )
+
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      view |> element("#join-#{slug("Home")}") |> render_click()
+      view |> form("#join-form-#{slug("Home")}", %{"passphrase" => "short"}) |> render_submit()
+
+      assert eventually(fn -> render(view) =~ "8 characters or more" end)
+    end
+  end
+
+  describe "a network the device already knows" do
+    setup do
+      Wifi.use_it(seen: [Wifi.network("Home")], known: ["Home"])
+    end
+
+    test "offers to forget it rather than to join it", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      assert has_element?(view, "#forget-wifi-#{slug("Home")}")
+      refute has_element?(view, "#join-#{slug("Home")}")
+    end
+
+    test "forgetting takes it off the list", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      view |> element("#forget-wifi-#{slug("Home")}") |> render_click()
+
+      assert eventually(fn -> PiFi.Device.Wifi.known() == [] end)
+    end
+  end
+
+  describe "a network this firmware cannot join" do
+    # It authenticates a person, with a username and often a certificate, and the page
+    # has nowhere to put either. Offering a password box would lead nowhere.
+    test "an enterprise network is listed and not offered", %{conn: conn} do
+      Wifi.use_it(seen: [Wifi.network("Campus", security: :enterprise)])
+
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      assert has_element?(view, "#wifi-#{slug("Campus")}")
+      refute has_element?(view, "#join-#{slug("Campus")}")
+      assert render(view) =~ "Needs a username"
+    end
+
+    test "a WEP network says why", %{conn: conn} do
+      Wifi.use_it(seen: [Wifi.network("Ancient", security: :wep)])
+
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      refute has_element?(view, "#join-#{slug("Ancient")}")
+      assert render(view) =~ "WEP"
+    end
+  end
+
+  describe "a device with no Wi-Fi" do
+    # The same image runs on a board with a radio and on one without, and on a laptop
+    # running the tests. None of them may see a section about a radio that is not there.
+    test "draws no Wi-Fi section at all", %{conn: conn} do
+      Wifi.use_it(available?: false)
+
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      refute has_element?(view, "#wifi")
+    end
+
+    test "and asks the adapter for nothing", %{conn: conn} do
+      Wifi.use_it(available?: false)
+
+      {:ok, _view, _html} = live(conn, ~p"/settings/network")
+
+      assert Wifi.scans() == 0
+    end
+  end
+
+  describe "a neighbourhood with nothing in it" do
+    test "says it is still looking", %{conn: conn} do
+      Wifi.use_it(seen: [])
+
+      {:ok, view, _html} = live(conn, ~p"/settings/network")
+
+      assert has_element?(view, "#wifi-looking")
+      refute has_element?(view, "#no-wifi-networks")
+    end
+  end
+
+  defp slug(ssid), do: Base.url_encode64(ssid, padding: false)
+
+  # The join and the forget run in a task, so the page has answered before the work has.
+  defp eventually(check, attempts \\ 50)
+  defp eventually(_check, 0), do: false
+
+  defp eventually(check, attempts) do
+    if check.() do
+      true
+    else
+      Process.sleep(20)
+      eventually(check, attempts - 1)
     end
   end
 end
