@@ -24,7 +24,7 @@ defmodule PiFi.Radio.Fill do
 
   ## Why it writes in bulk
 
-  Section 17 of the specification measures an Ash write at 11.8 ms, against 2.21 ms
+  A measurement gave an Ash write at 11.8 ms, against 2.21 ms
   for the same insert in plain SQL. A country of 500 stations is 500 items and about
   3000 links, so a write for each row would take a minute of the card.
   `Ash.bulk_create/4` writes one statement for each batch.

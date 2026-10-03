@@ -19,7 +19,7 @@ defmodule PiFiWeb.Telemetry do
 
   Each one carries the source as a tag, so a station and an episode are separate
   lines. `PiFi.Source.title/0` gives the name, because a module name reads as
-  `Elixir.PiFi.Source.Radio` in the table.
+  `Elixir.PiFi.Source.InternetRadio` in the table.
 
   **The dashboard runs in development alone.** `PiFiWeb.Router` mounts it behind
   `dev_routes`, and a firmware of this device is a development build, so the board
@@ -116,7 +116,7 @@ defmodule PiFiWeb.Telemetry do
     ]
   end
 
-  # A module name reads as `Elixir.PiFi.Source.Radio` in a table, and a source
+  # A module name reads as `Elixir.PiFi.Source.InternetRadio` in a table, and a source
   # already says what it is called. A player that names no source gives `nil`, which
   # happens for a track that stops before a source is chosen.
   defp source_name(%{source: nil} = metadata), do: %{metadata | source: "none"}

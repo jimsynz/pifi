@@ -216,7 +216,7 @@ defmodule PiFi.Playback.Item do
       description "Every item."
 
       # A person moves through a list with a knob, and a page shows part of one. A
-      # keyset also holds the place of the track that plays. See `PiFi.Player.Queue`.
+      # keyset also holds the place of the track that plays. See `PiFi.Playback.Queue`.
       pagination keyset?: true, required?: false
     end
 

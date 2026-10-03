@@ -129,9 +129,7 @@ defmodule PiFi.Output.Alsa do
   @doc """
   The name that ALSA takes for one card.
 
-  `sink_spec/1` wraps this in a Membrane sink, and a program that is not Membrane
-  needs the name on its own: `PiFi.Spotify` hands it to librespot, which opens ALSA
-  itself and knows nothing about the pipeline of this firmware.
+  `sink_spec/1` wraps this in a Membrane sink.
 
   **It carries the `rate48` of a USB card**, which this board needs and which
   `plug/1` explains, so a program that takes this name plays at the rate that the

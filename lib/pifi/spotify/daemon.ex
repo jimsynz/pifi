@@ -156,11 +156,6 @@ defmodule PiFi.Spotify.Daemon do
     :ok
   end
 
-  # **librespot still plays to the sound card, and the loopback is not wired up yet.**
-  # The capture element exists and nothing starts it, so a cast routed into the loopback
-  # would go nowhere and a person would get silence where they get music today. The
-  # device moves to `PiFi.Spotify.Loopback.playback_device/0` in the change that teaches
-  # `PiFi.Player` to carry a stream with no item, and not before.
   defp open(device) do
     args = argv(event_script(), device)
 

@@ -29,14 +29,6 @@ defmodule PiFi.AirPlay.Setup do
   `shk` becomes the ChaCha20-Poly1305 key that every audio packet is decrypted with, so
   a key of any other length is refused here. Shairport Sync learned this one the same
   way: a short key read past its end on every packet.
-
-  ## This is not routed yet
-
-  `PiFi.AirPlay.Router` still answers `501` to `SETUP`. **That is deliberate** — a
-  receiver that answered `200` would leave a telephone showing it as playing while
-  nothing came out, which is worse than failing the handshake. This is the reading and
-  the answering; the sockets, the decoder and the player come after it, and the route
-  turns on when there is audio at the end of it.
   """
 
   alias PiFi.AirPlay.BinaryPlist

@@ -108,7 +108,7 @@ defmodule PiFi.MixProject do
       # Membrane holds no decoder for Vorbis or for FLAC, so
       # `PiFi.Player.PortDecoder` drives a program instead. NBPR gives the
       # program for the target, and it ships a binary and no header file, which is
-      # all that a port needs. See section 6.1 of the specification.
+      # all that a port needs.
       #
       # These are target only. A host holds its own `flac` and `oggdec`, and that
       # is how the pipeline was read end to end before the packages existed.
@@ -181,11 +181,11 @@ defmodule PiFi.MixProject do
       # of it, which matters because that one holds native code.
       {:espex, "~> 0.9"},
       {:homex, github: "jimsynz/homex", branch: "feat/media-player-entity"},
-      # **`homex` names `muontrap ~> 2.0` and this firmware is on 1.8**, because
-      # `nerves_time`, `vintage_net` and `nbpr` all name `~> 1.0`. The override is safe
-      # because nothing here reaches the code that needs it: `homex` uses `muontrap` for
-      # its `:system` mDNS responder alone, and `PiFi.HomeAssistant` names `:mdns_lite`,
-      # which is the responder that a Nerves device wants in any case.
+      # **`nerves_time`, `vintage_net` and `nbpr` all name `muontrap ~> 1.0`, and this
+      # forces 2.0 on them.** `homex` names `~> 2.0`. Version 2 breaks only the cgroup
+      # options (cgroup v1 is gone and `:cgroup_controllers`/`:cgroup_sets` became one
+      # `:cgroup` map), and neither this firmware nor any of those three passes one.
+      # Remove the override when all three accept version 2.
       {:muontrap, "~> 2.0", override: true},
       {:circuits_spi, "~> 2.1"},
       # `membrane_core` needs `ratio`, and `ratio` names

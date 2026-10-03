@@ -55,8 +55,8 @@ defmodule PiFi.Plex.Fill do
 
   ## Why it writes in bulk
 
-  A library has tens of thousands of tracks, and section 17 of the specification
-  measures an Ash write at 11.8 ms against 2.21 ms for the same insert in plain SQL.
+  A library has tens of thousands of tracks, and a measurement gave an Ash write at
+  11.8 ms against 2.21 ms for the same insert in plain SQL.
   A write for each row would take an hour of the card. `Ash.bulk_create/4` writes one
   statement for each batch, and the sync gives it one page at a time.
   """

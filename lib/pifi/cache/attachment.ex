@@ -19,7 +19,8 @@ defmodule PiFi.Cache.Attachment do
   that key and removes the join rows with the entry.
 
   **A record that goes therefore leaves its rows behind.** A host that removes itself
-  must remove them, because only the host knows its own type. No host does that yet.
+  must remove them, because only the host knows its own type. Each host carries
+  `PiFi.Cache.Attachment.Changes.DetachRecord` on its destroy action for that.
   """
 
   use Ash.Resource,

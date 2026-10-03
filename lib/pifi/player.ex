@@ -383,8 +383,7 @@ defmodule PiFi.Player do
 
   # The settings hold the last station and the standby state, so both survive a
   # restart. The device selects that station and plays nothing: a stereo that
-  # starts to play by itself after a power cut is a surprise, and section 9 asks
-  # for silence at the first start.
+  # starts to play by itself after a power cut is a surprise.
   # A person waits for no pipeline. `handle_call(:stop, …)` answers as soon as the
   # sound stops, and this takes the pipeline down before the process reads another
   # message. A `play` that follows therefore still finds the sound card free, which

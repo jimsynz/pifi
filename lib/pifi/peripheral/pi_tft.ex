@@ -18,13 +18,10 @@ defmodule PiFi.Peripheral.PiTft do
   bytes back. A display server is therefore not necessary, and the firmware ships
   none.
 
-  ## What it does not do yet
+  ## What it does not do
 
-  It takes the `:player` topic only. The `:view` and `:hint` topics need more of
-  `PiFi.DeviceUi` than is written, so this screen shows the now playing view and
-  draws no list. It publishes the four buttons of the board, and it publishes no
-  touch: the STMPE610 owns the panel as well as the light, and reading the panel is
-  the work that comes next.
+  It publishes the four buttons of the board, and it publishes no touch: the STMPE610
+  owns the panel as well as the light, and nothing reads the panel.
 
   ## Standby
 
@@ -53,8 +50,7 @@ defmodule PiFi.Peripheral.PiTft do
   a second draw would queue behind the first and the screen would fall further
   behind for as long as the music plays. This module therefore draws the newest view
   and lets the older one go: the state keeps the view, and a draw uses whatever the
-  view says when it runs. Section 5.5 of the specification allows this, and it says
-  that a slow screen may drop what it cannot draw in time.
+  view says when it runs. A slow screen may drop what it can't draw in time.
   """
 
   @behaviour PiFi.Peripheral

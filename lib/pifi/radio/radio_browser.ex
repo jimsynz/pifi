@@ -36,7 +36,8 @@ defmodule PiFi.Radio.RadioBrowser do
   end
 
   @doc """
-  Turn one station of the service into the attributes of `PiFi.Radio.Station`.
+  Turn one station of the service into the attributes that `PiFi.Radio.Fill.stations/1`
+  writes.
 
   `url_resolved` comes first, because the service follows each redirect for us and
   gives the address that plays. `url` is the address that a person gave, and it
