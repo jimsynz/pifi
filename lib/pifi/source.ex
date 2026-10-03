@@ -102,13 +102,20 @@ defmodule PiFi.Source do
   `name` names the control to `run_settings_action/1`. `icon` works in the way that
   `c:icon/0` does, and each user interface draws that name itself.
 
+  `code` is a code that a person must type somewhere else before they press the
+  control, and `link` is the page where they type it. The settings page draws the code
+  large and the link as a button that opens in a new tab, because a code inside a
+  flash message was gone by the time a person had typed the address and come back.
+
   See `c:settings_actions/0`.
   """
   @type action :: %{
-          name: String.t(),
-          title: String.t(),
-          description: String.t() | nil,
-          icon: atom()
+          required(:name) => String.t(),
+          required(:title) => String.t(),
+          required(:description) => String.t() | nil,
+          required(:icon) => atom(),
+          optional(:code) => String.t(),
+          optional(:link) => %{href: String.t(), title: String.t()}
         }
 
   @typedoc """

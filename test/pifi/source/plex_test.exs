@@ -252,7 +252,7 @@ defmodule PiFi.Source.PlexTest do
 
       [control] = Source.Plex.settings_actions() |> Enum.filter(&(&1.name == "finish_player"))
 
-      assert control.description =~ "WXYZ"
+      assert control.code == "WXYZ"
     end
 
     # **A code that ran out of time must go.** The control of a person reads the code

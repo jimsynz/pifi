@@ -370,10 +370,14 @@ defmodule PiFi.Source.Plex do
     %{
       name: "finish_link",
       title: "Finish linking",
-      description: "Press this after you type the code at plex.tv/link.",
-      icon: :refresh
+      description: "Type this code at plex.tv/link, and then press Finish linking.",
+      icon: :refresh,
+      code: Server.pending_code(),
+      link: plex_link()
     }
   end
+
+  defp plex_link, do: %{href: "https://plex.tv/link", title: "Open plex.tv/link"}
 
   defp choose_server do
     %{
@@ -437,8 +441,10 @@ defmodule PiFi.Source.Plex do
     %{
       name: "finish_player",
       title: "Finish the player",
-      description: "Type the code #{Server.player_code()} at plex.tv/link, and press this.",
-      icon: :refresh
+      description: "Type this code at plex.tv/link, and then press Finish the player.",
+      icon: :refresh,
+      code: Server.player_code(),
+      link: plex_link()
     }
   end
 

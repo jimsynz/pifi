@@ -893,6 +893,25 @@ defmodule PiFiWeb.SettingsLive do
             id={"source-action-#{action.name}"}
             phx-click="run_source_action"
             phx-value-name={action.name}
+          <div
+            :if={action[:code]}
+            id={"source-action-#{action.name}-code"}
+            class="mb-3 flex flex-wrap items-center gap-4 border-2 border-edge p-4"
+          >
+            <span class="select-all font-mono text-4xl font-bold tracking-[0.3em] text-accent">
+              {action.code}
+            </span>
+            <a
+              :if={action[:link]}
+              href={action.link.href}
+              target="_blank"
+              rel="noopener"
+              class="control flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
+            >
+              {action.link.title}
+              <.icon name="ph-arrow-square-out" class="size-4" />
+            </a>
+          </div>
             class="control flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
           >
             <.source_icon name={action.icon} class="size-4" />

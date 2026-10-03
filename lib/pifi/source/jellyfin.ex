@@ -347,7 +347,8 @@ defmodule PiFi.Source.Jellyfin do
       name: "finish_link",
       title: "Finish linking",
       description: "Press this after you type the code into your client.",
-      icon: :refresh
+      icon: :refresh,
+      code: pending_code()
     }
   end
 

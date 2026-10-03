@@ -1226,6 +1226,29 @@ defmodule PiFiWeb.SettingsLiveTest do
         available: "9.9.9",
         notes: "What changed.",
         checked_at: DateTime.utc_now(),
+  describe "a code to type somewhere else" do
+    # A flash message went away before a person had typed the address and come back.
+    test "it stays on the page beside a link to where it goes", %{conn: conn} do
+      Settings.put!(PiFi.Plex.Server.pin_setting(), "12345")
+      Settings.put!(PiFi.Plex.Server.code_setting(), "ABCD")
+
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/#{Source.slug(Source.Plex)}")
+
+      assert has_element?(view, "#source-action-finish_link-code", "ABCD")
+
+      assert has_element?(
+               view,
+               ~s|#source-action-finish_link-code a[href="https://plex.tv/link"]|
+             )
+    end
+
+    test "a control with no code draws none", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/sources/#{Source.slug(Source.Plex)}")
+
+      refute has_element?(view, "#source-action-link-code")
+    end
+  end
+
         state: :idle,
         percent: 0
       })
