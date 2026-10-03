@@ -142,7 +142,7 @@ defmodule PiFi.MixProject do
       {:nbpr_bluez_alsa, "~> 4.3", organization: "nbpr", targets: @all_targets},
       # Dependencies for all targets
       {:ash, "~> 3.0"},
-      {:ash_oban, "~> 0.8"},
+      {:ash_oban, "~> 0.9"},
       {:ash_sqlite, "~> 0.2"},
       # `PiFi.Cache` models the cache on disk with this. It is not on Hex, and its
       # author says that the API iterates, so this names a reference and pins it in
