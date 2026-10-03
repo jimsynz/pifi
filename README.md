@@ -21,8 +21,16 @@ Internet radio, podcasts, and your own library from Plex or Jellyfin. The web
 interface browses, searches, holds a play queue, saves playlists, and drives
 playback.
 
+You can also cast to it with Spotify Connect or AirPlay, play through a Bluetooth
+speaker or headphones, and control it from Home Assistant. Each of those opens a
+port or starts a radio, so each one is off until you turn it on.
+
+It checks the releases on harton.dev once a day and offers an upgrade on the settings page.
+It never upgrades by itself.
+
 Two screens are supported: the Adafruit PiTFT 2.8" and the Pimoroni Pirate Audio
-240x240. The buttons on both work.
+240x240. The buttons on both work, and the screen shows the charge of a UPS-Lite
+battery when there's one fitted.
 
 Podcast episodes and any album you favourite are downloaded to the card, so they
 play with the network down and pick up exactly where you left off. Skipping
@@ -34,10 +42,10 @@ pipeline — and it works for MP3, AAC and FLAC.
 | | |
 |---|---|
 | Board | Raspberry Pi Zero 2 W, on a custom Nerves system (`pifi_rpi0_2`) |
-| Audio out | USB DAC, or a DAC on the board's pins, via `aplay` |
-| Pipeline | Membrane, with precompiled libmad and fdk-aac decoders |
+| Audio out | USB DAC, a DAC on the board's pins, or a Bluetooth speaker, via `aplay` |
+| Pipeline | Membrane, with precompiled libmad and fdk-aac decoders and an in-tree ALAC one |
 | Streaming | Shoutcast and HLS |
-| Extra binaries | [NBPR](https://github.com/jimsynz/nbpr), for the Ogg Vorbis and FLAC decoders |
+| Extra binaries | [NBPR](https://github.com/jimsynz/nbpr), for FLAC, Vorbis, librespot, BlueZ and libvips |
 | Data | Ash on SQLite, on the writable partition at `/root` |
 | Background work | Oban |
 | Web | Phoenix LiveView |
@@ -46,7 +54,7 @@ pipeline — and it works for MP3, AAC and FLAC.
 Sources, outputs and peripherals are all behaviours. A peripheral owns exactly
 one piece of hardware: it receives typed events about the player and where you
 are in the menus, it owns its own layout, fonts and scrolling, and it publishes
-what you pressed. A screen and a touch panel share that one behaviour.
+what you pressed. A screen and its buttons share that one behaviour.
 
 The point of that is you can add a music service, a different DAC, an SSD1306
 OLED, or a new control without touching the player or the interface.

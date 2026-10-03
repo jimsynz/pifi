@@ -17,26 +17,41 @@ Licence: Apache-2.0.
   it, because the custom system gives 16 MB to the GPU and 16 MB to CMA. A
   measurement on 2026-08-22 gave 202.4 MB available with HE-AAC in play, and the
   BEAM held 84.3 MB. One stream needs 2.3% of the four cores. The memory and the
-  CPU are therefore not tight, and HLS and the artwork cache are still to come.
-- **The USB port holds the DAC.** For this reason the knob uses I2C, not USB.
-- **The card plays at 48000 Hz, and 44100 Hz is rough.** USB audio sends one
+  CPU aren't tight. That measurement predates the HLS support and the artwork cache.
+- **A DAC can be on USB, on the I2S pins, or a Bluetooth speaker.** The USB port
+  usually holds a DAC (the HiFimeDIY one), a Pirate Audio board puts a PCM5102A on the
+  I2S pins, and `PiFi.Bluetooth` makes a paired speaker another ALSA name. The one USB
+  data port is why the knob uses I2C.
+- **A USB card plays at 48000 Hz, because 44100 Hz is rough.** USB audio sends one
   isochronous packet in each 1 ms frame, so 44100 Hz needs 44.1 samples in a packet
   and a controller must alternate the size of them. The dwc2 controller of this board
   handles that badly. A 440 Hz tone straight to `aplay` on 2026-08-24 was rough at
   44100 Hz at two levels, and clean at 24000 Hz and at 48000 Hz. `rate48` of
-  `rootfs_overlay/etc/asound.conf` therefore holds the card at 48000 Hz, and
-  `PiFi.Output.Alsa.sink_spec/1` names it in the place of `plughw`. **Do not tell
-  `aplay` to open the card at the rate of the decoder.** The DAC accepts 44100 Hz, so
-  nothing below that layer will choose to convert. Almost every podcast holds 44100
-  Hz MP3, and both RNZ streams hold 24000 Hz, which is why radio never showed this.
+  `rootfs_overlay/etc/asound.conf` therefore holds a USB card at 48000 Hz, and
+  `PiFi.Output.Alsa.pcm_name/1` names it in the place of `plughw` for a USB card when
+  `:alsa_rate48?` is set (a target build). An I2S card plays 44100 Hz as it arrives.
+  **`aplay` names the real rate of the audio, and `rate48` converts from it.** Naming
+  48000 Hz for 44100 Hz audio plays it 8.8% fast, and opening a USB card through
+  `plughw` at 44100 Hz gives the rough sound, because the DAC accepts that rate and
+  nothing converts. Almost every podcast is 44100 Hz MP3, and both RNZ streams are
+  24000 Hz, which is why radio never showed this.
 - **The Nerves system holds no audio decoder.** It holds `alsa-lib`, `aplay`, and
   `amixer` only. `membrane_alsa_plugin` does not exist. The output sink sends raw
-  samples to `aplay` through an Erlang port.
-- **The decoders come from Membrane, precompiled.**
-  `Membrane.PrecompiledDependencyProvider` gives an `aarch64` Linux build of
-  libmad and of fdk-aac. Each archive holds the headers and the shared library,
-  so Bundlex cross-compiles the NIF and the device gets the library. Do not add
-  ffmpeg or portaudio: they cost 32 MB and 17 MB, and this firmware needs
+  samples to `aplay` through an Erlang port, and `PiFi.Output.APlayPort` keeps that
+  port open across pipelines, so a new track of the same format doesn't pay the
+  second of silence that opening the card costs.
+- **Each decoder comes from a different place.**
+  - MP3 and AAC come from Membrane, precompiled.
+    `Membrane.PrecompiledDependencyProvider` gives an `aarch64` Linux build of libmad
+    and of fdk-aac. Each archive holds the headers and the shared library, so Bundlex
+    cross-compiles the NIF and the device gets the library.
+  - FLAC and Vorbis are programs from NBPR (`nbpr_flac`, `nbpr_vorbis_tools`), and
+    `PiFi.Player.PortDecoder` drives them through a port.
+  - ALAC, for AirPlay, is the one piece of native code in this repository:
+    `c_src/pifi/alac`, built by Bundlex from `bundlex.exs`. There's no ALAC decoder
+    on Hex.
+
+  Do not add ffmpeg or portaudio: they cost 32 MB and 17 MB, and this firmware needs
   neither.
 - **Nerves does not set the Bundlex target variables.** Bundlex needs
   `TARGET_ARCH`, `TARGET_VENDOR`, `TARGET_OS`, and `TARGET_ABI`. Nerves sets only
@@ -47,10 +62,13 @@ Licence: Apache-2.0.
   link to it. A host build therefore leaves an x86 library where a target release
   copies it, and the Nerves scrub step stops. The release step
   `prune_foreign_precompiled/1` in `mix.exs` removes what does not match.
+- **`ash_storage` is pinned to a git ref.** It isn't on Hex and its API still moves,
+  so a new ref needs a read of what changed.
 - **`decimal` is overridden to `~> 3.0`, and the override must stay.**
   `membrane_core` needs `ratio`, and `ratio` names an old `decimal`.
-  `ecto_sqlite3` needs version 3. See section 6.4 of the specification for why
-  the override is safe.
+  `ecto_sqlite3` needs version 3. It's safe because `ratio` only reads the `coef`,
+  `exp` and `sign` fields of the struct, and version 3 keeps all three. The comment
+  in `mix.exs` has the details.
 - **HLS is in scope for version 1**, and the playlist decides the pipeline, not
   the station record. `PiFi.Player.Hls` reads the playlist and gives three
   facts: the transport, the container, and the codec. Four traps, and each one
@@ -100,11 +118,18 @@ Licence: Apache-2.0.
     package and then stops with `registry_credentials_required` when it finds neither
     one, so `publish_after_build` reads the two variables. An absent secret turns the
     feature off, and it does not stop the build.
+  - **A source build reads a package's `priv`, and the fetch runs before Mix links
+    it.** `nbpr_librespot` is the one package here with a Buildroot recipe in
+    `priv/buildroot`, and Buildroot stopped with `no such file or directory` until
+    `vendored_priv/1` in `mix.exs` made `_build/<target>/lib/nbpr_librespot/priv` by
+    hand. Running `deps.compile` in the alias instead lost the `firmware` task. This
+    only shows when no prebuilt artefact exists, which is after every new version of
+    the system.
 - **A production firmware holds no SSH daemon, and `mix upload` needs one.**
   `config/target.exs` gives `nerves_ssh` an application environment only when
   `Mix.env()` is `dev`. A `MIX_ENV=prod` image on a board that a hand cannot reach is
   therefore one way, and the SD card is the way back. **A device that is running takes
-  its next firmware from the releases of the forge**, which is the bullet above, so the
+  its next firmware from the releases of the forge**, which a bullet below covers, so the
   card is for a board that will not boot and for nothing else.
 
   This firmware held `nerves_hub_link` and reached NervesCloud, which carried a console
@@ -112,10 +137,9 @@ Licence: Apache-2.0.
   account, and a device that a person bought is not one that this project should be able
   to open a shell on. Do not restore it.
 - **A skip moves the reader, and it does not start a pipeline again.**
-  `PiFi.Output.APlaySink` starts `aplay` for each pipeline, `aplay` opens the sound
-  card, and the card is the part of this board that fails. A start also holds a silence
-  of about one second, and a skip is a control that a person presses again and again.
-  The player therefore calls the pipeline and `PiFi.Player.FileSource` moves the byte
+  A new pipeline rebuilds the source, the buffer and the decoder, and if the format
+  changes it opens `aplay` again, which costs about a second of silence. A skip is a
+  control that a person presses again and again, so the player calls the pipeline and `PiFi.Player.FileSource` moves the byte
   that it reads. **A skip needs no bitrate either:** `PiFi.Player.Mp3Frame` walks the
   frame headers and `PiFi.Player.Skip` measures the span that it lands on, because 11
   of 46 real episodes hold more than one bitrate.
@@ -267,37 +291,54 @@ Licence: Apache-2.0.
   Assistant discovers the device as a node. Three things follow.
   - **`homex` comes from a branch of a fork**, because the media player entity is ours
     and it is not upstream yet. See <https://github.com/jimsynz/homex>.
-  - **It listens on TCP 6053**, so it is the second listener of this firmware and it
-    follows the rule that `PiFi.Plex.Companion` follows: a person turns it on, and a
-    device that no person asked holds the port closed.
-  - **`muontrap` is overridden to `~> 1.8`.** `homex` names `~> 2.0` and
-    `nerves_time`, `vintage_net` and `nbpr` all name `~> 1.0`. Nothing here reaches the
-    code that needs the newer one: `homex` uses `muontrap` for its `:system` mDNS
-    responder alone, and this firmware names `:mdns_lite`.
-  - **A firmware says which `MIX_ENV` built it, and nothing else does.** The two
-    builds differ in a way that matters, because `config/target.exs` gives
-    `nerves_ssh` an application environment only for `dev`. `stamp_environment/1` of
-    `mix.exs` writes `env=<mix env>` into `NERVES_FW_MISC`, which Nerves does not set
-    and the `fwup.conf` of the system does write, so `fwup -m -i <file>.fw` reads it
-    before a device applies anything. **`PiFi.Device.Upgrade.Install` refuses a
-    firmware that does not say `env=prod`**, and one that says nothing at all, because
-    a device applies what it is given without asking a person twice.
-- **Spotify is librespot, and it is a push input and not a source.** `PiFi.Spotify`
-  supervises the daemon of `nbpr_librespot`. A telephone decides what plays, so
-  nothing here resolves a track or knows its length, and it appears in no browse tree.
-  Three things follow.
-  - **It listens**, so it follows the rule that `PiFi.Plex.Companion` follows: a
-    person turns it on and a device that no person asked opens nothing. The licence
-    question is on the settings page, in front of the person taking the risk.
-  - **The sound card holds one program at a time**, and nothing hands it over yet.
-    librespot says what it is doing through `--onevent`, which runs a program, and
-    busybox here has no `wget` and no `nc`, so a shell cannot reach the BEAM. Stopping
-    the music before casting is the rule until that mechanism exists.
-  - **librespot reads its name and its card once**, as arguments, so
-    `PiFi.Spotify.Monitor` starts it again when either changes. It asks
-    `PiFi.Output.Alsa.pcm_name/1` for the card and not `PiFi.Output.module/0`, because
-    librespot opens ALSA itself: the behaviour promises a Membrane sink and an output
-    that is not ALSA has no name to give.
+  - **It listens on TCP 6053**, so it follows the rule for every listener: a person
+    turns it on, and a device that no person asked holds the port closed.
+  - **`muontrap` is overridden to `~> 2.0`**, because `homex` names it and
+    `nerves_time`, `vintage_net` and `nbpr` all name `~> 1.0`. Version 2 only breaks
+    the cgroup options, and nothing here or in those three passes one.
+- **A firmware says which `MIX_ENV` built it, and nothing else does.** The two
+  builds differ in a way that matters, because `config/target.exs` gives
+  `nerves_ssh` an application environment only for `dev`. `stamp_environment/1` of
+  `mix.exs` writes `env=<mix env>` into `NERVES_FW_MISC`, which Nerves does not set
+  and the `fwup.conf` of the system does write, so `fwup -m -i <file>.fw` reads it
+  before a device applies anything. **`PiFi.Device.Upgrade.Install` refuses a
+  firmware that does not say `env=prod`**, and one that says nothing at all, because
+  a device applies what it is given without asking a person twice.
+- **Every listener is off until a person turns it on.** That's Plex Companion,
+  Home Assistant (6053), Spotify and AirPlay (7000). A device that no person asked
+  opens no port, and none of them may stop the boot when the port is taken.
+- **Spotify and AirPlay are sources that browse nothing.** A telephone decides what
+  plays, so nothing here resolves a track or knows its length, and
+  `c:PiFi.Source.roots/0` answers `{:error, module}` so a page can explain what to do
+  instead. They're sources because that's where a person looks for the switch, and the
+  ordinary source switch is the only setting each one has. **Both play through
+  `PiFi.Player`**, so a cast replaces what was playing, and the volume, the screens
+  and the history work as they do for anything else.
+  - **Spotify is librespot from `nbpr_librespot`, and it plays into an ALSA
+    loopback.** `PiFi.Spotify.Loopback` loads `snd-aloop` when a person turns Spotify
+    on, librespot writes to `hw:Loopback,0,0`, and `PiFi.Spotify.CaptureSource` reads
+    `hw:Loopback,1,0` into a pipeline. `PiFi.Output.Alsa` hides the loopback card from
+    the outputs a person can choose.
+  - **The capture side of a loopback gives full-rate silence when nothing plays**, so
+    data arriving can't be what starts a cast: a pipeline started on data would never
+    stop. librespot's sink events start and stop it. busybox here has no `wget` and no
+    `nc`, so the `--onevent` script `priv/spotify/librespot-event` writes to
+    librespot's standard output and `PiFi.Spotify.Daemon` reads the port. librespot's
+    own log goes to standard error.
+  - **librespot reads its name once**, as an argument, so `PiFi.Spotify.Monitor` starts
+    it again on a rename. The licence question is on the settings page, in front of
+    the person taking the risk.
+  - **AirPlay speaks RTSP and decodes ALAC in-tree.** `PiFi.AirPlay.Server` runs on
+    `thousand_island` rather than Bandit, because RTSP isn't HTTP, and
+    `PiFi.AirPlay.PlaybackSource` hands raw samples to the pipeline with a `:manual`
+    pad, so the sound card stays the only clock.
+- **Bluetooth is an output, and a paired speaker is just another ALSA name.**
+  `PiFi.Bluetooth` runs `dbus-daemon`, `bluetoothd` and `bluealsa` (all from NBPR) in
+  that order, and `bluez-alsa` makes a speaker `bluealsa:DEV=...`, which
+  `PiFi.Output.Alsa` lists beside the cards. The sound is SBC only. The kernel side
+  and the `/var/lib/bluetooth` link to `/root/bluetooth` live in version 0.2.0 of the
+  system, and `/root` starts empty, so this firmware has to make that directory or
+  `bluetoothd` silently forgets every pairing.
 - **Web config suits an appliance, not a cloud app.** `config/target.exs` sets
   port 80, `server: true`, and `check_origin: false`, because a device answers on
   its IP address and on more than one mDNS name. `PiFi.Application` calls
@@ -313,8 +354,7 @@ Licence: Apache-2.0.
 - **Setup mode and normal operation cannot happen together.** The Wi-Fi wizard
   serves on port 80, and its captive portal needs port 80 as well.
   `PiFiWeb.Endpoint` uses the same port. `PiFi.Application` therefore starts
-  the wizard or the web interface, and never both. See `PiFi.Setup` and section
-  14 of the spec.
+  the wizard or the web interface, and never both. See `PiFi.Setup`.
 - **Three keys of `Nerves.Runtime.KV` hold what this device is called and what it
   looks like, and `fwup` provisions all three.** `pifi_device_name` is what a person
   called this device. `pifi_product_name` is what the product is called, which every
@@ -363,14 +403,15 @@ Licence: Apache-2.0.
   file, so this device writes it one time and then reads it. That is what makes the
   audio correct and the resume exact: an episode arrives faster than its own audio,
   and the demand of Membrane cannot pace a socket that Finch owns. See
-  `PiFi.Player.Download` and section 13 of the specification.
+  `PiFi.Player.Download`.
 
 ## Structure
 
-The software has four layers. They talk through Phoenix PubSub.
+The software has five parts. They talk through Phoenix PubSub.
 
 1. **Sources** find audio and give a playable stream. A source implements
-   `PiFi.Source`. The first source is internet radio. **A source names its own
+   `PiFi.Source`, and `lib/pifi/source/` holds them: internet radio, podcasts, Plex,
+   Jellyfin, Spotify and AirPlay. **A source names its own
    settings**, with `settings/0` and `settings_actions/0`, and it checks its own
    values in `put_settings/1`. The settings page draws that list and holds no
    knowledge of any source. **A source also names how its items read and in what
@@ -382,16 +423,17 @@ The software has four layers. They talk through Phoenix PubSub.
 2. **The player** runs the Membrane pipeline and holds the playback state.
 3. **Outputs** send samples to hardware. An output implements `PiFi.Output`.
 4. **Peripherals** own a piece of hardware. A peripheral implements
-   `PiFi.Peripheral`. A screen, a knob, and a touch panel are all peripherals,
-   and they share one behaviour. A peripheral gets typed events, it owns its
+   `PiFi.Peripheral`. A screen, a knob, a battery gauge and an activity LED are all
+   peripherals, and they share one behaviour. A peripheral gets typed events, it owns its
    layout, fonts, and scroll window, and it publishes what the person does.
 5. **`PiFi.DeviceUi`** holds the navigation state for the device screen. It
    receives the input events, and it publishes the view events and the hints. It
    owns the selected index and the list, because the knob needs a detent count
    and only `PiFi.DeviceUi` knows the length of the list.
 
-Every message is a struct from `PiFi.Event`, on one of five topics: `:player`,
-`:source`, `:view`, `:input`, and `:hint`. Never send a bare tuple or a map. A part
+Every message is a struct from `PiFi.Event`, on one of six topics: `:player`,
+`:source`, `:device`, `:view`, `:input`, and `:hint`. `:device` carries the state of
+the device itself: the outputs, the storage, the battery and its name. Never send a bare tuple or a map. A part
 never calls another part directly. A peripheral declares its topics with
 `subscriptions/0`, so a knob does not wake once a second for a progress event.
 `:source` carries `Source.Changed`, which says that the entries inside one
