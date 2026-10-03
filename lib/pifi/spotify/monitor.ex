@@ -2,21 +2,15 @@ defmodule PiFi.Spotify.Monitor do
   @moduledoc """
   Starts librespot again when what it was told stops being true.
 
-  **librespot reads its name and its sound card once, as arguments.** Two of those
-  move while a device runs, and neither one reaches a daemon that is already going:
+  **librespot reads its name once, as an argument.** A person renames the device, and
+  `PiFi.Device.Identity` publishes `PiFi.Event.Device.IdentityChanged`. A Spotify device
+  that kept the old name is one that a household with two of them cannot tell apart, so
+  this asks `PiFi.Spotify.restart/0`, which does nothing at all when the daemon is not
+  running.
 
-  - A person renames the device, and `PiFi.Device.Identity` publishes
-    `PiFi.Event.Device.IdentityChanged`. A Spotify device that kept the old name is
-    one that a household with two of them cannot tell apart.
-  - A person changes the DAC, or one arrives or goes, and `PiFi.Device.Monitor`
-    publishes `PiFi.Event.Device.OutputChanged`. librespot would carry on writing to a
-    card that is no longer there.
-
-  This watches the `:device` topic for both and asks `PiFi.Spotify.restart/0`, which
-  does nothing at all when the daemon is not running. **A short silence is better than
-  a wrong name or a dead card**, and neither event happens while a person is listening
-  to anything: renaming the device and changing the DAC are both done from the settings
-  page.
+  **A change of DAC does not restart it.** librespot plays into the ALSA loopback and
+  never the card, so `PiFi.Event.Device.OutputChanged` changes nothing it was told. A
+  restart there would cut off a cast whenever a DAC arrived or went, for nothing.
 
   ## It listens on three topics, and `:player` is the one that carries a cast
 
@@ -50,7 +44,6 @@ defmodule PiFi.Spotify.Monitor do
 
   alias PiFi.Event
   alias PiFi.Event.Device.IdentityChanged
-  alias PiFi.Event.Device.OutputChanged
   alias PiFi.Event.Source.EnabledChanged
   alias PiFi.Event.Spotify.SinkChanged
   alias PiFi.Event.Spotify.TrackChanged
@@ -71,12 +64,6 @@ defmodule PiFi.Spotify.Monitor do
   @doc false
   @impl GenServer
   def handle_info(%IdentityChanged{}, state) do
-    PiFi.Spotify.restart()
-
-    {:noreply, state}
-  end
-
-  def handle_info(%OutputChanged{}, state) do
     PiFi.Spotify.restart()
 
     {:noreply, state}
@@ -127,9 +114,9 @@ defmodule PiFi.Spotify.Monitor do
     {:noreply, state}
   end
 
-  # The storage and the battery report on the `:device` topic as well, every other
-  # source reports on the `:source` one, and none of that is an argument that librespot
-  # was given.
+  # The outputs, the storage and the battery report on the `:device` topic as well,
+  # every other source reports on the `:source` one, and none of that is an argument
+  # that librespot was given.
   def handle_info(_message, state), do: {:noreply, state}
 
   defp casting? do

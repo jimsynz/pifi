@@ -33,32 +33,22 @@ defmodule PiFi.Spotify do
   `PiFi.Source.Spotify` for why, and for what a page draws in the place of a tree. That
   module owns the setting; this one owns the process.
 
-  ## The sound card holds one program at a time
+  ## librespot never touches the sound card
 
-  **This is the sharp edge, and it is worth knowing before a person meets it.**
-  `PiFi.Output.APlayPort` opens the card when a track plays and closes it on a stop, a
-  pause or standby. librespot opens the same card when a Spotify session starts. They
-  cannot both have it.
-
-  In practice that means:
-
-  - PiFi idle, a person casts to it — it plays. This is the common case.
-  - PiFi playing, a person casts to it — librespot cannot open the card and says so in
-    the log. Stopping the music here lets the cast through.
-
-  **Nothing hands the card over by itself yet.** librespot says what it is doing
-  through `--onevent`, which runs a program, and the rootfs of this device holds a
-  shell and no way for a shell to reach the BEAM: busybox here has no `wget` and no
-  `nc`. A handover therefore needs a mechanism that does not exist yet, and guessing
-  at one is worse than saying this plainly.
+  The card takes one program at a time, and `aplay` (through `PiFi.Output.APlayPort`)
+  is that program. librespot plays into the ALSA loopback instead, and
+  `PiFi.Spotify.CaptureSource` reads the other end into an ordinary `PiFi.Player`
+  pipeline. So a cast stops whatever was playing, the volume and the screens work as
+  they do for anything else, and the cast goes to whichever card a person chose. See
+  `PiFi.Spotify.Loopback`.
 
   ## What librespot is given, and why it has to restart to change it
 
-  The name, the sound card and the cache are arguments, read once when the daemon
-  starts. Two of them move while a device runs: a person renames the device, or
-  changes the DAC. `PiFi.Spotify.Monitor` watches the `:device` topic for both and
-  starts the daemon again, because a Spotify device that kept the old name after a
-  rename, or played to a card that is no longer there, is worse than a short silence.
+  The name and the cache are arguments, read once when the daemon starts. The name
+  moves while a device runs, when a person renames it, so `PiFi.Spotify.Monitor`
+  starts the daemon again: a Spotify device that kept the old name is worse than a
+  short silence. The device it plays to is always the loopback, so a change of DAC
+  needs no restart.
 
   ## What it says, and where
 
@@ -121,8 +111,8 @@ defmodule PiFi.Spotify do
   @doc """
   Start the daemon again with what this device says now.
 
-  `PiFi.Spotify.Monitor` calls this when the name of the device or the sound card
-  changes, because librespot reads both once and never again.
+  `PiFi.Spotify.Monitor` calls this when the name of the device changes, because
+  librespot reads it once and never again.
   """
   @spec restart() :: :ok
   def restart do
@@ -177,14 +167,6 @@ defmodule PiFi.Spotify do
     :ok
   end
 
-  # **The card that the player uses is the card that Spotify uses.** A person who chose
-  # a DAC chose it for everything that this device plays.
-  #
-  # **It asks `PiFi.Output.Alsa` and not `PiFi.Output.module/0`.** librespot opens ALSA
-  # itself and knows nothing about Membrane, so what it needs is an ALSA name and not a
-  # sink: the behaviour promises a sink and says nothing about what is inside one, and
-  # an output that is not ALSA at all has no name to give. See
-  # `PiFi.Output.Alsa.pcm_name/1`.
   # **It plays into the ALSA loopback and never into the sound card.** `aplay` stays the
   # one program that opens the card, and a cast becomes a stream that `PiFi.Player`
   # carries like any other. See `PiFi.Spotify.Loopback`.

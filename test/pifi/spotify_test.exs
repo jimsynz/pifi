@@ -149,8 +149,8 @@ defmodule PiFi.SpotifyTest do
     end
   end
 
-  # librespot reads its name and its card once, as arguments, so the only way to
-  # change either is to start it again. See `PiFi.Spotify.Monitor`.
+  # librespot reads its name once, as an argument, so the only way to change it is to
+  # start it again. See `PiFi.Spotify.Monitor`.
   describe "what librespot was told" do
     test "a restart of a daemon that is not running does nothing" do
       assert :ok = Spotify.restart()
