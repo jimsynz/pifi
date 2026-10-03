@@ -529,6 +529,25 @@ defmodule PiFiWeb.SettingsLiveTest do
       assert Timezone.get() == "Etc/UTC"
     end
 
+    test "a person types part of a city and picks it from the matches", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/timezone")
+
+      view |> form("#timezone-form", %{"timezone" => "auck"}) |> render_change()
+
+      html = view |> element("#timezone-options button", "Pacific/Auckland") |> render_click()
+
+      assert html =~ "PiFi is in Pacific/Auckland now."
+      assert Timezone.get() == "Pacific/Auckland"
+    end
+
+    test "a search that matches nothing says what to try", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/timezone")
+
+      html = view |> form("#timezone-form", %{"timezone" => "mordor"}) |> render_change()
+
+      assert html =~ "No place matches that"
+    end
+
     test "the page shows the time where the person is", %{conn: conn} do
       :ok = Timezone.put("Pacific/Auckland")
 
@@ -1207,25 +1226,6 @@ defmodule PiFiWeb.SettingsLiveTest do
     end
   end
 
-  describe "the firmware section" do
-    test "it names the version that runs", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
-
-      assert has_element?(view, "#running-version", Upgrade.running_version())
-      assert has_element?(view, "#up-to-date")
-      refute has_element?(view, "#install-upgrade")
-    end
-
-    # A version that lands while a person has the page open must reach them, in the way
-    # that the storage and the network do.
-    test "a version that the forge names reaches the page", %{conn: conn} do
-      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
-
-      Event.publish(:device, %Events.UpgradeChanged{
-        running: "0.1.0",
-        available: "9.9.9",
-        notes: "What changed.",
-        checked_at: DateTime.utc_now(),
   describe "a code to type somewhere else" do
     # A flash message went away before a person had typed the address and come back.
     test "it stays on the page beside a link to where it goes", %{conn: conn} do
@@ -1249,6 +1249,25 @@ defmodule PiFiWeb.SettingsLiveTest do
     end
   end
 
+  describe "the firmware section" do
+    test "it names the version that runs", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
+
+      assert has_element?(view, "#running-version", Upgrade.running_version())
+      assert has_element?(view, "#up-to-date")
+      refute has_element?(view, "#install-upgrade")
+    end
+
+    # A version that lands while a person has the page open must reach them, in the way
+    # that the storage and the network do.
+    test "a version that the forge names reaches the page", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/firmware")
+
+      Event.publish(:device, %Events.UpgradeChanged{
+        running: "0.1.0",
+        available: "9.9.9",
+        notes: "What changed.",
+        checked_at: DateTime.utc_now(),
         state: :idle,
         percent: 0
       })

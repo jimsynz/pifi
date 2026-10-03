@@ -25,6 +25,7 @@ import {accent} from "./accent"
 import {cover} from "./cover"
 import {DragToReorder} from "./drag_to_reorder"
 import {Flash} from "./flash"
+import {TimezoneSearch} from "./timezone_search"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 // **No fallback transport, because `PiFiWeb.Endpoint` serves none.** A window here
@@ -35,7 +36,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 // must not lose its socket for that. With no fallback the client retries the websocket.
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {DragToReorder, Flash}
+  hooks: {DragToReorder, Flash, TimezoneSearch}
 })
 
 accent()

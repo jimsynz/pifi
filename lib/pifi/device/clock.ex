@@ -24,7 +24,6 @@ defmodule PiFi.Device.Clock do
       The zone that this device is in, and the time there now.
 
       `now` is a `DateTime` already shifted, so a caller formats it and shifts nothing.
-      `common` is a list for a person to pick from, and not the set of what is allowed.
       """
 
       run fn _input, _context ->
@@ -32,7 +31,6 @@ defmodule PiFi.Device.Clock do
          %{
            timezone: Timezone.get(),
            now: Timezone.now(),
-           common: Timezone.common(),
            default?: Timezone.get() == Timezone.default()
          }}
       end

@@ -32,21 +32,45 @@ defmodule PiFi.Device.Timezone do
   summer, and a person who set +12 would find their overnight job running an hour late
   for half the year. The name carries the rule, and `tz` carries the names.
 
-  ## It validates by asking, and it holds no list
+  ## It validates by asking
 
-  `tz` compiles the IANA database into modules and exposes no list of what it holds, so
-  there is nothing here to check a name against and nothing to go stale. `DateTime.now/1`
+  `tz` compiles the IANA database into modules and exposes no list of what it holds.
+  The list that `search/1` reads is for finding a name, not for checking one: an alias
+  such as `Asia/Calcutta` is on no list there and is still good. `DateTime.now/1`
   answers `{:error, :time_zone_not_found}` for a name that the database does not carry,
   which is the same question asked of the thing that will have to answer it later.
 
   `common/0` is a short list for a person to pick from and not the set of what is
   allowed: a person whose zone is not on it types the name.
+
+  ## The list a person searches
+
+  `search/1` reads `zone1970.tab`, which `tz` ships beside the data it compiled. That
+  file names each zone that differs from its neighbours since 1970, and none of the
+  aliases that `backward` keeps, so a search for "auck" gives one answer and not three.
+  It's read when this module compiles, so a device reads no file. The path comes from
+  how `tz` lays out its `priv` directory, so a release of `tz` that moves the file stops
+  the build here, where someone sees it, and not on a page that suddenly finds nothing.
+  The datalist that this replaced filtered by the zone already in the box, so a person
+  who opened it saw one option.
   """
 
   alias PiFi.Settings
 
   @key "device.timezone"
   @default "Etc/UTC"
+  @search_limit 10
+
+  @zone_table Application.app_dir(:tz, "priv/tzdata#{Tz.iana_version()}/zone1970.tab")
+  @external_resource @zone_table
+
+  @all @zone_table
+       |> File.read!()
+       |> String.split("\n", trim: true)
+       |> Enum.reject(&String.starts_with?(&1, "#"))
+       |> Enum.map(&(&1 |> String.split("\t") |> Enum.at(2)))
+       |> then(&[@default | &1])
+       |> Enum.sort()
 
   # A list to pick from, and not a list of what is allowed. It covers the places this
   # product is likely to sit, and `put/1` takes any name that the database carries.
@@ -121,6 +145,33 @@ defmodule PiFi.Device.Timezone do
   """
   @spec common() :: [String.t()]
   def common, do: @common
+
+  @doc """
+  The zones whose names hold what a person typed, best first.
+
+  Case and underscores don't matter, so "new york" finds `America/New_York`. A match at
+  the start of the city sorts before one in the middle of a name. An empty search gives
+  `common/0`.
+
+      iex> PiFi.Device.Timezone.search("auck")
+      ["Pacific/Auckland"]
+
+      iex> "America/New_York" in PiFi.Device.Timezone.search("new york")
+      true
+  """
+  @spec search(String.t()) :: [String.t()]
+  def search(text) when is_binary(text) do
+    case normalise(text) do
+      "" ->
+        @common
+
+      query ->
+        @all
+        |> Enum.filter(&String.contains?(normalise(&1), query))
+        |> Enum.sort_by(&(not String.starts_with?(normalise(city(&1)), query)))
+        |> Enum.take(@search_limit)
+    end
+  end
 
   @doc """
   The zone that this device is in.
@@ -205,4 +256,8 @@ defmodule PiFi.Device.Timezone do
   @spec suffix(String.t()) :: String.t()
   def suffix(@default), do: " UTC"
   def suffix(_zone), do: ""
+
+  defp city(zone), do: zone |> String.split("/") |> List.last()
+
+  defp normalise(text), do: text |> String.trim() |> String.downcase() |> String.replace("_", " ")
 end

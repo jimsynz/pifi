@@ -470,6 +470,11 @@ defmodule PiFiWeb.SettingsLive do
   end
 
   @impl Phoenix.LiveView
+  def handle_event("search_timezone", %{"timezone" => text}, socket) do
+    {:noreply, assign(socket, :timezone_matches, Timezone.search(text))}
+  end
+
+  @impl Phoenix.LiveView
   def handle_event("set_timezone", %{"timezone" => timezone}, socket) do
     case Device.set_timezone(String.trim(timezone)) do
       {:ok, :ok} ->
@@ -888,11 +893,6 @@ defmodule PiFiWeb.SettingsLive do
 
       <div :if={@source.actions != []} class="mt-4 space-y-3 border-t border-edge pt-4">
         <div :for={action <- @source.actions}>
-          <button
-            type="button"
-            id={"source-action-#{action.name}"}
-            phx-click="run_source_action"
-            phx-value-name={action.name}
           <div
             :if={action[:code]}
             id={"source-action-#{action.name}-code"}
@@ -912,6 +912,11 @@ defmodule PiFiWeb.SettingsLive do
               <.icon name="ph-arrow-square-out" class="size-4" />
             </a>
           </div>
+          <button
+            type="button"
+            id={"source-action-#{action.name}"}
+            phx-click="run_source_action"
+            phx-value-name={action.name}
             class="control flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
           >
             <.source_icon name={action.icon} class="size-4" />
@@ -1023,25 +1028,49 @@ defmodule PiFiWeb.SettingsLive do
         so PiFi stays right through both ends of the year.
       </p>
 
-      <form id="timezone-form" phx-submit="set_timezone" class="mb-4 flex items-center gap-2">
+      <form
+        id="timezone-form"
+        phx-submit="set_timezone"
+        phx-change="search_timezone"
+        phx-hook="TimezoneSearch"
+        phx-click-away={JS.hide(to: "#timezone-options")}
+        class="relative mb-4"
+      >
         <input
           type="text"
           id="timezone-name"
           name="timezone"
-          value={@clock.timezone}
-          list="timezone-options"
+          placeholder={"Search for a city, e.g. #{@clock.timezone}"}
           required
           autocomplete="off"
           spellcheck="false"
+          role="combobox"
           aria-label="Time zone"
-          class="control grow rounded-lg px-3 py-2 text-sm"
+          aria-controls="timezone-options"
+          aria-autocomplete="list"
+          phx-debounce="150"
+          phx-focus={JS.show(to: "#timezone-options")}
+          class="control w-full rounded-lg px-3 py-2 text-sm"
         />
-        <datalist id="timezone-options">
-          <option :for={zone <- @clock.common} value={zone}></option>
-        </datalist>
-        <button type="submit" id="save-timezone" class="control rounded-lg px-3 py-2 text-sm">
-          Save
-        </button>
+        <ul
+          id="timezone-options"
+          role="listbox"
+          class="control absolute inset-x-0 top-full z-10 mt-1 hidden max-h-72 overflow-y-auto rounded-lg py-1"
+        >
+          <li :for={zone <- @timezone_matches} role="option">
+            <button
+              type="button"
+              phx-click={JS.hide(to: "#timezone-options") |> JS.push("set_timezone")}
+              phx-value-timezone={zone}
+              class="w-full px-3 py-2 text-left text-sm text-ink hover:bg-recess aria-selected:bg-recess"
+            >
+              {zone}
+            </button>
+          </li>
+          <li :if={@timezone_matches == []} class="px-3 py-2 text-sm text-ink-dim">
+            No place matches that. Try the name of a nearby city.
+          </li>
+        </ul>
       </form>
 
       <p id="timezone-now" class="text-sm text-ink-dim">
@@ -2022,6 +2051,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:standby_minutes, PiFi.Playback.standby_minutes!())
     |> assign(:crossfade_seconds, PiFi.Playback.crossfade_seconds!())
     |> assign(:clock, Device.clock!())
+    |> assign_new(:timezone_matches, fn -> Timezone.search("") end)
     |> assign(:screen_blank_seconds, PiFi.Playback.screen_blank_seconds!())
     |> assign(:screen?, Peripheral.any_screen?())
     |> assign(:switch_off?, SwitchOff.enabled?())
