@@ -35,9 +35,12 @@ Licence: Apache-2.0.
   `plughw` at 44100 Hz gives the rough sound, because the DAC accepts that rate and
   nothing converts. Almost every podcast is 44100 Hz MP3, and both RNZ streams are
   24000 Hz, which is why radio never showed this.
-- **The Nerves system holds no audio decoder.** It holds `alsa-lib`, `aplay`, and
-  `amixer` only. `membrane_alsa_plugin` does not exist. The output sink sends raw
-  samples to `aplay` through an Erlang port, and `PiFi.Output.APlayPort` keeps that
+- **The Nerves system holds no audio decoder.** It holds `alsa-lib`, `aplay`,
+  `arecord` and `amixer` only. **`arecord` is there because `aplay` is**:
+  `BR2_PACKAGE_ALSA_UTILS_APLAY` installs both, which is what lets a cast and a
+  telephone arrive as a capture. `membrane_alsa_plugin` does not exist. The output
+  sink sends raw samples to `aplay` through an Erlang port, and
+  `PiFi.Output.APlayPort` keeps that
   port open across pipelines, so a new track of the same format doesn't pay the
   second of silence that opening the card costs.
 - **Each decoder comes from a different place.**
