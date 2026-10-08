@@ -24,6 +24,22 @@ defmodule PiFi.AirPlay.Setup do
   still worth it: the first real telephone that connects settles what it really sends,
   and a receiver that threw them away would have nothing to show.
 
+  ## PTP is read and not kept
+
+  `timingProtocol` says PTP for every modern sender, and this receiver reads it, reports
+  it, and runs no clock. **PTP exists so that several speakers agree with each other**,
+  and one speaker has nothing to agree with: the audio plays as it arrives, and
+  `PiFi.AirPlay.Router` reads `SETRATEANCHORTIME` for its `rate` and not for the anchor
+  that would place it on a shared clock. A board played from a telephone on 2026-10-08
+  with none of it.
+
+  Doing it properly is not a small module. Shairport Sync gave up running IEEE 1588
+  in-process and shipped a separate daemon, NQPTP, for it, and the ports are not the
+  difficulty — this firmware runs as root — but holding a clock steady enough for a
+  group to agree is, on a runtime that schedules as the BEAM does. `SETPEERS`, which is
+  the list of the other speakers of a group, is answered and ignored for the same
+  reason.
+
   ## The session key is thirty-two bytes or it is nothing
 
   `shk` becomes the ChaCha20-Poly1305 key that every audio packet is decrypted with, so
@@ -93,8 +109,12 @@ defmodule PiFi.AirPlay.Setup do
   @doc """
   The answer to the first `SETUP`.
 
-  `event_port` is the TCP port this receiver listens on for the event channel, which is
-  what carries the track title and the artwork once the audio is running.
+  `event_port` is the TCP port this receiver listens on for the event channel. **It
+  carries no metadata, and the reason is the feature bits.** With bit 50 set a sender
+  posts the title, the artist and the artwork to `/command` as a binary plist and sends
+  nothing at all down this channel, so it is opened and accepted because a sender that
+  found nothing listening would abandon the session, and for no other reason. See
+  `PiFi.AirPlay.NowPlaying`.
 
   **`timingPort` is zero on purpose for PTP.** The timing of a PTP session happens on
   the two well-known ports of IEEE 1588 rather than on one this receiver chooses, so

@@ -13,17 +13,16 @@ defmodule PiFi.AirPlay.Session do
   whose connection is refused gives up on the session, so naming a port nothing holds
   would fail the handshake as surely as answering `501`.
 
-    * **event**, TCP. Carries what is playing, as plists, from this receiver to the
-      sender. Opened and accepted; nothing is sent on it yet, because the metadata is
-      useless until the audio works.
+    * **event**, TCP. Opened and accepted, and never written to. A sender with bit 50
+      set posts its metadata to `/command` rather than reading it here, so this exists
+      to be connected to and for nothing else.
     * **data**, UDP. The audio. This is `PiFi.AirPlay.AudioSocket`.
     * **control**, UDP. Retransmit requests and timing. This is
       `PiFi.AirPlay.ControlSocket`, and it asks a sender again for a packet that did not
       arrive, which is why a stream on a poor network keeps fewer of its gaps.
 
-  The event channel is opened and not written to, which is the honest cost of making the
-  handshake complete: a sender whose connection is accepted and then left quiet carries
-  on, and a sender that found nothing listening would not.
+  A sender whose connection is accepted and then left quiet carries on, and one that
+  found nothing listening would not, which is why the event channel is opened at all.
 
   ## Two kinds of audio, and the kind decides the socket
 
@@ -236,9 +235,11 @@ defmodule PiFi.AirPlay.Session do
   defp data_port(%{audio: audio, kind: :buffered}), do: BufferedSocket.port(audio)
   defp data_port(%{audio: audio}), do: AudioSocket.port(audio)
 
-  # Nothing is sent on the event channel yet, so this accepts the connection and holds
-  # it open. A sender that finds nothing listening abandons the session; one whose
-  # connection is accepted and then left quiet does not.
+  # **Nothing is sent on the event channel, and nothing is meant to be.** With bit 50 of
+  # the feature flags set a sender posts its metadata to `/command` instead, so this
+  # accepts the connection and holds it open for one reason: a sender that finds nothing
+  # listening abandons the session, and one whose connection is accepted and then left
+  # quiet does not. See `PiFi.AirPlay.NowPlaying`.
   #
   # **It happens in a process of its own and keeps the socket it accepted.** Accepting
   # here would block the connection from answering anything else, and holding the socket
