@@ -256,7 +256,7 @@ defmodule PiFi.MixProject do
       # The sync job fetches the station list. `req` already arrives through a
       # dependency of Membrane, and this line makes the reliance explicit, so a
       # change there cannot take it away.
-      {:req, "~> 0.5"},
+      {:req, "~> 0.7"},
       {:ring_logger, "~> 0.11.0"},
       # `PiFi.Podcast.Feed.Parser` reads a podcast feed with this. It is pure
       # Elixir and it holds no dependency of its own, so it needs nothing from the
