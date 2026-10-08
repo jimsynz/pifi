@@ -11,7 +11,8 @@ defmodule PiFi.Player do
 
   It tells the rest of the firmware what it does on the `:player` topic. See
   `PiFi.Event.Player`. Nothing reads the state of this process directly, apart
-  from `state/0` for a person at the console.
+  from `state/0` for a person at the console and `status/0` for everything that only
+  has to say what the device is doing.
 
   ## A control answers before the device does the work
 
@@ -32,7 +33,11 @@ defmodule PiFi.Player do
   takes no skip are all of that kind, and a person who asks for one must be told so.
 
   A continue runs before any message that waits, so a caller that asks for `state/0`
-  after a play still reads the track that it asked for.
+  after a play still reads the track that it asked for. **`status/0` makes no such
+  promise**: it reads a table rather than queueing, so a read between the answer and
+  the end of the work describes the track that was playing before. That is the trade,
+  and it is the right way round — the readers that take it are the ones a wait hurts,
+  and an event corrects each of them a moment later.
 
   ## The controls
 
@@ -107,6 +112,11 @@ defmodule PiFi.Player do
   @skip_timeout :timer.seconds(5)
   @output_device_key "output_device"
   @standby_key "standby"
+
+  # The table that `status/0` reads. It is `:protected`, so this process is the only
+  # one that writes it, and it goes when this process goes — which is correct, because
+  # the state it described went with it.
+  @mirror :pifi_player_state
 
   # How long before the end of a track the device reads the next one. A track of 8 MB
   # over slow Wi-Fi takes about this long, and a person who skips in the last half
@@ -198,9 +208,14 @@ defmodule PiFi.Player do
 
   A caller says this for whatever is playing, so it is the caller that has to know
   whether the title is still about the right thing.
+
+  **A field that the map does not hold is one that does not change.** An AirPlay sender
+  sends the words of a track and the picture of it in separate messages, so a caller
+  that had to name both would wipe one of them each time the other moved. The keys are
+  `:title` and `:artwork_path`.
   """
-  @spec metadata(String.t() | nil) :: :ok
-  def metadata(title), do: GenServer.cast(__MODULE__, {:metadata, title})
+  @spec metadata(%{optional(:title) => String.t(), optional(:artwork_path) => String.t()}) :: :ok
+  def metadata(fields) when is_map(fields), do: GenServer.cast(__MODULE__, {:metadata, fields})
 
   @doc """
   Stop the audio and keep the track, or start it again.
@@ -299,6 +314,42 @@ defmodule PiFi.Player do
   def state(timeout \\ 5000), do: GenServer.call(__MODULE__, :state, timeout)
 
   @doc """
+  What the player was doing when it last finished something, read without asking it.
+
+  **`state/0` waits for the player and this does not.** The work of a play runs in a
+  continue — a resolve that reads a service, an old pipeline that takes up to 5 seconds
+  to stop — and a call sits behind all of it. A board at 192.168.3.142 logged four
+  seconds of `The player did not say what it is doing` on 2026-10-08, and every reader
+  of the player drew `idle/0` for that time: the screens showed a device out of
+  standby, and `PiFi.AirPlay.Monitor.playing?/0` answered that nothing was playing
+  while the player was starting a stream.
+
+  So the player writes its state to a table as each callback returns, and this reads
+  it. **It is the state as the player last committed it, and not the state it is on
+  its way to.** A reader that must see the result of a command it just gave wants
+  `state/0`, which queues behind the work; everything that only has to say what the
+  device is doing wants this, because every change arrives as an event a moment later
+  anyway. See `PiFi.Event.Player`.
+
+  `:miss` means there is no player, or there is one that has not finished its first
+  callback. `PiFi.Playback.Player.idle/0` is the answer for that.
+  """
+  @spec status() :: {:ok, map()} | :miss
+  def status do
+    case :ets.whereis(@mirror) do
+      :undefined -> :miss
+      table -> read(table)
+    end
+  end
+
+  defp read(table) do
+    case :ets.lookup(table, :state) do
+      [{:state, %State{} = state}] -> {:ok, report(state)}
+      [] -> :miss
+    end
+  end
+
+  @doc """
   The output devices, and the one that the player uses.
 
   The settings page shows this, so that page needs no knowledge of which output
@@ -353,7 +404,81 @@ defmodule PiFi.Player do
     # controller drawing a track that had stopped.
     Process.flag(:trap_exit, true)
 
+    # **The table is made here and written nowhere yet**, because `%State{}` says
+    # `standby?: false` and the stored answer arrives in the continue below. A device
+    # that woke its screen over a board that was in standby is what that costs, so
+    # `status/0` answers `:miss` until there is a state worth reading and `idle/0`
+    # reads the setting in the meantime.
+    :ets.new(@mirror, [:named_table, :protected, :set, read_concurrency: true])
+
     {:ok, %State{}, {:continue, :restore}}
+  end
+
+  @impl GenServer
+  def handle_call(message, from, state), do: message |> answered(from, state) |> published()
+
+  @impl GenServer
+  def handle_cast(message, state), do: message |> noted(state) |> published()
+
+  @impl GenServer
+  def handle_info(message, state), do: message |> heard(state) |> published()
+
+  @impl GenServer
+  def handle_continue(message, state), do: message |> continued(state) |> published()
+
+  # **One place writes the mirror, and every callback goes through it.** A clause that
+  # returned its state straight to `GenServer` would leave the table holding the state
+  # before it, and nothing in the compiler would say so. See `status/0`.
+  defp published({:reply, answer, %State{} = state}) do
+    mirror(state)
+
+    {:reply, answer, state}
+  end
+
+  defp published({:reply, answer, %State{} = state, continue}) do
+    mirror(state)
+
+    {:reply, answer, state, continue}
+  end
+
+  defp published({:noreply, %State{} = state}) do
+    mirror(state)
+
+    {:noreply, state}
+  end
+
+  defp published({:noreply, %State{} = state, continue}) do
+    mirror(state)
+
+    {:noreply, state, continue}
+  end
+
+  # **The struct goes in the table and not the description of it.** `position_ms` is
+  # counted from `started_at` against the clock, so a description written here would
+  # age until the next callback — up to a second between progress events, which is
+  # enough to put a seek of `PiFi.Plex.Companion` a second out. The reader builds it
+  # instead, and reads the clock as it does.
+  defp mirror(%State{} = state) do
+    :ets.insert(@mirror, {:state, state})
+
+    :ok
+  end
+
+  # The one description of what the player is doing. `status/0` builds it from the
+  # table and `answered(:state, …)` replies with it, so the two cannot disagree.
+  defp report(%State{} = state) do
+    %{
+      source: state.source,
+      item: state.item,
+      stream_title: state.stream_title,
+      artwork_path: state.artwork_path,
+      playing?: state.started_at != nil,
+      paused?: state.paused?,
+      standby?: state.standby?,
+      position_ms: position_ms(state),
+      live?: live?(state),
+      crossfading?: state.previous != nil
+    }
   end
 
   @doc """
@@ -388,8 +513,7 @@ defmodule PiFi.Player do
   # sound stops, and this takes the pipeline down before the process reads another
   # message. A `play` that follows therefore still finds the sound card free, which
   # is the reason that `stop_pipeline/1` waits at all.
-  @impl GenServer
-  def handle_continue({:terminate, pipeline, monitor}, %State{} = state) do
+  defp continued({:terminate, pipeline, monitor}, %State{} = state) do
     # The answer of `stop_pipeline/1` is what carries on, because it is the one that
     # knows that the pipeline under a crossfade went as well.
     stopped = stop_pipeline(%State{state | pipeline: pipeline, monitor: monitor})
@@ -397,29 +521,25 @@ defmodule PiFi.Player do
     {:noreply, %State{cancel_restart(stopped) | pipeline: nil, monitor: nil, started_at: nil}}
   end
 
-  @impl GenServer
-  def handle_continue(:restore, %State{} = state) do
+  defp continued(:restore, %State{} = state) do
     {:noreply, restore_station(%State{state | standby?: stored_standby?()})}
   end
 
   # **A continue runs before any message that waits**, so a caller that asks for the
   # state after a play still reads the track that it asked for. The answer is what
   # arrives early, and not the work.
-  @impl GenServer
-  def handle_continue({:play, source, item}, %State{} = state) do
+  defp continued({:play, source, item}, %State{} = state) do
     {:noreply, played(source, item, state)}
   end
 
-  @impl GenServer
-  def handle_continue(:resume, %State{} = state) do
+  defp continued(:resume, %State{} = state) do
     case start(state.source, state.item, state) do
       {:ok, state} -> {:noreply, state}
       {:error, _reason, state} -> {:noreply, state}
     end
   end
 
-  @impl GenServer
-  def handle_continue({:skip, ms}, %State{} = state) do
+  defp continued({:skip, ms}, %State{} = state) do
     if Pipeline.decoder_holds_stream?(state.playable) do
       {:noreply, restarted(state, ms)}
     else
@@ -441,14 +561,20 @@ defmodule PiFi.Player do
   # `PiFi.Event.Player.Failed`, and `fail/2` publishes it. The two checks here stay
   # in the answer, because both are one read and a person who asks for a source that is
   # out of use must be told so.
-  @impl GenServer
-  def handle_call({:play, item}, _from, %State{} = state) do
+  defp answered({:play, item}, _from, %State{} = state) do
     case Source.from_slug(item.source) do
       {:ok, source} ->
         if Source.enabled?(source) do
+          # **The place of the track that is going belongs to the press and not to the
+          # work.** It is written here because the state below names the new track, and
+          # `store_position/1` writes the place of whatever `item` it is given.
+          store_position(state)
+          release_file(state)
+
           # `waking/1` goes here and not at the head of the clause, so a play that
           # cannot happen leaves the device as quiet as it found it.
-          {:reply, :ok, buffering(waking(state)), {:continue, {:play, source, item}}}
+          {:reply, :ok, accepted(buffering(waking(state)), source, item),
+           {:continue, {:play, source, item}}}
         else
           {:reply, {:error, :source_not_in_use}, state}
         end
@@ -458,49 +584,48 @@ defmodule PiFi.Player do
     end
   end
 
-  @impl GenServer
-  def handle_call(:stop, _from, %State{} = state) do
-    {:reply, :ok, cleared(state), {:continue, {:terminate, state.pipeline, state.monitor}}}
+  defp answered(:stop, _from, %State{} = state) do
+    {:reply, :ok, handing_over(cleared(state)),
+     {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
   # A pause keeps a track for a person, so a device with nothing selected has nothing
   # to pause.
-  @impl GenServer
-  def handle_call({:pause, true}, _from, %State{item: nil} = state) do
+  defp answered({:pause, true}, _from, %State{item: nil} = state) do
     {:reply, :ok, state}
   end
 
-  @impl GenServer
-  def handle_call({:pause, true}, _from, %State{pipeline: nil} = state) do
+  defp answered({:pause, true}, _from, %State{pipeline: nil} = state) do
     {:reply, :ok, %State{state | paused?: true}}
   end
 
   # `offset_ms` keeps the place, because the terminate below clears `started_at` and
   # `position_ms/1` then counts from the offset alone. A page that opens while the
   # device is paused therefore reads the place that a person stopped at.
-  @impl GenServer
-  def handle_call({:pause, true}, _from, %State{} = state) do
+  defp answered({:pause, true}, _from, %State{} = state) do
     store_position(state)
     silence(state)
     Event.publish(:player, %Events.Paused{position_ms: position_ms(state)})
 
-    {:reply, :ok, %State{state | paused?: true, stream_title: nil, offset_ms: position_ms(state)},
-     {:continue, {:terminate, state.pipeline, state.monitor}}}
+    {:reply, :ok,
+     handing_over(%State{
+       state
+       | paused?: true,
+         stream_title: nil,
+         offset_ms: position_ms(state)
+     }), {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
-  @impl GenServer
-  def handle_call({:pause, false}, _from, %State{item: nil} = state) do
+  defp answered({:pause, false}, _from, %State{item: nil} = state) do
     {:reply, {:error, :nothing_selected}, %State{state | paused?: false}}
   end
 
-  @impl GenServer
-  def handle_call({:pause, false}, _from, %State{pipeline: pipeline} = state)
-      when pipeline != nil do
+  defp answered({:pause, false}, _from, %State{pipeline: pipeline} = state)
+       when pipeline != nil do
     {:reply, :ok, %State{state | paused?: false}}
   end
 
-  @impl GenServer
-  def handle_call({:pause, false}, _from, %State{} = state) do
+  defp answered({:pause, false}, _from, %State{} = state) do
     {:reply, :ok, buffering(waking(state)), {:continue, :resume}}
   end
 
@@ -509,24 +634,21 @@ defmodule PiFi.Player do
   # it keeps the new track in the settings, and it leaves standby. This called
   # `waking/1` of its own before that clause did, and two calls woke a device that then
   # found the source out of use and played nothing.
-  @impl GenServer
-  def handle_call({:move, direction}, from, %State{} = state) do
+  defp answered({:move, direction}, from, %State{} = state) do
     case moved(direction) do
-      {:ok, item} -> handle_call({:play, item}, from, state)
+      {:ok, item} -> answered({:play, item}, from, state)
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
-  @impl GenServer
-  def handle_call({:skip, _ms}, _from, %State{started_at: nil} = state) do
+  defp answered({:skip, _ms}, _from, %State{started_at: nil} = state) do
     {:reply, {:error, :not_playing}, state}
   end
 
   # A skip answers before it moves, in the way that a play does. The pipeline reads the
   # frames of the file to find the place, and a card that is also writing a download
   # takes its time over that.
-  @impl GenServer
-  def handle_call({:skip, ms}, _from, %State{} = state) do
+  defp answered({:skip, ms}, _from, %State{} = state) do
     if skippable?(state) do
       {:reply, :ok, state, {:continue, {:skip, ms}}}
     else
@@ -534,67 +656,47 @@ defmodule PiFi.Player do
     end
   end
 
-  @impl GenServer
-  def handle_call({:standby, true}, _from, %State{} = state) do
+  defp answered({:standby, true}, _from, %State{} = state) do
     store_position(state)
     silence(state)
     Settings.put(@standby_key, "true")
     Event.publish(:player, %Events.Standby{entered?: true})
 
-    {:reply, :ok, %State{state | standby?: true, stream_title: nil},
+    {:reply, :ok, handing_over(%State{state | standby?: true, stream_title: nil}),
      {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
-  @impl GenServer
-  def handle_call({:standby, false}, _from, %State{source: nil} = state) do
+  defp answered({:standby, false}, _from, %State{source: nil} = state) do
     {:reply, :ok, waking(state)}
   end
 
   # A person who paused a track and then pressed standby did not ask for music, so
   # leaving standby leaves that track paused. A play starts it.
-  @impl GenServer
-  def handle_call({:standby, false}, _from, %State{paused?: true} = state) do
+  defp answered({:standby, false}, _from, %State{paused?: true} = state) do
     {:reply, :ok, waking(state)}
   end
 
-  @impl GenServer
-  def handle_call({:standby, false}, _from, %State{} = state) do
+  defp answered({:standby, false}, _from, %State{} = state) do
     {:reply, :ok, buffering(waking(state)), {:continue, :resume}}
   end
 
-  @impl GenServer
-  def handle_call(:state, _from, %State{} = state) do
-    {:reply,
-     %{
-       source: state.source,
-       item: state.item,
-       stream_title: state.stream_title,
-       artwork_path: state.artwork_path,
-       playing?: state.started_at != nil,
-       paused?: state.paused?,
-       standby?: state.standby?,
-       position_ms: position_ms(state),
-       live?: live?(state),
-       crossfading?: state.previous != nil
-     }, state}
+  defp answered(:state, _from, %State{} = state) do
+    {:reply, report(state), state}
   end
 
-  @impl GenServer
-  def handle_call(:waiting_for_output, _from, %State{output_lost?: true, standby?: false} = state) do
+  defp answered(:waiting_for_output, _from, %State{output_lost?: true, standby?: false} = state) do
     {:reply, chosen_device(), state}
   end
 
-  def handle_call(:waiting_for_output, _from, %State{} = state), do: {:reply, nil, state}
+  defp answered(:waiting_for_output, _from, %State{} = state), do: {:reply, nil, state}
 
-  @impl GenServer
-  def handle_call(:output, _from, %State{} = state), do: {:reply, output_report(), state}
+  defp answered(:output, _from, %State{} = state), do: {:reply, output_report(), state}
 
   # A person who takes a source away expects the sound of it to go as well, and they
   # expect the device not to select it again after a restart. They also expect the room
   # of it on the card back, and a job does that work. See
   # `PiFi.Playback.RemoveSourceCache`.
-  @impl GenServer
-  def handle_call({:enable_source, source, enabled?}, _from, %State{} = state) do
+  defp answered({:enable_source, source, enabled?}, _from, %State{} = state) do
     Source.enable(source, enabled?)
 
     unless enabled?, do: RemoveSourceCache.ask(source)
@@ -602,7 +704,8 @@ defmodule PiFi.Player do
     if enabled? or state.source != source do
       {:reply, :ok, state}
     else
-      {:reply, :ok, cleared(state), {:continue, {:terminate, state.pipeline, state.monitor}}}
+      {:reply, :ok, handing_over(cleared(state)),
+       {:continue, {:terminate, state.pipeline, state.monitor}}}
     end
   end
 
@@ -611,8 +714,7 @@ defmodule PiFi.Player do
   # that arrives or goes, which is the other half of that event, and a reader that
   # keeps the card of this device therefore held the one that the person left. See
   # `PiFi.Output.Volume`.
-  @impl GenServer
-  def handle_call({:select_output, id}, _from, %State{} = state) do
+  defp answered({:select_output, id}, _from, %State{} = state) do
     case Settings.put(@output_device_key, id) do
       {:ok, _setting} ->
         state = restart_for_output(state)
@@ -625,15 +727,22 @@ defmodule PiFi.Player do
     end
   end
 
-  @impl GenServer
-  def handle_cast({:metadata, title}, %State{} = state) do
-    Event.publish(:player, %Events.MetadataChanged{title: title})
+  defp noted({:metadata, fields}, %State{} = state) do
+    state = %State{
+      state
+      | stream_title: Map.get(fields, :title, state.stream_title),
+        artwork_path: Map.get(fields, :artwork_path, state.artwork_path)
+    }
 
-    {:noreply, %State{state | stream_title: title}}
+    Event.publish(:player, %Events.MetadataChanged{
+      title: state.stream_title,
+      artwork_path: state.artwork_path
+    })
+
+    {:noreply, state}
   end
 
-  @impl GenServer
-  def handle_cast(:outputs_changed, %State{} = state) do
+  defp noted(:outputs_changed, %State{} = state) do
     report = output_report()
 
     Event.publish(:device, struct(DeviceEvents.OutputChanged, report))
@@ -698,14 +807,11 @@ defmodule PiFi.Player do
      }, {:terminate, state.pipeline, state.monitor}}
   end
 
-  @impl GenServer
-  def handle_info(:progress, %State{pipeline: nil} = state), do: {:noreply, state}
+  defp heard(:progress, %State{pipeline: nil} = state), do: {:noreply, state}
 
-  @impl GenServer
-  def handle_info(:progress, %State{started_at: nil} = state), do: {:noreply, state}
+  defp heard(:progress, %State{started_at: nil} = state), do: {:noreply, state}
 
-  @impl GenServer
-  def handle_info(:progress, %State{} = state) do
+  defp heard(:progress, %State{} = state) do
     Event.publish(:player, %Events.Progress{
       position_ms: position_ms(state),
       duration_ms: state.item && state.item.duration_ms
@@ -715,8 +821,7 @@ defmodule PiFi.Player do
     {:noreply, state |> prefetch() |> crossfade()}
   end
 
-  @impl GenServer
-  def handle_info({:pipeline_playing, pipeline}, %State{pipeline: pipeline} = state) do
+  defp heard({:pipeline_playing, pipeline}, %State{pipeline: pipeline} = state) do
     artwork_path = artwork_path(state.item)
 
     # **The history is written before the event goes out.** A part that hears that the
@@ -752,8 +857,7 @@ defmodule PiFi.Player do
   # the last one, and `store_position/1` writes it beside the time. The two numbers
   # therefore come from one stop, and no part of this firmware turns a time into a
   # byte with a bitrate. See `PiFi.Source.place/0`.
-  @impl GenServer
-  def handle_info({:pipeline_position_bytes, pipeline, bytes}, %State{pipeline: pipeline} = state) do
+  defp heard({:pipeline_position_bytes, pipeline, bytes}, %State{pipeline: pipeline} = state) do
     {:noreply, %State{state | position_bytes: bytes}}
   end
 
@@ -761,8 +865,7 @@ defmodule PiFi.Player do
   # and no part of this firmware turns a byte into a time. The progress event goes out
   # here and not one second later, because a person who presses a skip watches the
   # count.
-  @impl GenServer
-  def handle_info({:pipeline_skipped, pipeline, place}, %State{pipeline: pipeline} = state) do
+  defp heard({:pipeline_skipped, pipeline, place}, %State{pipeline: pipeline} = state) do
     state = %State{
       state
       | offset_ms: state.offset_ms + place.ms,
@@ -777,8 +880,7 @@ defmodule PiFi.Player do
     {:noreply, state}
   end
 
-  @impl GenServer
-  def handle_info({:pipeline_metadata, pipeline, title}, %State{pipeline: pipeline} = state) do
+  defp heard({:pipeline_metadata, pipeline, title}, %State{pipeline: pipeline} = state) do
     # The title stays here as well, because a page that opens in the middle of a
     # track needs it. The next block comes about one second later, and a person
     # should not wait for it.
@@ -786,8 +888,7 @@ defmodule PiFi.Player do
     {:noreply, %State{state | stream_title: title}}
   end
 
-  @impl GenServer
-  def handle_info({:pipeline_finished, pipeline}, %State{pipeline: pipeline} = state) do
+  defp heard({:pipeline_finished, pipeline}, %State{pipeline: pipeline} = state) do
     if live?(state) do
       Logger.info("The stream ended. Starting it again.")
       {:noreply, restart(state)}
@@ -800,44 +901,38 @@ defmodule PiFi.Player do
   # The track that the fade took down has ended. The fade carries on against silence,
   # so the incoming track still arrives at full gain, and `{:pipeline_faded, _}` below
   # is what stops this pipeline.
-  @impl GenServer
-  def handle_info({:pipeline_finished, previous}, %State{previous: previous} = state) do
+  defp heard({:pipeline_finished, previous}, %State{previous: previous} = state) do
     {:noreply, state}
   end
 
   # **Only the sink knows whether the output can sum two streams of this shape**, so the
   # player asks and waits for this. A `:fade_out` that no sink answers leaves the track
   # playing to its end in the way that it always did.
-  @impl GenServer
-  def handle_info({:pipeline_fading, pipeline, :ok}, %State{pipeline: pipeline} = state) do
+  defp heard({:pipeline_fading, pipeline, :ok}, %State{pipeline: pipeline} = state) do
     {:noreply, handed_over(state)}
   end
 
-  @impl GenServer
-  def handle_info({:pipeline_fading, _pipeline, _answer}, %State{} = state) do
+  defp heard({:pipeline_fading, _pipeline, _answer}, %State{} = state) do
     {:noreply, state}
   end
 
   # The fade is over, however it ended, so the track underneath it goes.
-  @impl GenServer
-  def handle_info({:pipeline_faded, _pipeline}, %State{} = state) do
+  defp heard({:pipeline_faded, _pipeline}, %State{} = state) do
     {:noreply, stop_previous(state)}
   end
 
-  @impl GenServer
-  def handle_info(
-        {:DOWN, monitor, :process, previous, reason},
-        %State{previous: previous, previous_monitor: monitor} = state
-      ) do
+  defp heard(
+         {:DOWN, monitor, :process, previous, reason},
+         %State{previous: previous, previous_monitor: monitor} = state
+       ) do
     Logger.warning("The pipeline under the fade stopped: #{inspect(reason)}")
     {:noreply, %State{state | previous: nil, previous_monitor: nil}}
   end
 
-  @impl GenServer
-  def handle_info(
-        {:DOWN, monitor, :process, pipeline, reason},
-        %State{pipeline: pipeline, monitor: monitor} = state
-      ) do
+  defp heard(
+         {:DOWN, monitor, :process, pipeline, reason},
+         %State{pipeline: pipeline, monitor: monitor} = state
+       ) do
     Logger.warning("The pipeline stopped: #{inspect(reason)}")
     {:noreply, restart(%State{state | pipeline: nil, monitor: nil})}
   end
@@ -847,24 +942,20 @@ defmodule PiFi.Player do
   # would leave it playing with nothing holding it. A player that a person paused must
   # stay quiet as well. `cancel_restart/1` takes the message out of the mailbox, and
   # these two clauses hold the cases that reach the process another way.
-  @impl GenServer
-  def handle_info(:restart, %State{pipeline: pipeline} = state) when pipeline != nil,
+  defp heard(:restart, %State{pipeline: pipeline} = state) when pipeline != nil,
     do: {:noreply, state}
 
-  @impl GenServer
-  def handle_info(:restart, %State{paused?: true} = state), do: {:noreply, state}
+  defp heard(:restart, %State{paused?: true} = state), do: {:noreply, state}
 
-  @impl GenServer
-  def handle_info(:restart, %State{source: source, item: item} = state)
-      when source != nil and item != nil do
+  defp heard(:restart, %State{source: source, item: item} = state)
+       when source != nil and item != nil do
     case start(source, item, state) do
       {:ok, state} -> {:noreply, state}
       {:error, _reason, state} -> {:noreply, state}
     end
   end
 
-  @impl GenServer
-  def handle_info(message, state) do
+  defp heard(message, state) do
     Logger.debug("Player ignoring #{inspect(message)}")
     {:noreply, state}
   end
@@ -1100,9 +1191,6 @@ defmodule PiFi.Player do
   end
 
   defp played(source, item, %State{} = state) do
-    store_position(state)
-    release_file(state)
-
     case start(source, item, state) do
       {:ok, state} ->
         state
@@ -1224,6 +1312,42 @@ defmodule PiFi.Player do
         # reconnecting would play again something they had already stopped.
         output_lost?: false
     }
+  end
+
+  # **The player names the track as soon as it takes it, and not when the work ends.**
+  # The work runs in a continue that reads a service and stops an old pipeline, and
+  # `PiFi.Plex.Companion` reads `item` to answer `buffering` rather than `stopped` for
+  # exactly that window — a controller that reads `stopped` takes it for the end of the
+  # music and stops the player, which cost a person every track of a playlist after the
+  # first on 2026-09-15. `PiFi.AirPlay.Monitor.playing?/0` asks the same question of a
+  # telephone's `TEARDOWN`.
+  #
+  # Everything the track that is going left behind goes with it, because a state that
+  # named the new track beside the old title, artwork or place would describe neither.
+  # The continue writes each of these again from the playable it resolved.
+  defp accepted(%State{} = state, source, item) do
+    %State{
+      state
+      | source: source,
+        item: item,
+        playable: nil,
+        stream_title: nil,
+        artwork_path: nil,
+        started_at: nil,
+        offset_ms: 0,
+        position_bytes: nil,
+        paused?: false,
+        prefetched?: false
+    }
+  end
+
+  # **A clause that hands its pipeline to the terminate continue stops naming it here.**
+  # That terminate waits up to 5 seconds, and the event that says what happened has
+  # already gone out, so a reader of `status/0` in between would see a device with no
+  # track that is still playing, or one that is paused and playing at once. The
+  # continue clears the same three fields, because `heard/2` reaches it as well.
+  defp handing_over(%State{} = state) do
+    %State{state | pipeline: nil, monitor: nil, started_at: nil}
   end
 
   defp silence(%State{pipeline: nil}), do: :ok

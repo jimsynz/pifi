@@ -37,6 +37,8 @@ defmodule PiFi.Source.AirPlay do
 
   @behaviour PiFi.Source
 
+  alias PiFi.AirPlay.Monitor
+
   @doc false
   @impl PiFi.Source
   def title, do: "AirPlay"
@@ -80,9 +82,7 @@ defmodule PiFi.Source.AirPlay do
        headers: [],
        transport: :airplay,
        container: :none,
-       # ALAC comes off the wire and `PiFi.AirPlay.PlaybackSource` has already decoded
-       # it, so what reaches the pipeline is samples.
-       format: :raw,
+       format: format(Monitor.stream()),
        # **A sender decides when it stops**, so there is no length to count against and
        # nothing to seek in.
        live?: true,
@@ -91,6 +91,17 @@ defmodule PiFi.Source.AirPlay do
        position_bytes: nil
      }}
   end
+
+  # **The two kinds of session carry different audio, and the session decides.** A
+  # realtime sender sends ALAC, which `PiFi.AirPlay.PlaybackSource` decodes itself, so
+  # what reaches the pipeline is samples. A buffered sender sends AAC, and the pipeline
+  # already holds a decoder for that, so the source hands the frames on and
+  # `PiFi.Player.Pipeline` does the rest.
+  #
+  # A session that has gone resolves as raw. The pipeline then finds no socket and says
+  # so, which is a better answer than a decoder that cannot read what arrives.
+  defp format(%{kind: :buffered}), do: :aac
+  defp format(_stream), do: :raw
 
   @doc """
   The one item that stands for the input.

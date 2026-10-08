@@ -23,8 +23,6 @@ defmodule PiFi.Playback.Player do
 
   use Ash.Resource, otp_app: :pifi, domain: PiFi.Playback
 
-  require Logger
-
   alias PiFi.Output.Volume
   alias PiFi.Player.Crossfade
 
@@ -379,20 +377,25 @@ defmodule PiFi.Playback.Player do
   end
 
   @doc """
-  What the player is doing, or `idle/0` when it cannot say.
+  What the player is doing, or `idle/0` when there is no player to say.
 
-  A pipeline that crashes blocks the player, and a caller that waited would stop with
-  it. This waits one second, which is long enough for a player that is working and
-  short enough that a person does not notice.
+  **This never waits for the player and never dies with it**, because it asks the
+  player nothing: `PiFi.Player.status/0` reads the table that the player writes as
+  each of its callbacks returns. A read therefore costs no message, and the work of a
+  play — a resolve that reads a service, an old pipeline that takes seconds to stop —
+  is not in the way of it.
+
+  It used to wait one second and answer `idle/0` when the player was busy, which is
+  how a screen came to show a device out of standby and how a `TEARDOWN` from a
+  telephone came to be read as nothing playing. The answer is the last one the player
+  committed now, so a reader is at most one callback behind rather than wrong.
   """
   @spec state() :: map()
   def state do
-    PiFi.Player.state(:timer.seconds(1))
-  catch
-    :exit, reason ->
-      Logger.warning("The player did not say what it is doing: #{inspect(reason)}")
-
-      idle()
+    case PiFi.Player.status() do
+      {:ok, state} -> state
+      :miss -> idle()
+    end
   end
 
   @doc """

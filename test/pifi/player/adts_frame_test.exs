@@ -3,6 +3,8 @@ defmodule PiFi.Player.AdtsFrameTest do
 
   alias PiFi.Player.AdtsFrame
 
+  doctest PiFi.Player.AdtsFrame
+
   # AAC LC, 44100 Hz, stereo, no CRC, one raw data block, and a frame of 384 bytes.
   # The length of the frame is in the header, so the header and the count below
   # cannot disagree. See `header/1` of the module for each field.

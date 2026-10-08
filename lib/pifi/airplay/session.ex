@@ -26,6 +26,15 @@ defmodule PiFi.AirPlay.Session do
   complete. They degrade the audio on a bad network; they do not mislead a sender about
   what it is connected to.
 
+  ## Two kinds of audio, and the kind decides the socket
+
+  A sender picks the kind from the feature bits that `PiFi.AirPlay.Advertisement`
+  claims. Bit 40 says this receiver takes buffered audio, so a telephone sends stream
+  type 103: AAC over TCP, running ahead of the sound. A realtime sender sends type 96,
+  which is ALAC in RTP over UDP. `kind` says which one this session is, and
+  `PiFi.AirPlay.Monitor` carries it to the player, because the two need different
+  decoders.
+
   ## Sockets belong to the connection that made them
 
   Everything here is linked to the process that called `setup/2`, which is the
@@ -35,7 +44,10 @@ defmodule PiFi.AirPlay.Session do
   """
 
   alias PiFi.AirPlay.AudioSocket
+  alias PiFi.AirPlay.BufferedSocket
   alias PiFi.AirPlay.Setup
+
+  require Logger
 
   @typedoc "What one connection has opened."
   @type t :: %__MODULE__{
@@ -43,6 +55,7 @@ defmodule PiFi.AirPlay.Session do
           acceptor: pid() | nil,
           control: port() | nil,
           audio: pid() | nil,
+          kind: :realtime | :buffered | nil,
           streams: [Setup.stream()],
           timing: :ptp | :ntp | :none | nil,
           name: String.t() | nil
@@ -52,6 +65,7 @@ defmodule PiFi.AirPlay.Session do
             acceptor: nil,
             control: nil,
             audio: nil,
+            kind: nil,
             streams: [],
             timing: nil,
             name: nil
@@ -90,6 +104,8 @@ defmodule PiFi.AirPlay.Session do
   """
   @spec close(t()) :: t()
   def close(%__MODULE__{} = session) do
+    Logger.debug("Closing an AirPlay session: #{inspect(session.audio)}")
+
     if session.audio && Process.alive?(session.audio), do: GenServer.stop(session.audio)
     # The acceptor owns whatever it accepted, so ending it is what closes that as well.
     # Closing the listener alone would leave a sender's event connection open until the
@@ -155,10 +171,47 @@ defmodule PiFi.AirPlay.Session do
 
   defp started(%{audio: audio} = session, _stream) when audio != nil, do: {:ok, session}
 
+  # **The two kinds of session need different sockets, and that is the whole of the
+  # difference here.** A realtime sender sends ALAC in RTP over UDP; a buffered one
+  # sends AAC over TCP and runs ahead of the sound. See `PiFi.AirPlay.BufferedSocket`,
+  # which is where a board at 192.168.3.142 found out that naming a UDP port for a
+  # buffered stream leaves a telephone connecting to nothing.
   defp started(session, stream) do
-    case AudioSocket.start_link(key: stream.key) do
-      {:ok, audio} -> {:ok, %{session | audio: audio}}
-      {:error, reason} -> {:error, {:no_audio_port, reason}}
+    case listening_for(stream) do
+      {:ok, audio, port} ->
+        # **The compression type is the one field worth reading in a log.** This
+        # firmware builds an ADTS header for AAC-LC, and a sender that named another
+        # codec would be decoded as the wrong one, which sounds like noise rather than
+        # like a failure. See `PiFi.Player.AdtsFrame.header/3`.
+        Logger.info(
+          "An AirPlay sender is sending #{stream.kind} audio to port #{port}: " <>
+            "compression #{inspect(stream.compression)}, " <>
+            "#{inspect(stream.sample_rate)} Hz, " <>
+            "#{inspect(stream.frames_per_packet)} frames to a packet."
+        )
+
+        {:ok, %{session | audio: audio, kind: stream.kind}}
+
+      {:error, reason} ->
+        {:error, {:no_audio_port, reason}}
+    end
+  end
+
+  defp listening_for(%{kind: :buffered} = stream) do
+    # A sender names the rate and the frames of a packet in `SETUP` and says nothing
+    # about the channels, so this takes the two that every AirPlay session carries.
+    options = [key: stream.key, sample_rate: stream.sample_rate, channels: 2]
+
+    with {:ok, audio} <- BufferedSocket.start_link(options),
+         {:ok, port} <- BufferedSocket.port(audio) do
+      {:ok, audio, port}
+    end
+  end
+
+  defp listening_for(stream) do
+    with {:ok, audio} <- AudioSocket.start_link(key: stream.key),
+         {:ok, port} <- AudioSocket.port(audio) do
+      {:ok, audio, port}
     end
   end
 
@@ -166,6 +219,7 @@ defmodule PiFi.AirPlay.Session do
   # one that takes nothing. Naming the control port for both keeps the answer honest:
   # there is something listening on it either way.
   defp data_port(%{audio: nil, control: control}), do: :inet.port(control)
+  defp data_port(%{audio: audio, kind: :buffered}), do: BufferedSocket.port(audio)
   defp data_port(%{audio: audio}), do: AudioSocket.port(audio)
 
   # Nothing is sent on the event channel yet, so this accepts the connection and holds

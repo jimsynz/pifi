@@ -161,6 +161,44 @@ defmodule PiFi.PlayerControlsTest do
     end
   end
 
+  # **A reader must never wait for the player.** The work of a play runs in a continue —
+  # a resolve that reads a service, an old pipeline that takes up to 5 seconds to stop —
+  # and a call sits behind all of it. A board logged four seconds of `The player did not
+  # say what it is doing` on 2026-10-08, and every reader drew `PiFi.Playback.Player.idle/0`
+  # for that time: the screens showed a device out of standby, and the AirPlay monitor
+  # read a telephone's `TEARDOWN` as nothing playing.
+  describe "what the player is doing" do
+    # `:sys.suspend/1` stops the player serving its mailbox, which is what a long
+    # continue does to every caller behind it.
+    test "a player that answers nothing still says what it was doing" do
+      playing(1)
+
+      :sys.suspend(Player)
+
+      try do
+        assert %{playing?: true, item: %{title: "Episode 1"}} = Playback.state!()
+        assert catch_exit(Player.state(100))
+      after
+        :sys.resume(Player)
+      end
+    end
+
+    # One description, built in one place, so the table and the player cannot disagree.
+    test "the table and the player say the same thing" do
+      playing(1)
+
+      assert Playback.state!() == Player.state()
+    end
+
+    test "a stop reaches the table" do
+      playing(1)
+      assert :ok = Player.stop()
+      assert_receive %Events.Stopped{}, 2000
+
+      assert %{playing?: false, item: nil, source: nil} = Playback.state!()
+    end
+  end
+
   describe "a pause" do
     test "it stops the audio and it keeps the track" do
       playing(1)

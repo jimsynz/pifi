@@ -141,11 +141,48 @@ defmodule PiFi.AirPlay.RouterTest do
     # A sender that skips has nothing held here to throw away, and answering 501 to a
     # method it expects to succeed would stop the session over nothing.
     test "the methods that need no work are 200", %{session: session} do
-      for method <- ["FLUSH", "SET_PARAMETER", "GET_PARAMETER"] do
+      for method <- ["FLUSH", "SET_PARAMETER", "GET_PARAMETER", "SETPEERS"] do
         {reply, _session} = Router.route(request(method, "rtsp://host/stream"), session)
 
         assert status(reply) == 200
       end
+    end
+
+    # **A buffered sender asks for each of these as a matter of course.** A telephone
+    # met 501 for all of them on a board at 192.168.3.142 on 2026-10-08, asked about
+    # forty times for the audio to start, and then tore the session down without a note
+    # of sound.
+    test "the paths a buffered sender posts to are 200", %{session: session} do
+      for uri <- ["/audioMode", "/command", "/feedback"] do
+        {reply, _session} = Router.route(request("POST", uri), session)
+
+        assert status(reply) == 200
+      end
+    end
+
+    # `SETRATEANCHORTIME` is how a buffered sender says play and pause, so a 501 to it
+    # is a sender that never starts.
+    test "the rate of a buffered sender is 200", %{session: session} do
+      body = BinaryPlist.encode(%{"rate" => 1, "rtpTime" => 0})
+
+      {reply, _session} = Router.route(request("SETRATEANCHORTIME", "rtsp://host", body), session)
+
+      assert status(reply) == 200
+    end
+
+    # The body of this holds the metadata, and a telephone sends what it sends. A body
+    # this firmware cannot read must not be the thing that stops the music.
+    test "a command body that is not a plist is still 200", %{session: session} do
+      {reply, _session} = Router.route(request("POST", "/command", "not a plist"), session)
+
+      assert status(reply) == 200
+    end
+
+    test "a rate that names nothing readable leaves the player alone", %{session: session} do
+      {reply, _session} =
+        Router.route(request("SETRATEANCHORTIME", "rtsp://host", "rubbish"), session)
+
+      assert status(reply) == 200
     end
   end
 

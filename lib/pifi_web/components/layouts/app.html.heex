@@ -12,7 +12,7 @@
             id={"source-#{source.slug}"}
             navigate={~p"/browse/#{source.slug}"}
             label={source.title}
-            current?={source.slug == @current_source}
+            current?={source.slug == @playing_source}
             standby?={@standby?}
             class="flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm"
           >

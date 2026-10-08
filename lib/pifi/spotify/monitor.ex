@@ -109,7 +109,7 @@ defmodule PiFi.Spotify.Monitor do
   # The title and the artist of a cast ride where the ICY title of a station rides. See
   # `PiFi.Source.Spotify.item/0`.
   def handle_info(%TrackChanged{track: track}, state) do
-    if casting?(), do: PiFi.Player.metadata(now_playing(track))
+    if casting?(), do: PiFi.Player.metadata(%{title: now_playing(track)})
 
     {:noreply, state}
   end

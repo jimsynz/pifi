@@ -216,6 +216,56 @@ defmodule PiFiWeb.BrowseLiveTest do
     end)
   end
 
+  # **The top row of the faceplate is the input selector of a stereo.** It marks what
+  # the device is on, and the breadcrumb of the browser says where a person is, so a
+  # cast from a telephone must move it even though nobody pressed anything here.
+  describe "the row of sources" do
+    defp playing_station do
+      PlayingPipeline.use_it()
+      SilentOutput.use_it()
+
+      station = Stations.create(%{country_code: "NZ", title: "Playing FM"})
+
+      Event.subscribe(:player)
+      assert {:ok, :ok} = Playback.play([station.id])
+      assert_receive %Events.Started{}, 2000
+
+      station
+    end
+
+    defp current?(html, slug), do: html =~ ~r/id="source-#{slug}"[^>]*aria-current="page"/
+
+    test "nothing is marked when the device plays nothing", %{conn: conn} do
+      {:ok, _view, html} = live(conn, @podcasts)
+
+      refute current?(html, "internet-radio")
+      refute current?(html, "podcasts")
+    end
+
+    # **The page a person reads is not the source the device is on.** This one is open
+    # at the podcasts and the device is playing a station, and the row says so.
+    test "it marks what the device plays and not the page", %{conn: conn} do
+      playing_station()
+
+      {:ok, _view, html} = live(conn, @podcasts)
+
+      assert current?(html, "internet-radio")
+      refute current?(html, "podcasts")
+    end
+
+    # A person who casts presses nothing on this device, so a row that waited for a
+    # navigation would never move.
+    test "a track that starts while the page is open moves it", %{conn: conn} do
+      {:ok, view, html} = live(conn, @podcasts)
+
+      refute current?(html, "internet-radio")
+
+      playing_station()
+
+      assert current?(render(view), "internet-radio")
+    end
+  end
+
   describe "the branches of a source" do
     test "the page draws what the source names, in that order", %{conn: conn} do
       {:ok, _view, html} = live(conn, @radio)
@@ -1379,10 +1429,13 @@ defmodule PiFiWeb.BrowseLiveTest do
   # the same list back.
   # The top row of the faceplate is the source switch of this device, and a switch stays
   # where a hand put it. See `PiFi.Source.chosen/0`.
-  describe "the source switch" do
+  # **Where the browser opens is navigation, and the source of the device is not.**
+  # `PiFiWeb.Browsing` holds the first and the player holds the second. The tests of
+  # the rule live beside that module; these are the redirect that a person meets.
+  describe "where an address with no source opens" do
     setup do
       on_exit(fn ->
-        case PiFi.Settings.fetch(PiFi.Source.chosen_key()) do
+        case PiFi.Settings.fetch(PiFiWeb.Browsing.key()) do
           {:ok, setting} -> PiFi.Settings.delete!(setting)
           {:error, _reason} -> :ok
         end
@@ -1395,19 +1448,19 @@ defmodule PiFiWeb.BrowseLiveTest do
       assert {:error, {:live_redirect, %{to: @radio}}} = live(conn, ~p"/")
     end
 
-    test "an address with no source opens the source that a person chose", %{conn: conn} do
+    test "it opens where a person was last reading", %{conn: conn} do
       {:ok, _view, _html} = live(conn, @podcasts)
 
       assert {:error, {:live_redirect, %{to: @podcasts}}} = live(conn, ~p"/")
     end
 
-    test "a search of a source moves the switch as well", %{conn: conn} do
+    test "a search of a source is a visit as well", %{conn: conn} do
       {:ok, _view, _html} = live(conn, ~p"/search/podcasts")
 
-      assert PiFi.Source.chosen() == PiFi.Source.Podcasts
+      assert PiFiWeb.Browsing.last() == PiFi.Source.Podcasts
     end
 
-    # A person who took the chosen source out of use must still find a page.
+    # A person who took that source out of use must still find a page.
     test "a source that goes out of use gives the first source in use", %{conn: conn} do
       {:ok, _view, _html} = live(conn, @podcasts)
       PiFi.Source.enable(PiFi.Source.Podcasts, false)

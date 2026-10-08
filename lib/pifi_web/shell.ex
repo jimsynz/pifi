@@ -61,6 +61,26 @@ defmodule PiFiWeb.Shell do
   alias PiFiWeb.Title
 
   @doc """
+  Mark the source that the device is playing, for the top row of the faceplate.
+
+  **The row is the input selector of a stereo and not a breadcrumb.** It marks what
+  the device is on, and the breadcrumb of the browser says where a person is reading.
+  A person who casts from a telephone presses nothing here, so a row that followed the
+  address of the page would go on showing the station they happened to be looking at.
+
+  It reads the player and not `PiFi.Source.chosen/0`, because that setting moves when a
+  person opens a page — `PiFiWeb.BrowseLive` writes it so that the browser opens where
+  they left off — and a row built on it would follow the reading rather than the music.
+  """
+  @spec assign_playing(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+  def assign_playing(socket) do
+    assign(socket, :playing_source, playing_slug(socket.assigns.player_state))
+  end
+
+  defp playing_slug(%{source: nil}), do: nil
+  defp playing_slug(%{source: module}), do: Source.slug(module)
+
+  @doc """
   Read the sources in use, for the top row of the faceplate.
   """
   @spec assign_sources(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
@@ -100,6 +120,7 @@ defmodule PiFiWeb.Shell do
       |> assign(:current_source, nil)
       |> assign(:page_name, nil)
       |> assign(:player_state, Playback.state!())
+      |> assign_playing()
       |> assign(:standby?, Playback.state!().standby?)
       |> attach_title(params)
       |> attach_hook(:standby, :handle_info, &standby/2)
@@ -120,7 +141,8 @@ defmodule PiFiWeb.Shell do
   # composes the same string and sends no diff.
   defp player_moved(%_{} = event, socket) when is_struct(event) do
     if player_event?(event) do
-      {:cont, socket |> assign(:player_state, Playback.state!()) |> compose_title()}
+      {:cont,
+       socket |> assign(:player_state, Playback.state!()) |> assign_playing() |> compose_title()}
     else
       {:cont, socket}
     end

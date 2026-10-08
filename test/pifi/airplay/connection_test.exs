@@ -33,7 +33,7 @@ defmodule PiFi.AirPlay.ConnectionTest do
     # The listener is linked to this test, so it goes when the test does.
     {:ok, {_address, port}} = ThousandIsland.listener_info(server)
 
-    %{port: port, device: device}
+    %{port: port, device: device, server: server}
   end
 
   defp connect(port) do
@@ -159,6 +159,60 @@ defmodule PiFi.AirPlay.ConnectionTest do
     :ok = :gen_tcp.send(socket, "\0\0\0 this is not RTSP \r\n\r\n")
 
     assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2000)
+  end
+
+  # `ThousandIsland.Handler` traps exits, and `PiFi.AirPlay.Session` links every socket
+  # it opens to the connection so that a telephone going away takes the ports with it.
+  describe "a process linked to the connection ending" do
+    defp linked_to(pid) do
+      spawn(fn ->
+        Process.link(pid)
+
+        receive do
+          {:end, reason} -> exit(reason)
+        end
+      end)
+    end
+
+    defp connection_pid(server) do
+      {:ok, [connection]} = ThousandIsland.connection_pids(server)
+
+      connection
+    end
+
+    # A `TEARDOWN` stops the audio socket, so the orderly end of a session must not end
+    # the conversation that ended it.
+    test "an orderly end leaves it answering", %{port: port, server: server} do
+      socket = connect(port)
+      :ok = :gen_tcp.send(socket, get_info(1))
+      {_headers, _body, _rest} = read_reply(socket)
+
+      helper = linked_to(connection_pid(server))
+      reference = Process.monitor(helper)
+      send(helper, {:end, :normal})
+      assert_receive {:DOWN, ^reference, :process, ^helper, :normal}
+
+      :ok = :gen_tcp.send(socket, get_info(2))
+      {headers, _body, _rest} = read_reply(socket)
+
+      assert headers =~ "cseq: 2"
+    end
+
+    # An end that is not orderly is a port this receiver named to a sender and no longer
+    # holds, and there is no telling the sender that.
+    test "an end that is not orderly closes the connection", %{port: port, server: server} do
+      socket = connect(port)
+      :ok = :gen_tcp.send(socket, get_info(1))
+      {_headers, _body, _rest} = read_reply(socket)
+
+      helper = linked_to(connection_pid(server))
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        send(helper, {:end, :boom})
+
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2000)
+      end)
+    end
   end
 
   describe "once a pairing is done" do

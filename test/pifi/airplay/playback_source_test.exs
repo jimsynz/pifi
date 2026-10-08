@@ -19,7 +19,9 @@ defmodule PiFi.AirPlay.PlaybackSourceTest do
   alias Membrane.RawAudio
   alias PiFi.AirPlay.Alac
   alias PiFi.AirPlay.AudioSocket
+  alias PiFi.AirPlay.BufferedSocket
   alias PiFi.AirPlay.PlaybackSource
+  alias PiFi.Player.AdtsFrame
 
   @digest "b62b778352be6523642c0d1ed3318ce375d98191d0879e12c1201e6d7558734b"
   @samples 44_100
@@ -71,7 +73,7 @@ defmodule PiFi.AirPlay.PlaybackSourceTest do
     on_exit(fn -> :gen_udp.close(sender) end)
 
     {[], state} =
-      PlaybackSource.handle_init(nil, %{
+      PlaybackSource.handle_init(nil, %PlaybackSource{
         socket: socket,
         config: Keyword.get(options, :config, @config)
       })
@@ -113,6 +115,69 @@ defmodule PiFi.AirPlay.PlaybackSourceTest do
     end
   end
 
+  # **A buffered session is AAC over TCP, and the pipeline holds the decoder for it.**
+  # So this element hands the frames on rather than decoding them, which is the one real
+  # difference between the two kinds. See `PiFi.AirPlay.BufferedSocket`.
+  describe "a buffered session" do
+    defp buffered(options \\ []) do
+      key = :crypto.strong_rand_bytes(32)
+
+      {:ok, socket} =
+        start_supervised({BufferedSocket, Keyword.merge([key: key], options)})
+
+      {:ok, port} = BufferedSocket.port(socket)
+      {:ok, sender} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false], 2000)
+
+      on_exit(fn -> :gen_tcp.close(sender) end)
+
+      {[], state} =
+        PlaybackSource.handle_init(nil, %PlaybackSource{socket: socket, kind: :buffered})
+
+      {actions, state} = PlaybackSource.handle_playing(nil, state)
+
+      %{state: state, actions: actions, socket: socket, key: key, sender: sender}
+    end
+
+    defp block(packet), do: <<byte_size(packet) + 2::16, packet::binary>>
+
+    test "it announces a byte stream, because the decoder comes after it" do
+      %{actions: actions} = buffered()
+
+      assert [stream_format: {:output, %Membrane.RemoteStream{type: :bytestream}}] = actions
+    end
+
+    # **No ALAC decoder is started for one of these.** A buffered session carries AAC,
+    # and a configuration that described it would describe the wrong codec.
+    test "it starts no decoder" do
+      %{state: state} = buffered()
+
+      assert state.decoder == nil
+    end
+
+    test "a frame that arrived comes out with its ADTS header" do
+      %{state: state, socket: socket, key: key, sender: sender} = buffered()
+
+      :ok = :gen_tcp.send(sender, block(sealed("some aac", key, 0)))
+      assert eventually(fn -> BufferedSocket.statistics(socket).held == 1 end)
+
+      {actions, _state} = PlaybackSource.handle_demand(:output, 1_000, :bytes, nil, state)
+
+      payload = payloads(actions)
+
+      assert payload == AdtsFrame.header(44_100, 2, 8) <> "some aac"
+    end
+  end
+
+  describe "the demand unit" do
+    # The pad is linked to `PiFi.Output.APlaySink`, whose input pad asks in buffers, and
+    # an output pad that names no unit of its own takes that one. The `handle_demand/5`
+    # clause then never matches and the first demand crashes the pipeline.
+    test "the pad asks in bytes" do
+      assert [output: pad] = PlaybackSource.membrane_pads()
+      assert pad.demand_unit == :bytes
+    end
+  end
+
   describe "the format it announces" do
     test "says what the configuration said" do
       %{actions: actions} = playing()
@@ -137,7 +202,7 @@ defmodule PiFi.AirPlay.PlaybackSourceTest do
       {:ok, socket} = start_supervised({AudioSocket, key: :crypto.strong_rand_bytes(32)})
 
       {[], state} =
-        PlaybackSource.handle_init(nil, %{
+        PlaybackSource.handle_init(nil, %PlaybackSource{
           socket: socket,
           config: Alac.config(bit_depth: 32)
         })

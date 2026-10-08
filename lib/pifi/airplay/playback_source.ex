@@ -2,10 +2,23 @@ defmodule PiFi.AirPlay.PlaybackSource do
   @moduledoc """
   The audio of an AirPlay session, as something the player can play.
 
-  It takes packets from a `PiFi.AirPlay.AudioSocket`, decodes them with
-  `PiFi.AirPlay.Alac`, and gives raw samples to the rest of the pipeline. This is the
-  join between a telephone sending audio and the ordinary playing of it, so volume, the
-  screens and the history all work as they do for anything else.
+  This is the join between a telephone sending audio and the ordinary playing of it, so
+  volume, the screens and the history all work as they do for anything else.
+
+  ## Two kinds of session, and the kind decides what leaves here
+
+  A telephone picks the kind, and `PiFi.AirPlay.Session` opens the socket to match.
+
+    * A **realtime** session gives ALAC in RTP over UDP. `PiFi.AirPlay.Alac` decodes it
+      here, because there is no ALAC decoder on Hex and the one in this repository is a
+      NIF rather than a Membrane element. Raw samples leave.
+    * A **buffered** session gives AAC over TCP, and this firmware already holds a
+      decoder for AAC — the one every podcast and half the radio stations go through.
+      So the frames leave as they arrived, in a `Membrane.RemoteStream`, and
+      `PiFi.Player.Pipeline` hands them to `Membrane.AAC.FDK.Decoder`.
+
+  The socket, the demand and the asking are the same for both, which is why one element
+  serves them.
 
   ## The sound card is the clock, and nothing else may be
 
@@ -33,7 +46,8 @@ defmodule PiFi.AirPlay.PlaybackSource do
   ## The configuration is not negotiated
 
   A realtime sender sends no magic cookie, so `PiFi.AirPlay.Alac.config/1` supplies one.
-  The frames per packet come from `SETUP` when a sender named them.
+  The frames per packet come from `SETUP` when a sender named them. A buffered session
+  needs none of this: the ADTS header of each frame says what the frame is.
   """
 
   use Membrane.Source
@@ -42,12 +56,20 @@ defmodule PiFi.AirPlay.PlaybackSource do
 
   alias Membrane.Buffer
   alias Membrane.RawAudio
+  alias Membrane.RemoteStream
   alias PiFi.AirPlay.Alac
   alias PiFi.AirPlay.AudioSocket
+  alias PiFi.AirPlay.BufferedSocket
 
   # A packet is about eight milliseconds of audio, so this is a little under one packet:
   # long enough not to spin, short enough that the card is never kept waiting by it.
   @quiet 5
+
+  # **A stream that goes quiet says so once a second and not once an ask.** The counts
+  # it carries are the ones that separate a telephone that stopped sending from one
+  # whose packets arrive and will not open, and the second of those looks exactly like
+  # the first from here.
+  @rounds_before_reporting div(1000, @quiet)
 
   def_options(
     socket: [
@@ -59,33 +81,78 @@ defmodule PiFi.AirPlay.PlaybackSource do
       default: nil,
       description: """
       The twenty-four byte ALAC configuration. It defaults to what a realtime AirPlay
-      sender sends, which is the one a sender never gives.
+      sender sends, which is the one a sender never gives. A buffered session reads
+      none of it.
       """
+    ],
+    kind: [
+      spec: :realtime | :buffered,
+      default: :realtime,
+      description: "Which kind of session the socket is taking."
     ]
   )
 
-  def_output_pad(:output, accepted_format: %RawAudio{}, flow_control: :manual)
+  # `demand_unit: :bytes` is not optional. Without it the pad takes the unit of whatever
+  # it is linked to — `PiFi.Output.APlaySink` asks in buffers — and the `handle_demand/5`
+  # clause below never matches, so the first demand crashes the pipeline. See
+  # `PiFi.Player.FileSource` and `PiFi.Player.HttpSource`, which carry the same line.
+  def_output_pad(:output,
+    accepted_format: any_of(%RawAudio{}, %RemoteStream{}),
+    flow_control: :manual,
+    demand_unit: :bytes
+  )
 
   defmodule State do
     @moduledoc false
 
     @type t :: %__MODULE__{
             socket: pid(),
+            kind: :realtime | :buffered,
             config: binary(),
             decoder: term(),
-            format: RawAudio.t() | nil,
+            format: RawAudio.t() | RemoteStream.t() | nil,
             silence: binary(),
             demand: non_neg_integer(),
-            asking?: boolean()
+            asking?: boolean(),
+            quiet_rounds: non_neg_integer(),
+            heard?: boolean()
           }
 
-    defstruct [:socket, :config, :decoder, :format, silence: <<>>, demand: 0, asking?: false]
+    defstruct [
+      :socket,
+      :config,
+      :decoder,
+      :format,
+      kind: :realtime,
+      silence: <<>>,
+      demand: 0,
+      asking?: false,
+      quiet_rounds: 0,
+      heard?: false
+    ]
   end
 
   @doc false
   @impl true
   def handle_init(_ctx, options) do
-    {[], %State{socket: options.socket, config: options.config || Alac.config()}}
+    {[],
+     %State{
+       socket: options.socket,
+       kind: options.kind,
+       config: options.config || Alac.config()
+     }}
+  end
+
+  # **A buffered session needs no decoder and no configuration.** The frames carry an
+  # ADTS header that says what each one is, and `Membrane.AAC.FDK.Decoder` reads it.
+  @doc false
+  @impl true
+  def handle_playing(_ctx, %State{kind: :buffered} = state) do
+    format = %RemoteStream{content_format: nil, type: :bytestream}
+
+    Membrane.Logger.info("Playing buffered AirPlay audio from #{inspect(state.socket)}.")
+
+    {[stream_format: {:output, format}], %State{state | format: format}}
   end
 
   @doc false
@@ -106,6 +173,12 @@ defmodule PiFi.AirPlay.PlaybackSource do
           format: format,
           silence: :binary.copy(<<0>>, described.frame_length * RawAudio.frame_size(format))
       }
+
+      Membrane.Logger.info(
+        "Playing AirPlay audio from #{inspect(state.socket)}: " <>
+          "#{described.channels} channels, #{described.sample_rate} Hz, " <>
+          "#{described.bit_depth}-bit, #{described.frame_length} frames to a packet."
+      )
 
       {[stream_format: {:output, format}], state}
     else
@@ -130,23 +203,72 @@ defmodule PiFi.AirPlay.PlaybackSource do
 
   defp served(%State{demand: demand} = state) when demand <= 0, do: {[], state}
 
+  # **A buffered session loses no frame and conceals no gap.** The audio arrives on a
+  # TCP connection, so it arrives in order or the session is over, and there is nothing
+  # here to put right.
+  defp served(%State{kind: :buffered} = state) do
+    case BufferedSocket.take(state.socket) do
+      :empty -> {[], asking(quiet(state))}
+      {:ok, frame} -> sent(heard(state), frame.payload)
+    end
+  end
+
   defp served(%State{} = state) do
     case AudioSocket.take(state.socket) do
       :empty ->
-        {[], asking(state)}
+        {[], asking(quiet(state))}
 
       {:gap, count} ->
         Membrane.Logger.debug("#{count} AirPlay packets did not arrive, so that much silence.")
 
-        sent(state, :binary.copy(state.silence, count))
+        sent(heard(state), :binary.copy(state.silence, count))
 
       {:ok, packet} ->
         case Alac.decode(state.decoder, packet.payload) do
-          {:ok, samples} -> sent(state, samples)
+          {:ok, samples} ->
+            sent(heard(state), samples)
+
           # A frame the decoder could not read is a gap of exactly its own length.
-          {:error, _reason} -> sent(state, state.silence)
+          {:error, reason} ->
+            Membrane.Logger.debug("An AirPlay frame would not decode: #{inspect(reason)}")
+
+            sent(heard(state), state.silence)
         end
     end
+  end
+
+  # **The first packet is worth a line of its own**, because everything before it is a
+  # handshake that can look right and carry nothing.
+  defp heard(%State{heard?: true} = state), do: %State{state | quiet_rounds: 0}
+
+  defp heard(%State{} = state) do
+    Membrane.Logger.info("The first AirPlay audio of this session arrived.")
+
+    %State{state | heard?: true, quiet_rounds: 0}
+  end
+
+  defp quiet(%State{quiet_rounds: rounds} = state)
+       when rounds < @rounds_before_reporting do
+    %State{state | quiet_rounds: rounds + 1}
+  end
+
+  defp quiet(%State{} = state) do
+    Membrane.Logger.debug(
+      "A second of no AirPlay audio. The socket has #{inspect(statistics(state))}."
+    )
+
+    %State{state | quiet_rounds: 0}
+  end
+
+  # A socket that has gone cannot say what it saw, and the asking must not be what
+  # raises. `PiFi.AirPlay.Monitor` logs the reason it went.
+  defp statistics(%State{kind: :buffered, socket: socket}), do: counted(socket, BufferedSocket)
+  defp statistics(%State{socket: socket}), do: counted(socket, AudioSocket)
+
+  defp counted(socket, module) do
+    module.statistics(socket)
+  catch
+    :exit, reason -> reason
   end
 
   defp sent(%State{} = state, <<>>), do: served(state)

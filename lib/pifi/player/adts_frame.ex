@@ -63,6 +63,41 @@ defmodule PiFi.Player.AdtsFrame do
   @probe_ms 1000
 
   @doc """
+  The ADTS header for one frame of bare AAC.
+
+  **A buffered AirPlay session sends AAC with no header at all**, and
+  `Membrane.AAC.FDK.Decoder` reads the ADTS transport layer rather than naked frames.
+  So `PiFi.AirPlay.BufferedSocket` puts one of these in front of each frame it
+  decrypts, which is what Shairport Sync does for the same stream.
+
+  `bytes` is the length of the frame that follows, and the header names the two added
+  together. The rate comes from `SETUP`, and the profile is AAC-LC, which is what a
+  telephone sends.
+
+      iex> PiFi.Player.AdtsFrame.header(44_100, 2, 7)
+      <<255, 241, 80, 128, 1, 223, 252>>
+
+  A rate that ADTS cannot name has no header to give.
+
+      iex> PiFi.Player.AdtsFrame.header(44_101, 2, 7)
+      {:error, {:unnameable_rate, 44_101}}
+  """
+  @spec header(pos_integer(), pos_integer(), non_neg_integer()) ::
+          binary() | {:error, term()}
+  def header(sample_rate, channels, bytes) do
+    case rate_index(sample_rate) do
+      {:ok, index} ->
+        # Profile 1 is AAC-LC, the buffer fullness of 0x7FF says the rate varies, and
+        # the frame carries one raw data block. See the moduledoc for the rest.
+        <<0xFFF::12, 0::1, 0::2, 1::1, 1::2, index::4, 0::1, channels::3, 0::4,
+          bytes + @header_bytes::13, 0x7FF::11, 0::2>>
+
+      :error ->
+        {:error, {:unnameable_rate, sample_rate}}
+    end
+  end
+
+  @doc """
   The first frame boundary at or after `byte`.
 
   `limit` is the byte to stop at, which is the count that the download reports, so
@@ -130,6 +165,13 @@ defmodule PiFi.Player.AdtsFrame do
   def forward(device, byte, ms, limit) do
     with {:ok, start} <- boundary_at(device, byte, limit) do
       {:ok, step(device, start, ms, limit, 0)}
+    end
+  end
+
+  defp rate_index(sample_rate) do
+    case Enum.find_index(Tuple.to_list(@rates), &(&1 == sample_rate)) do
+      nil -> :error
+      index -> {:ok, index}
     end
   end
 

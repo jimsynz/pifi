@@ -59,7 +59,6 @@ defmodule PiFi.Plex.Companion.Router do
   alias PiFi.Plex.Companion.Farewell
   alias PiFi.Plex.Companion.Queue
   alias PiFi.Plex.Server
-  alias PiFi.Source
 
   plug :match
   plug Plug.Parsers, parsers: [:urlencoded], pass: ["*/*"]
@@ -464,35 +463,17 @@ defmodule PiFi.Plex.Companion.Router do
     end
   end
 
-  # **A device that a controller drives leaves standby and it takes the switch with
-  # it.** The player wakes by itself, because a play is a play whoever asked for it. The
-  # switch does not: `PiFi.Source.choose/1` is what the pages of a person call when
-  # they move to a source, and a controller moves no page. A person who hears their
-  # record and then walks to the device must find it where the music is.
-  #
-  # **It goes here and not in `PiFi.Player`.** A play of that module is every play,
-  # and a track of the queue that follows the one a person chose would move the switch
-  # under them. A controller is the caller that has no page of its own.
-  defp playing(container_key, key) do
-    case played(container_key, key) do
-      {:ok, _result} = played ->
-        Source.choose(PiFi.Source.Plex)
-
-        played
-
-      other ->
-        other
-    end
-  end
+  # **A person who hears their record and then walks to the device must find it where
+  # the music is**, and this used to write the source of the device to make that true.
+  # It no longer has to: the row of the faceplate reads the player, which knows what is
+  # playing whoever asked for it. See `PiFiWeb.Browsing`.
+  defp playing(container_key, key), do: played(container_key, key)
 
   defp made(nil), do: {:error, :no_uri}
 
   defp made(uri) do
-    with {:ok, queue} <- Server.create_play_queue(uri),
-         {:ok, _result} = played <- from_queue(queue) do
-      Source.choose(PiFi.Source.Plex)
-
-      played
+    with {:ok, queue} <- Server.create_play_queue(uri) do
+      from_queue(queue)
     end
   end
 

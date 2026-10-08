@@ -357,22 +357,20 @@ defmodule PiFi.Plex.CompanionTest do
       refute Playback.state!().standby?
     end
 
-    # `PiFi.Source.chosen/0` is the switch of the device, and a page with no source in
-    # its address reads it.
-    test "the switch of the device moves to Plex" do
-      Source.choose(Source.InternetRadio)
-
+    # **The source of the device is what the player plays**, and the top row of the
+    # faceplate reads it. This used to write `PiFi.Source.choose/1` so that a person
+    # who walked to the device found it where the music was; the player knew all
+    # along. See `PiFiWeb.Browsing`.
+    test "the source of the device becomes Plex" do
       call("/player/playback/playMedia?key=/library/metadata/470959")
 
-      assert Source.chosen() == Source.Plex
+      assert Playback.state!().source == Source.Plex
     end
 
-    test "a command that plays nothing leaves the switch where it was" do
-      Source.choose(Source.InternetRadio)
-
+    test "a command that plays nothing leaves the source where it was" do
       call("/player/playback/playMedia?key=/library/metadata/404")
 
-      assert Source.chosen() == Source.InternetRadio
+      refute Playback.state!().source == Source.Plex
     end
   end
 
@@ -741,13 +739,11 @@ defmodule PiFi.Plex.CompanionTest do
       assert Playback.state!().item.source_ref == "12"
     end
 
-    # The switch of the device follows the music, in the way that it does for a play.
-    test "the switch of the device moves to Plex" do
-      Source.choose(Source.InternetRadio)
-
+    # The source of the device follows the music, in the way that it does for a play.
+    test "the source of the device becomes Plex" do
       call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
 
-      assert Source.chosen() == Source.Plex
+      assert Playback.state!().source == Source.Plex
     end
 
     test "a command that names no address plays nothing" do

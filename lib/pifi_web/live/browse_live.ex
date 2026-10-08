@@ -55,6 +55,7 @@ defmodule PiFiWeb.BrowseLive do
   alias PiFi.Playback.Facet
   alias PiFi.Playback.Item
   alias PiFi.Source
+  alias PiFiWeb.Browsing
   alias PiFiWeb.ItemList
 
   import PiFiWeb.ItemList,
@@ -102,7 +103,7 @@ defmodule PiFiWeb.BrowseLive do
   def handle_params(%{"source" => slug} = params, uri, socket) do
     with {:ok, module} <- Source.from_slug(slug),
          true <- Source.enabled?(module) do
-      :ok = Source.choose(module)
+      :ok = Browsing.visited(module)
 
       # `Cinder.UrlSync.handle_params/3` gives the socket, and it writes `:url_state`
       # on it. Do not put what it returns into an assign.
@@ -1028,10 +1029,11 @@ defmodule PiFiWeb.BrowseLive do
     if function_exported?(source, :opened, 1), do: source.opened(item), else: :ok
   end
 
-  # An address with no source is a person who asked for "the device", so the device
-  # answers with the switch where they left it. See `PiFi.Source.chosen/0`.
+  # An address with no source is a person who asked for "the device", so the browser
+  # opens where they are most likely to want it: what the device is playing, then where
+  # they were last reading. See `PiFiWeb.Browsing.landing/0`.
   defp chosen_source(socket) do
-    case Source.chosen() do
+    case Browsing.landing() do
       nil -> start_at(socket, nil)
       module -> push_navigate(socket, to: ~p"/browse/#{Source.slug(module)}")
     end

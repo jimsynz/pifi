@@ -36,6 +36,7 @@ defmodule PiFiWeb.SearchLive do
   use PiFiWeb, :live_view
 
   alias PiFi.Source
+  alias PiFiWeb.Browsing
   alias PiFiWeb.ItemList
 
   import PiFiWeb.ItemList, only: [playlist_sheet: 1, row: 1]
@@ -60,7 +61,7 @@ defmodule PiFiWeb.SearchLive do
     with {:ok, module} <- Source.from_slug(slug),
          true <- Source.enabled?(module),
          true <- :search in module.capabilities() do
-      :ok = Source.choose(module)
+      :ok = Browsing.visited(module)
 
       {:noreply,
        socket

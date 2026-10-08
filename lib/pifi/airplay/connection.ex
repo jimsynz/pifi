@@ -51,7 +51,38 @@ defmodule PiFi.AirPlay.Connection do
 
   @impl ThousandIsland.Handler
   def handle_connection(socket, state) do
-    {:continue, %{buffer: <<>>, plain: <<>>, channel: nil, session: session_for(socket, state)}}
+    session = session_for(socket, state)
+
+    Logger.debug("An AirPlay sender at #{session.sender} opened a connection.")
+
+    {:continue, %{buffer: <<>>, plain: <<>>, channel: nil, session: session}}
+  end
+
+  # **The four below are the whole story of how a conversation ended**, and without them
+  # a telephone that gives up leaves nothing in the log at all: it closes the socket, the
+  # process goes quietly, and the ports go with it. A session that stopped seconds after
+  # `RECORD` is the thing worth chasing, and this is where it says which of the four it
+  # was. `PiFi.AirPlay.Router` logs the request that came before.
+  @impl ThousandIsland.Handler
+  def handle_close(_socket, state) do
+    Logger.debug("The AirPlay sender at #{sender(state)} closed the connection.")
+  end
+
+  @impl ThousandIsland.Handler
+  def handle_error(reason, _socket, state) do
+    Logger.warning("The AirPlay connection to #{sender(state)} failed: #{inspect(reason)}")
+  end
+
+  @impl ThousandIsland.Handler
+  def handle_shutdown(_socket, state) do
+    Logger.debug("This receiver is stopping, so #{sender(state)} goes with it.")
+  end
+
+  # The read timeout of `ThousandIsland`, which this receiver leaves at its default of a
+  # minute. It is the one ending that looks like nothing happening at all.
+  @impl ThousandIsland.Handler
+  def handle_timeout(_socket, state) do
+    Logger.info("The AirPlay sender at #{sender(state)} sent nothing for the read timeout.")
   end
 
   @impl ThousandIsland.Handler
@@ -61,10 +92,29 @@ defmodule PiFi.AirPlay.Connection do
       {:continue, state}
     else
       {:error, reason} ->
-        Logger.warning("AirPlay connection closed: #{inspect(reason)}")
+        Logger.warning("AirPlay connection to #{state.session.sender} closed: #{inspect(reason)}")
 
         {:close, state}
     end
+  end
+
+  # `ThousandIsland.Handler` traps exits, and `PiFi.AirPlay.Session` links everything it
+  # opens to this process so that a telephone going away takes the ports with it. So a
+  # `TEARDOWN` that stops the audio socket sends a signal here, and without this clause
+  # the orderly end of a session kills the connection that was ending it.
+  #
+  # An exit that is not orderly is a port this receiver named to a sender and no longer
+  # holds, and there is no telling the sender that. Ending the conversation is what makes
+  # it set up a new one.
+  @impl GenServer
+  def handle_info({:EXIT, _pid, reason}, state) when reason in [:normal, :shutdown] do
+    {:noreply, state}
+  end
+
+  def handle_info({:EXIT, pid, reason}, state) do
+    Logger.warning("An AirPlay session process #{inspect(pid)} ended: #{inspect(reason)}")
+
+    {:stop, {:shutdown, reason}, state}
   end
 
   # Before a pairing there is no channel and the bytes are already plain.
@@ -118,6 +168,12 @@ defmodule PiFi.AirPlay.Connection do
   end
 
   defp secure(state), do: state
+
+  # **A log line must not be the thing that breaks the connection it reports on.** The
+  # four callbacks above can run before `handle_connection/2` has put a session in the
+  # state, and the handler options that stand in its place hold no address.
+  defp sender(%{session: %{sender: sender}}), do: sender
+  defp sender(_state), do: "an unknown address"
 
   defp session_for(socket, state) do
     sender =

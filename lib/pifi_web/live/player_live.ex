@@ -135,17 +135,14 @@ defmodule PiFiWeb.PlayerLive do
     {:noreply, assign(socket, position_ms: position, duration_ms: duration)}
   end
 
-  # The cache reads a logo after the track started, so the path arrives later. A
-  # title of `nil` in such an event must not remove the title that is there.
+  # **A field that the event does not name is one that did not change.** The cache reads
+  # a logo after the track started, so an event of the artwork alone arrives later and
+  # must not remove the title that is there; an AirPlay sender names the words of a
+  # track and the picture of it in separate messages, and each must leave the other
+  # alone.
   @impl Phoenix.LiveView
-  def handle_info(%Events.MetadataChanged{title: nil, artwork_path: path}, socket)
-      when is_binary(path) do
-    {:noreply, socket |> accent(path) |> assign(artwork_path: path)}
-  end
-
-  @impl Phoenix.LiveView
-  def handle_info(%Events.MetadataChanged{title: title}, socket) do
-    {:noreply, assign(socket, stream_title: title)}
+  def handle_info(%Events.MetadataChanged{} = event, socket) do
+    {:noreply, socket |> titled(event.title) |> pictured(event.artwork_path)}
   end
 
   @impl Phoenix.LiveView
@@ -681,6 +678,12 @@ defmodule PiFiWeb.PlayerLive do
   # made the thumbnail. A page that opens in the middle of a track therefore reads the
   # colour before the picture arrives, and a page that shows no artwork keeps the
   # colour that the stylesheet names. See `PiFi.Artwork.Accent`.
+  defp titled(socket, nil), do: socket
+  defp titled(socket, title), do: assign(socket, stream_title: title)
+
+  defp pictured(socket, nil), do: socket
+  defp pictured(socket, path), do: socket |> accent(path) |> assign(artwork_path: path)
+
   defp accent(socket, "/artwork/" <> name) do
     push_event(socket, "accent", %{colour: colour(Artwork.accent(name))})
   end

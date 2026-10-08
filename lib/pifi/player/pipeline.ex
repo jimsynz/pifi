@@ -196,9 +196,12 @@ defmodule PiFi.Player.Pipeline do
   # session lasts as long as one telephone stays connected and this pipeline is built
   # again whenever the output changes. See `PiFi.AirPlay.Monitor`.
   defp source(%{transport: :airplay}, _buffer_bytes) do
-    case AirPlay.Monitor.socket() do
-      nil -> raise "No telephone is sending AirPlay audio."
-      socket -> child(:source, %AirPlay.PlaybackSource{socket: socket})
+    case AirPlay.Monitor.stream() do
+      nil ->
+        raise "No telephone is sending AirPlay audio."
+
+      stream ->
+        child(:source, %AirPlay.PlaybackSource{socket: stream.socket, kind: stream.kind})
     end
   end
 
@@ -278,7 +281,10 @@ defmodule PiFi.Player.Pipeline do
   # headers, and it finds the first frame of a stream that starts in the middle of
   # one. 3 of 9 New Zealand AAC stations start in the middle of a frame, and
   # `Membrane.AAC.Parser` stops with `:invalid_adts_header` on each of those.
-  defp adapter(link, %{transport: :http, container: :none, format: :aac}) do
+  # **A buffered AirPlay session arrives here as well.** `PiFi.AirPlay.BufferedSocket`
+  # puts an ADTS header on each frame for the same reason a station carries one, so the
+  # two take the same path and neither needs a parser.
+  defp adapter(link, %{container: :none, format: :aac}) do
     via_in(link, :input, auto_demand_size: @fdk_input_bytes)
   end
 
