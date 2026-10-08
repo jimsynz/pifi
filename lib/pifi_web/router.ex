@@ -21,10 +21,13 @@ defmodule PiFiWeb.Router do
     # A scheme and not a host: this device answers on its IP address and on more than
     # one mDNS name, so no list of hosts can name them all. That is the reason that
     # `check_origin` is `false` as well. See `config/target.exs`.
+    #
+    # **The policy is one string literal, and it must stay one.** `Sobelow.Config.CSP`
+    # reads the map from the source, so a `<>` between two halves looks to it like a
+    # value it cannot read, and it reports the pipeline as having no policy at all.
     plug(:put_secure_browser_headers, %{
       "content-security-policy" =>
-        "default-src 'self'; connect-src 'self' ws: wss:; " <>
-          "img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+        "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     })
   end
 

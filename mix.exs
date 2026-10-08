@@ -325,7 +325,7 @@ defmodule PiFi.MixProject do
       {:ex_check_ng, "~> 1.0.0-rc.2", only: [:dev, :test], targets: :host},
       {:ex_doc, "~> 0.40", only: [:dev, :test], targets: :host},
       {:phx_install, "~> 0.1", only: [:dev], targets: :host},
-      {:sobelow, "~> 0.15", only: [:dev, :test], targets: :host},
+      {:sobelow, "~> 0.16", only: [:dev, :test], targets: :host},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev}
     ]
   end

@@ -580,6 +580,12 @@ defmodule PiFi.Plex.Companion.Router do
     end
   end
 
+  # Sobelow reports every `send_resp` of `text/xml`, because XML can carry a script.
+  # This body never does: `container/1` builds it from `element/1` and `attribute/1`,
+  # and `escaped/1` below replaces the four characters that could close a tag or an
+  # attribute. The only text of a person that reaches it is the name of the device.
+  Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
+  @sobelow_skip ["XSS.SendResp"]
   defp send_xml(conn, body) do
     conn
     |> put_resp_content_type("text/xml")
