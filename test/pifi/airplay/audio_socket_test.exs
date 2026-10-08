@@ -14,6 +14,7 @@ defmodule PiFi.AirPlay.AudioSocketTest do
   use ExUnit.Case, async: true
 
   alias PiFi.AirPlay.AudioSocket
+  alias PiFi.Test.AirPlayControl
 
   @payload_type 96
 
@@ -258,6 +259,76 @@ defmodule PiFi.AirPlay.AudioSocketTest do
       assert taken(receiver, waves * each)
              |> Enum.map(fn {:ok, packet} -> packet.sequence end) ==
                Enum.to_list(0..(waves * each - 1))
+    end
+  end
+
+  # **Asking for a packet that did not arrive is worth doing while there is still time
+  # to use it**, so the moment to ask is each time a packet lands and the run has a hole
+  # in it. See `PiFi.AirPlay.ControlSocket`.
+  describe "packets that did not arrive" do
+    test "a hole in the run is asked for, as one request" do
+      control = start_supervised!(AirPlayControl)
+      %{receiver: receiver, key: key, send: send} = listening(control: control)
+
+      send.(sent("one", key: key, sequence: 10))
+      send.(sent("four", key: key, sequence: 13))
+      arrived(receiver, 2)
+
+      assert eventually(fn -> AirPlayControl.asked(control) == [{11, 2}] end)
+    end
+
+    # A stream arrives about 350 packets a second, and a hole that stayed open while the
+    # buffer filled would otherwise be asked about hundreds of times.
+    test "the same hole is asked about once" do
+      control = start_supervised!(AirPlayControl)
+      %{receiver: receiver, key: key, send: send} = listening(control: control)
+
+      send.(sent("one", key: key, sequence: 10))
+      for sequence <- 13..16, do: send.(sent("x", key: key, sequence: sequence))
+      arrived(receiver, 5)
+
+      assert eventually(fn -> AirPlayControl.asked(control) == [{11, 2}] end)
+    end
+
+    test "a run with no hole in it asks for nothing" do
+      control = start_supervised!(AirPlayControl)
+      %{receiver: receiver, key: key, send: send} = listening(control: control)
+
+      for sequence <- 10..13, do: send.(sent("x", key: key, sequence: sequence))
+      arrived(receiver, 4)
+
+      assert AirPlayControl.asked(control) == []
+    end
+
+    # A socket with no control channel is the one a session of remote control alone
+    # makes, and it must ask nobody rather than fall over.
+    test "a socket with no control channel asks nobody" do
+      %{receiver: receiver, key: key, send: send} = listening()
+
+      send.(sent("one", key: key, sequence: 10))
+      send.(sent("four", key: key, sequence: 13))
+      arrived(receiver, 2)
+
+      assert Process.alive?(receiver)
+    end
+
+    # A retransmitted packet arrives on the control port and belongs in this buffer, so
+    # it goes through the same decryption and the same ordering as the original.
+    test "a packet that comes back is played in its place" do
+      %{receiver: receiver, key: key, send: send} = listening()
+
+      send.(sent("one", key: key, sequence: 10))
+      send.(sent("three", key: key, sequence: 12))
+      arrived(receiver, 2)
+
+      AudioSocket.deliver(receiver, sent("two", key: key, sequence: 11))
+
+      assert eventually(fn -> AudioSocket.statistics(receiver).held == 3 end)
+
+      assert [{:ok, one}, {:ok, two}, {:ok, three}] = taken(receiver, 3)
+      assert one.payload == "one"
+      assert two.payload == "two"
+      assert three.payload == "three"
     end
   end
 

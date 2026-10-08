@@ -17,14 +17,13 @@ defmodule PiFi.AirPlay.Session do
       sender. Opened and accepted; nothing is sent on it yet, because the metadata is
       useless until the audio works.
     * **data**, UDP. The audio. This is `PiFi.AirPlay.AudioSocket`.
-    * **control**, UDP. Retransmit requests and timing from the sender. Opened so that
-      what it sends has somewhere to go, and **not yet read**: asking for a lost packet
-      again is worth doing and is not done here, so a stream on a poor network has the
-      gaps it has.
+    * **control**, UDP. Retransmit requests and timing. This is
+      `PiFi.AirPlay.ControlSocket`, and it asks a sender again for a packet that did not
+      arrive, which is why a stream on a poor network keeps fewer of its gaps.
 
-  The two that are opened and not serviced are the honest cost of making the handshake
-  complete. They degrade the audio on a bad network; they do not mislead a sender about
-  what it is connected to.
+  The event channel is opened and not written to, which is the honest cost of making the
+  handshake complete: a sender whose connection is accepted and then left quiet carries
+  on, and a sender that found nothing listening would not.
 
   ## Two kinds of audio, and the kind decides the socket
 
@@ -45,6 +44,7 @@ defmodule PiFi.AirPlay.Session do
 
   alias PiFi.AirPlay.AudioSocket
   alias PiFi.AirPlay.BufferedSocket
+  alias PiFi.AirPlay.ControlSocket
   alias PiFi.AirPlay.Setup
 
   require Logger
@@ -53,7 +53,7 @@ defmodule PiFi.AirPlay.Session do
   @type t :: %__MODULE__{
           event: port() | nil,
           acceptor: pid() | nil,
-          control: port() | nil,
+          control: pid() | nil,
           audio: pid() | nil,
           kind: :realtime | :buffered | nil,
           streams: [Setup.stream()],
@@ -112,7 +112,7 @@ defmodule PiFi.AirPlay.Session do
     # whole conversation ended.
     if session.acceptor, do: ended(session.acceptor)
     if session.event, do: :gen_tcp.close(session.event)
-    if session.control, do: :gen_udp.close(session.control)
+    if session.control && Process.alive?(session.control), do: GenServer.stop(session.control)
 
     %__MODULE__{}
   end
@@ -128,7 +128,7 @@ defmodule PiFi.AirPlay.Session do
   defp answer(session, {:streams, streams}) do
     with {:ok, session} <- controlling(session),
          {:ok, session} <- hearing(session, streams) do
-      {:ok, control} = :inet.port(session.control)
+      {:ok, control} = ControlSocket.port(session.control)
       {:ok, data} = data_port(session)
 
       {:ok, Setup.streams_reply(streams, data: data, control: control),
@@ -156,7 +156,7 @@ defmodule PiFi.AirPlay.Session do
   defp controlling(%{control: control} = session) when control != nil, do: {:ok, session}
 
   defp controlling(session) do
-    case :gen_udp.open(0, [:binary, active: false]) do
+    case ControlSocket.start_link([]) do
       {:ok, control} -> {:ok, %{session | control: control}}
       {:error, reason} -> {:error, {:no_control_port, reason}}
     end
@@ -190,7 +190,7 @@ defmodule PiFi.AirPlay.Session do
             "#{inspect(stream.frames_per_packet)} frames to a packet."
         )
 
-        {:ok, %{session | audio: audio, kind: stream.kind}}
+        {:ok, joined(%{session | audio: audio, kind: stream.kind})}
 
       {:error, reason} ->
         {:error, {:no_audio_port, reason}}
@@ -215,10 +215,24 @@ defmodule PiFi.AirPlay.Session do
     end
   end
 
+  # **The two sockets need each other and only one can be opened first.** The control
+  # port is in the answer to `SETUP` whether there is audio or not, so it opens first
+  # and is told about the audio once there is any. See `PiFi.AirPlay.ControlSocket`.
+  defp joined(%{control: nil} = session), do: session
+
+  defp joined(%{audio: nil} = session), do: session
+
+  defp joined(session) do
+    ControlSocket.audio(session.control, session.audio)
+    AudioSocket.control(session.audio, session.control)
+
+    session
+  end
+
   # A session of remote control alone has no audio socket, and the port it is given is
   # one that takes nothing. Naming the control port for both keeps the answer honest:
   # there is something listening on it either way.
-  defp data_port(%{audio: nil, control: control}), do: :inet.port(control)
+  defp data_port(%{audio: nil, control: control}), do: ControlSocket.port(control)
   defp data_port(%{audio: audio, kind: :buffered}), do: BufferedSocket.port(audio)
   defp data_port(%{audio: audio}), do: AudioSocket.port(audio)
 

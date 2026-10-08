@@ -12,6 +12,7 @@ defmodule PiFi.AirPlay.SessionTest do
 
   alias PiFi.AirPlay.AudioSocket
   alias PiFi.AirPlay.BinaryPlist
+  alias PiFi.AirPlay.ControlSocket
   alias PiFi.AirPlay.Session
 
   defp key, do: :crypto.strong_rand_bytes(32)
@@ -81,7 +82,7 @@ defmodule PiFi.AirPlay.SessionTest do
       # Sending to a port nothing holds gives no error to the sender, so the proof is
       # that the socket is the one the session reports.
       assert {:ok, ^data} = AudioSocket.port(session.audio)
-      assert {:ok, ^control} = :inet.port(session.control)
+      assert {:ok, ^control} = ControlSocket.port(session.control)
     end
 
     test "the audio socket takes the key the sender gave" do
@@ -151,13 +152,20 @@ defmodule PiFi.AirPlay.SessionTest do
       assert {:ok, _reply, session} = Session.setup(session, second())
 
       audio = session.audio
-      sockets = [session.event, session.control, :sys.get_state(audio).socket]
+      control = session.control
+
+      sockets = [
+        session.event,
+        :sys.get_state(audio).socket,
+        :sys.get_state(control).socket
+      ]
 
       for socket <- sockets, do: assert(Port.info(socket))
 
       assert Session.close(session) == Session.new()
 
       refute Process.alive?(audio)
+      refute Process.alive?(control)
       for socket <- sockets, do: refute(Port.info(socket))
     end
 

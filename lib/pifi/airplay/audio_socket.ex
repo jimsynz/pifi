@@ -44,6 +44,7 @@ defmodule PiFi.AirPlay.AudioSocket do
   use GenServer
 
   alias PiFi.AirPlay.AudioPacket
+  alias PiFi.AirPlay.ControlSocket
   alias PiFi.AirPlay.JitterBuffer
 
   # How many datagrams the socket delivers before it waits to be asked again.
@@ -89,6 +90,25 @@ defmodule PiFi.AirPlay.AudioSocket do
   @spec take(GenServer.server()) :: {:ok, AudioPacket.t()} | {:gap, pos_integer()} | :empty
   def take(socket), do: GenServer.call(socket, :take)
 
+  @doc """
+  Take one datagram that arrived somewhere else.
+
+  `PiFi.AirPlay.ControlSocket` calls this with a packet a sender sent again, which
+  arrives on the control port and belongs in this buffer. It goes through the same
+  decryption and the same ordering, because a retransmitted packet is the original one.
+  """
+  @spec deliver(GenServer.server(), binary()) :: :ok
+  def deliver(socket, datagram), do: GenServer.cast(socket, {:deliver, datagram})
+
+  @doc """
+  Name the control socket that asks for a packet that did not arrive.
+
+  The control port opens first, because the answer to `SETUP` names it whether there is
+  audio or not. See `PiFi.AirPlay.Session`.
+  """
+  @spec control(GenServer.server(), pid()) :: :ok
+  def control(socket, control), do: GenServer.cast(socket, {:control, control})
+
   @doc "How many datagrams arrived, how many would not open, and how many are waiting."
   @spec statistics(GenServer.server()) :: statistics()
   def statistics(socket), do: GenServer.call(socket, :statistics)
@@ -107,6 +127,8 @@ defmodule PiFi.AirPlay.AudioSocket do
            socket: socket,
            key: key,
            buffer: JitterBuffer.new(Keyword.take(options, [:depth, :capacity])),
+           control: Keyword.get(options, :control),
+           asked_for: nil,
            received: 0,
            refused: 0
          }}
@@ -139,6 +161,12 @@ defmodule PiFi.AirPlay.AudioSocket do
 
   @doc false
   @impl GenServer
+  def handle_cast({:control, control}, state), do: {:noreply, %{state | control: control}}
+
+  def handle_cast({:deliver, datagram}, state), do: {:noreply, took(state, datagram)}
+
+  @doc false
+  @impl GenServer
   def handle_info({:udp, socket, _address, _port, datagram}, %{socket: socket} = state) do
     {:noreply, took(state, datagram)}
   end
@@ -162,10 +190,57 @@ defmodule PiFi.AirPlay.AudioSocket do
 
     case AudioPacket.open(datagram, state.key) do
       {:ok, packet} ->
-        %{state | buffer: JitterBuffer.push(state.buffer, packet.sequence, packet)}
+        buffer = JitterBuffer.push(state.buffer, packet.sequence, packet)
+
+        asked_for_the_absent(%{state | buffer: buffer})
 
       {:error, _reason} ->
         %{state | refused: state.refused + 1}
+    end
+  end
+
+  # **A packet that is absent is worth asking for while there is still time to use it.**
+  # The buffer gives up on one once something `depth` past it arrives, so the moment to
+  # ask is each time a packet lands and the run has a hole in it. A sender that ignores
+  # the request leaves the audio exactly as it would have been.
+  #
+  # **The same hole is asked about once.** A stream arrives about 350 packets a second,
+  # and a hole that stayed open while the buffer filled would otherwise be asked for
+  # hundreds of times — which is the trap the ALAC decoder had to be saved from, with a
+  # datagram in the place of a log line.
+  defp asked_for_the_absent(%{control: nil} = state), do: state
+
+  defp asked_for_the_absent(state) do
+    case run_of_absent(state.buffer) do
+      nil -> %{state | asked_for: nil}
+      {first, _count} when first == state.asked_for -> state
+      {first, count} -> asked(state, first, count)
+    end
+  end
+
+  defp asked(state, first, count) do
+    ControlSocket.request(state.control, first, count)
+
+    %{state | asked_for: first}
+  end
+
+  # The first unbroken run of absent sequence numbers. A burst of loss is consecutive,
+  # and `PiFi.AirPlay.ControlSocket.ask/2` takes a count for that reason, so a second
+  # hole waits for the first to be answered or given up on.
+  defp run_of_absent(buffer) do
+    case JitterBuffer.missing(buffer) do
+      [] ->
+        nil
+
+      [first | _rest] = missing ->
+        run =
+          missing
+          |> Enum.with_index()
+          |> Enum.take_while(fn {sequence, offset} ->
+            sequence == Integer.mod(first + offset, 0x10000)
+          end)
+
+        {first, length(run)}
     end
   end
 end
