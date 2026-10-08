@@ -3,9 +3,14 @@ defmodule PiFi.HomeAssistantTest do
 
   doctest PiFi.HomeAssistant, import: true
 
+  alias PiFi.Artwork
+  alias PiFi.Artwork.Thumbnail
+  alias PiFi.Cache
+  alias PiFi.Device.Identity
   alias PiFi.Event
   alias PiFi.Event.Player, as: Events
   alias PiFi.HomeAssistant
+  alias PiFi.HomeAssistant.Artwork, as: ArtworkEntity
   alias PiFi.HomeAssistant.Player
   alias PiFi.Settings
   alias PiFi.Test.PlayingPipeline
@@ -177,7 +182,81 @@ defmodule PiFi.HomeAssistantTest do
     end
   end
 
+  # The ESPHome protocol carries no metadata for a player, so the cover of what is
+  # playing goes to Home Assistant as a camera instead. See
+  # `PiFi.HomeAssistant.Artwork`.
+  describe "the cover that Home Assistant draws" do
+    setup do
+      start_supervised!({Homex, id: "test", entities: [ArtworkEntity]})
+
+      assert eventually(fn -> is_map(Homex.Entity.snapshot(:pifi_artwork)) end)
+
+      on_exit(fn -> File.rm_rf(Artwork.directory()) end)
+
+      :ok
+    end
+
+    # A camera with no image breaks the first frame that the bridge builds, so the mark
+    # of the product is there before anything plays.
+    test "it holds the mark of the product while nothing plays" do
+      assert eventually(fn -> cover() == File.read!(Identity.shipped_splash({320, 240})) end)
+    end
+
+    test "a track that starts sends its cover" do
+      name = cached("a small cover")
+
+      Event.publish(:player, %Events.Started{live?: false, artwork_path: "/artwork/#{name}"})
+
+      assert eventually(fn -> cover() == "a small cover" end)
+    end
+
+    # A stream names a new track in the middle of itself, and one that names no picture
+    # leaves the cover of the station where it was.
+    test "a stream that names a picture replaces the cover, and one that names none does not" do
+      name = cached("a cover of a track")
+
+      Event.publish(:player, %Events.MetadataChanged{artwork_path: "/artwork/#{name}"})
+      assert eventually(fn -> cover() == "a cover of a track" end)
+
+      Event.publish(:player, %Events.MetadataChanged{title: "Another track"})
+      refute eventually(fn -> cover() != "a cover of a track" end, 5)
+    end
+
+    test "a stop puts the mark of the product back" do
+      name = cached("a small cover")
+
+      Event.publish(:player, %Events.Started{live?: false, artwork_path: "/artwork/#{name}"})
+      assert eventually(fn -> cover() == "a small cover" end)
+
+      Event.publish(:player, %Events.Stopped{reason: :requested})
+
+      assert eventually(fn -> cover() == File.read!(Identity.shipped_splash({320, 240})) end)
+    end
+  end
+
   defp snapshot, do: Homex.Entity.snapshot(:pifi_player) || %{}
+
+  defp cover, do: Homex.Entity.snapshot(:pifi_artwork)[:image]
+
+  # `vipsthumbnail` belongs to the target, so a test writes the thumbnail that
+  # `PiFi.Artwork.generate_thumbnail/1` would write and reads it back.
+  defp cached(bytes) do
+    entry =
+      Cache.put!("artwork", Base.encode16(:crypto.hash(:sha256, bytes), case: :lower), %{
+        bytes: bytes,
+        content_type: "image/jpeg"
+      })
+
+    Cache.put!("artwork", entry.entry_key <> ".thumbnail", %{
+      bytes: bytes,
+      content_type: "image/jpeg",
+      variant_of_blob_id: entry.id,
+      variant_name: "thumbnail",
+      variant_digest: Thumbnail.digest()
+    })
+
+    entry.entry_key
+  end
 
   # The entity writes in its own process, so a test waits for it and does not sleep for
   # a period that a slow machine makes wrong.

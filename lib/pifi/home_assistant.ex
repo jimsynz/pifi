@@ -15,6 +15,13 @@ defmodule PiFi.HomeAssistant do
   `homex` is the bridge, and the media player entity of it is ours: see
   `PiFi.HomeAssistant.Player`. `mix.exs` points at a branch of a fork for that reason.
 
+  ## The cover arrives as a camera
+
+  The protocol carries a state, a volume and a mute flag for a player, and no metadata
+  at all, so the artwork cannot ride on the player. `PiFi.HomeAssistant.Artwork`
+  publishes it as a camera instead, and that moduledoc says how to put it back in the
+  media control card.
+
   ## A person turns this on, and a device that no person asked leaves it off
 
   **It listens on TCP port 6053.** That is the second listener of this firmware, and
@@ -40,6 +47,7 @@ defmodule PiFi.HomeAssistant do
   alias Homex.Adapter.ESPHome
   alias PiFi.Device.Identity
   alias PiFi.Device.Upgrade
+  alias PiFi.HomeAssistant.Artwork
   alias PiFi.HomeAssistant.Player
   alias PiFi.Settings
 
@@ -165,7 +173,7 @@ defmodule PiFi.HomeAssistant do
                ]
              ],
              adapters: [{ESPHome, [port: @port] ++ mdns()}],
-             entities: [Player]
+             entities: [Player, Artwork]
            ]
          ]}
     }
