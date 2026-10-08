@@ -27,7 +27,9 @@ defmodule PiFi.Source.Bluetooth do
   cast from a telephone without either switch knowing about the other.
 
   **The switch here turns the radio on if it is off**, because a person who turns this
-  source on and finds nothing has been told nothing. See `PiFi.Bluetooth.Monitor`.
+  source on and finds nothing has been told nothing. Turning it off leaves the radio
+  alone, because a person may be listening on Bluetooth headphones. See
+  `PiFi.Bluetooth.Monitor`.
 
   ## It is out of use until a person says otherwise
 

@@ -54,6 +54,11 @@ defmodule PiFi.Application do
         # Three daemons and a radio that answers anything in range, so it starts with
         # none of them for the same reason. See `PiFi.Bluetooth`.
         PiFi.Bluetooth,
+        # **It is not a child of `PiFi.Bluetooth`, and the reason is the switch it
+        # watches.** A person turning the Bluetooth source on is how the radio starts,
+        # so the thing that hears that has to be running while the radio is not. See
+        # `PiFi.Bluetooth.Monitor`.
+        PiFi.Bluetooth.Monitor,
         # It listens on 7000 and it starts with no child for the same reason. See
         # `PiFi.AirPlay.Server`.
         PiFi.AirPlay.Server,

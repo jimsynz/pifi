@@ -26,12 +26,19 @@ defmodule PiFi.Bluetooth.Monitor do
   it is checked against the source of what is playing rather than against anything this
   process remembers.
 
-  ## It runs whether the radio does or not
+  ## It runs whether the radio does or not, and that is what lets it start the radio
 
-  Like the monitor beside it in `PiFi.Spotify`, this is cheap: two subscriptions and a
-  poll that only runs after a device connected. A monitor that existed only while the
-  daemons did would have to be started and stopped by the code that starts and stops
-  them, for no gain.
+  **A person turns this source on under Settings → Sources, and the radio may be off.**
+  Nothing else would turn it on: `PiFi.Playback.enable_source/2` is the generic switch
+  and knows nothing about any source, which is what `PiFi.Source` exists to keep true.
+  So this is a child of the application and not of `PiFi.Bluetooth`, because a monitor
+  that only ran while the daemons did could not be the thing that starts them.
+  `PiFi.Spotify.Monitor` does the same job for the same reason.
+
+  **Turning the source off leaves the radio alone.** The radio is shared: a person
+  listening on Bluetooth headphones has `PiFi.Output.Alsa` pointed at it, and stopping
+  the daemons would take their music away to tidy up a switch they did not touch. So
+  this starts and never stops.
   """
 
   use GenServer
@@ -91,8 +98,18 @@ defmodule PiFi.Bluetooth.Monitor do
   @impl GenServer
   def handle_info(:look, state), do: {:noreply, look(state)}
 
+  # **A person who turns this on and finds nothing has been told nothing.** The radio is
+  # what a telephone pairs with, so turning the source on turns it on. A board that has
+  # no adapter is left alone, because no daemon will change that.
+  def handle_info(%EnabledChanged{source: Source.Bluetooth, enabled?: true}, state) do
+    started_the_radio()
+
+    {:noreply, state}
+  end
+
   # A person turning this source off while a telephone is playing means the music
-  # stops, in the way that it does for Spotify.
+  # stops, in the way that it does for Spotify. **The radio stays on**: it is shared
+  # with the headphones a person may be listening to. See the module documentation.
   def handle_info(%EnabledChanged{source: Source.Bluetooth, enabled?: false}, state) do
     if playing?(), do: Player.stop()
 
@@ -171,6 +188,25 @@ defmodule PiFi.Bluetooth.Monitor do
   end
 
   defp settled(state), do: %{state | attempts: 0}
+
+  defp started_the_radio do
+    cond do
+      PiFi.Bluetooth.enabled?() ->
+        :ok
+
+      not PiFi.Bluetooth.adapter?() ->
+        Logger.info("Bluetooth is a source now, and this board has no adapter.")
+
+      true ->
+        told(PiFi.Bluetooth.enable(true))
+    end
+  end
+
+  defp told(:ok), do: Logger.info("Bluetooth is a source now, so the radio is on.")
+
+  defp told({:error, reason}),
+    do:
+      Logger.warning("Bluetooth is a source now and the radio did not start: #{inspect(reason)}")
 
   defp playing?, do: match?(%{source: Source.Bluetooth}, PiFi.Playback.state!())
 end

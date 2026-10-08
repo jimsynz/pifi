@@ -72,8 +72,10 @@ defmodule PiFi.Bluetooth.MonitorTest do
   end
 
   describe "what it does with the music" do
+    # **It is a child of the application now**, because the switch it watches is how the
+    # radio starts and a monitor that only ran while the daemons did could not do that.
     setup do
-      start_supervised!(Monitor)
+      assert is_pid(Process.whereis(Monitor))
 
       :ok
     end
@@ -93,6 +95,26 @@ defmodule PiFi.Bluetooth.MonitorTest do
       refute eventually(fn -> not PiFi.Playback.state!().playing? end, 5)
     end
 
+    # **A person who turns this on and finds nothing has been told nothing**, so the
+    # source switch is what starts the radio. A machine that is not the board has no
+    # adapter, which is the branch this reaches, and the point is that it says so and
+    # carries on rather than raising on a laptop.
+    test "turning the source on asks for the radio" do
+      refute PiFi.Bluetooth.enabled?()
+
+      Event.publish(:source, %EnabledChanged{source: Source.Bluetooth, enabled?: true})
+
+      refute eventually(fn -> not Process.alive?(Process.whereis(Monitor)) end, 5)
+    end
+
+    # The radio is shared with the headphones a person may be listening to, so taking
+    # the source out of use must not stop the daemons.
+    test "turning the source off leaves the radio alone" do
+      Event.publish(:source, %EnabledChanged{source: Source.Bluetooth, enabled?: false})
+
+      refute eventually(fn -> not Process.alive?(Process.whereis(Monitor)) end, 5)
+    end
+
     # Nothing is connected in a test, so this is the case where a signal arrives and
     # there is nothing behind it. It must not start anything and it must not fall over.
     test "a connection change with no telephone behind it plays nothing" do
@@ -103,9 +125,9 @@ defmodule PiFi.Bluetooth.MonitorTest do
     end
   end
 
-  # Bluetooth is off on a device nobody asked for it, so the parts above call this
-  # whether the monitor is running or not.
-  test "it answers rather than exiting when it is not running" do
+  # Bluetooth is off on a device nobody asked for it, so the watcher calls this whether
+  # the daemons are running or not.
+  test "it answers rather than exiting when there is nothing behind it" do
     assert :ok = Monitor.connection_changed()
   end
 

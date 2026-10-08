@@ -208,8 +208,7 @@ defmodule PiFi.Bluetooth do
           bluealsa(),
           client(),
           agent(),
-          watcher(),
-          monitor()
+          watcher()
         ],
         do: start_child(child)
 
@@ -299,7 +298,6 @@ defmodule PiFi.Bluetooth do
 
   defp stop_daemons do
     for id <- [
-          PiFi.Bluetooth.Monitor,
           PiFi.Bluetooth.Watcher,
           PiFi.Bluetooth.Agent,
           PiFi.Bluetooth.Bus,
@@ -377,12 +375,6 @@ defmodule PiFi.Bluetooth do
   # connection. See `PiFi.Bluetooth.Watcher`.
   defp watcher do
     %{id: PiFi.Bluetooth.Watcher, start: {PiFi.Bluetooth.Watcher, :start_link, [[]]}}
-  end
-
-  # It comes after the watcher because the watcher is what hands it a device that
-  # connected. See `PiFi.Bluetooth.Monitor`.
-  defp monitor do
-    %{id: PiFi.Bluetooth.Monitor, start: {PiFi.Bluetooth.Monitor, :start_link, [[]]}}
   end
 
   defp bluetoothd do
