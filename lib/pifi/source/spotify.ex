@@ -137,10 +137,7 @@ defmodule PiFi.Source.Spotify do
        This uses librespot, which is not made by Spotify. That project says connecting \
        to Spotify this way is probably against their terms. Turning it on is your call.\
        """},
-      """
-      The sound card plays one thing at a time. If PiFi is already playing, stop it \
-      before you cast.\
-      """
+      "Casting replaces whatever PiFi is playing."
     ]
   end
 

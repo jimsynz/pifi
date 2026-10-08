@@ -1413,12 +1413,14 @@ defmodule PiFiWeb.SettingsLiveTest do
       assert html =~ "Anyone on your network"
     end
 
-    # The card plays one thing at a time, and a person meeting that with no warning
-    # would read it as the feature being broken.
-    test "it says that the card plays one thing at a time", %{conn: conn} do
+    # **A cast used to need the music stopped first, and it does not any more.** The
+    # audio goes through `PiFi.Player` now, so sending replaces what is playing — and a
+    # person told to stop first would read a working feature as a broken one.
+    test "it says that sending replaces what is playing", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings/sources/air-play")
 
-      assert html =~ "one thing at a time"
+      assert html =~ "replaces whatever PiFi is playing"
+      refute html =~ "one thing at a time"
     end
 
     # **The switch and the port cannot be allowed to disagree.** The listener follows
@@ -1479,12 +1481,13 @@ defmodule PiFiWeb.SettingsLiveTest do
              |> render() =~ "against their terms"
     end
 
-    # The card plays one thing at a time, and a person meeting that with no warning
-    # would read it as the feature being broken.
-    test "it says that the card plays one thing at a time", %{conn: conn} do
+    # **A cast used to need the music stopped first, and it does not any more.** See the
+    # same test for AirPlay.
+    test "it says that casting replaces what is playing", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings/sources/spotify")
 
-      assert html =~ "one thing at a time"
+      assert html =~ "replaces whatever PiFi is playing"
+      refute html =~ "one thing at a time"
     end
 
     test "a person turns it on and off again", %{conn: conn} do

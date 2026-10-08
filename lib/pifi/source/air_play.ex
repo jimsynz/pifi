@@ -137,10 +137,7 @@ defmodule PiFi.Source.AirPlay do
       Anyone on your network can send to it, which is how AirPlay works. Leave it off \
       if that is not what you want.\
       """,
-      """
-      The sound card plays one thing at a time. If PiFi is already playing, stop it \
-      before you send.\
-      """
+      "Sending replaces whatever PiFi is playing."
     ]
   end
 

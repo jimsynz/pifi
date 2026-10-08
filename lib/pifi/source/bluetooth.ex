@@ -129,10 +129,7 @@ defmodule PiFi.Source.Bluetooth do
       from your phone. The window closes by itself.\
       """,
       "The sound is SBC, which is what every phone has. A USB DAC sounds better.",
-      """
-      The sound card plays one thing at a time. If PiFi is already playing, stop it \
-      before you start.\
-      """
+      "Playing from your phone replaces whatever PiFi is playing."
     ]
   end
 
