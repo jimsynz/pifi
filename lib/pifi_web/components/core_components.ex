@@ -34,6 +34,7 @@ defmodule PiFiWeb.CoreComponents do
   # label that already says Plex. `brand/plex.svg` is therefore the chevron.
   @source_icons %{
     airplay: "ph-airplay",
+    bluetooth: "ph-bluetooth",
     cloud: "ph-cloud",
     jellyfin: "brand-jellyfin",
     library: "ph-stack",

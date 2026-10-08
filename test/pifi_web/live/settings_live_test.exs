@@ -99,7 +99,7 @@ defmodule PiFiWeb.SettingsLiveTest do
     test "each row says what the section holds", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/settings")
 
-      assert html =~ "1 of 6 enabled"
+      assert html =~ "1 of #{length(PiFi.Source.all())} enabled"
       assert html =~ "free of"
     end
 

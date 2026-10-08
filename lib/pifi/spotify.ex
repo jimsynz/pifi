@@ -37,7 +37,7 @@ defmodule PiFi.Spotify do
 
   The card takes one program at a time, and `aplay` (through `PiFi.Output.APlayPort`)
   is that program. librespot plays into the ALSA loopback instead, and
-  `PiFi.Spotify.CaptureSource` reads the other end into an ordinary `PiFi.Player`
+  `PiFi.Player.CaptureSource` reads the other end into an ordinary `PiFi.Player`
   pipeline. So a cast stops whatever was playing, the volume and the screens work as
   they do for anything else, and the cast goes to whichever card a person chose. See
   `PiFi.Spotify.Loopback`.

@@ -13,9 +13,10 @@ defmodule PiFi.Bluetooth do
   - `dbus-daemon` carries the system bus. BlueZ claims `org.bluez` on it as it starts
     and exits when there is no bus to claim it on.
   - `bluetoothd` owns the adapter and the pairings.
-  - `bluealsa` turns a paired device into that ALSA name. It routes nothing until it
-    is told a profile, and `a2dp-source` is the one that **sends** audio to a speaker.
-    `a2dp-sink`, which takes audio from a telephone, is a separate feature.
+  - `bluealsa` turns a paired device into that ALSA name. It routes nothing until it is
+    told a profile, and it is told both: `a2dp-source` **sends** audio to a speaker and
+    `a2dp-sink` **takes** it from a telephone. The second one is `PiFi.Source.Bluetooth`,
+    and it arrives as a capture PCM rather than as an output.
 
   All three come from NBPR, because they are binaries and a Nerves system is not where
   a binary belongs. The kernel side cannot: `CONFIG_BT` and the `.hcd` blob of the radio
@@ -68,10 +69,11 @@ defmodule PiFi.Bluetooth do
   @asoundrc "/root/.asoundrc"
   @plugin_config "etc/alsa/conf.d/20-bluealsa.conf"
 
-  # A stereo sends audio to a speaker. Taking audio from a telephone is the other half
-  # of Bluetooth audio and a separate feature, and a daemon that was told both would
-  # advertise this device as a speaker as well.
-  @profiles ["a2dp-source"]
+  # **One daemon serves both directions.** `a2dp-source` sends audio to a speaker and
+  # `a2dp-sink` takes it from a telephone, and `bluealsad` takes both at once, so a
+  # person can listen on headphones and cast from a telephone without either switch
+  # knowing about the other. See `PiFi.Source.Bluetooth`.
+  @profiles ["a2dp-source", "a2dp-sink"]
 
   # **Two files are called `system.conf` and only one of them starts a bus.**
   # `usr/share/dbus-1/system.conf` in the package's priv is the real configuration;
@@ -200,7 +202,15 @@ defmodule PiFi.Bluetooth do
     keep_pairings()
     name_the_plugin()
 
-    for child <- [dbus_daemon(), bluetoothd(), bluealsa(), client(), agent(), watcher()],
+    for child <- [
+          dbus_daemon(),
+          bluetoothd(),
+          bluealsa(),
+          client(),
+          agent(),
+          watcher(),
+          monitor()
+        ],
         do: start_child(child)
 
     :ok
@@ -289,6 +299,7 @@ defmodule PiFi.Bluetooth do
 
   defp stop_daemons do
     for id <- [
+          PiFi.Bluetooth.Monitor,
           PiFi.Bluetooth.Watcher,
           PiFi.Bluetooth.Agent,
           PiFi.Bluetooth.Bus,
@@ -366,6 +377,12 @@ defmodule PiFi.Bluetooth do
   # connection. See `PiFi.Bluetooth.Watcher`.
   defp watcher do
     %{id: PiFi.Bluetooth.Watcher, start: {PiFi.Bluetooth.Watcher, :start_link, [[]]}}
+  end
+
+  # It comes after the watcher because the watcher is what hands it a device that
+  # connected. See `PiFi.Bluetooth.Monitor`.
+  defp monitor do
+    %{id: PiFi.Bluetooth.Monitor, start: {PiFi.Bluetooth.Monitor, :start_link, [[]]}}
   end
 
   defp bluetoothd do

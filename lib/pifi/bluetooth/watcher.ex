@@ -43,6 +43,7 @@ defmodule PiFi.Bluetooth.Watcher do
 
   alias PiFi.Bluetooth.Bus
   alias PiFi.Bluetooth.Devices
+  alias PiFi.Bluetooth.Monitor
   alias PiFi.Player
 
   @properties "org.freedesktop.DBus.Properties"
@@ -165,7 +166,15 @@ defmodule PiFi.Bluetooth.Watcher do
   end
 
   def handle_info({:signal, _sender, interface, member, _path, arguments}, state) do
-    if connection_changed?(interface, member, arguments), do: told()
+    if connection_changed?(interface, member, arguments) do
+      told()
+
+      # **A telephone connecting is the same signal and a different question.** This
+      # process owns the subscriptions, because the library only matches an exact path
+      # and one for each paired device is what that costs, so the monitor is handed the
+      # change rather than subscribing to the same paths again.
+      Monitor.connection_changed()
+    end
 
     {:noreply, state}
   end

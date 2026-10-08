@@ -24,6 +24,8 @@ defmodule PiFi.Player.Pipeline do
   use Membrane.Pipeline
 
   alias PiFi.AirPlay
+  alias PiFi.Bluetooth
+  alias PiFi.Player.CaptureSource
   alias PiFi.Player.FileSource
   alias PiFi.Player.Hls
   alias PiFi.Player.HttpSource
@@ -187,7 +189,26 @@ defmodule PiFi.Player.Pipeline do
   # writes one half of an ALSA loopback and this reads the other. See
   # `PiFi.Spotify.Loopback`.
   defp source(%{transport: :capture} = playable, _buffer_bytes) do
-    child(:source, %PiFi.Spotify.CaptureSource{device: playable.uri, command: "arecord"})
+    child(:source, %CaptureSource{device: playable.uri, command: "arecord"})
+  end
+
+  # **A telephone over Bluetooth is a capture as well, and the device is not in the
+  # playable.** A2DP negotiates the rate with the telephone and the pipeline is built
+  # again whenever the output changes, so both are read here rather than frozen when the
+  # source resolved. See `PiFi.Bluetooth.Sender`.
+  defp source(%{transport: :bluetooth}, _buffer_bytes) do
+    case Bluetooth.Sender.playing() do
+      nil ->
+        raise "No telephone is sending over Bluetooth."
+
+      sender ->
+        child(:source, %CaptureSource{
+          device: sender.device,
+          command: "arecord",
+          sample_rate: sender.sample_rate,
+          channels: sender.channels
+        })
+    end
   end
 
   # **An AirPlay stream is a telephone sending audio**, so there is no network to read

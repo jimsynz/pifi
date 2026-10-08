@@ -89,7 +89,7 @@ defmodule PiFi.Source.Spotify do
        headers: [],
        transport: :capture,
        container: :none,
-       # The samples are already samples. See `PiFi.Spotify.CaptureSource`.
+       # The samples are already samples. See `PiFi.Player.CaptureSource`.
        format: :raw,
        # **A cast has no end that this device knows.** A telephone decides when it
        # stops, so there is no length to count against and nothing to seek in.

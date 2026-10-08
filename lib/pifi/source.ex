@@ -189,7 +189,7 @@ defmodule PiFi.Source do
     is a file that `PiFi.Player.Download` writes while the player reads it, and
     `:capture` is a sound card that another program is playing into. A cast reaches
     this device that way: librespot plays to an ALSA loopback and the player reads the
-    other half of it. See `PiFi.Spotify.CaptureSource`.
+    other half of it. See `PiFi.Player.CaptureSource`.
   - `container` is what carries the audio. `:mpeg_ts` needs a demultiplexer, `:ogg`
     names a container that the decoder reads itself, and `:none` gives the audio as
     it is.
@@ -222,7 +222,7 @@ defmodule PiFi.Source do
   @type playable :: %{
           uri: String.t(),
           headers: [{String.t(), String.t()}],
-          transport: :http | :hls | :download | :capture,
+          transport: :http | :hls | :download | :capture | :airplay | :bluetooth,
           container: :none | :mpeg_ts | :ogg,
           format: :mp3 | :aac | :flac | :vorbis | :opus | :speex | :raw | :unknown,
           live?: boolean(),
@@ -611,7 +611,8 @@ defmodule PiFi.Source do
       PiFi.Source.Jellyfin,
       PiFi.Source.Plex,
       PiFi.Source.Spotify,
-      PiFi.Source.AirPlay
+      PiFi.Source.AirPlay,
+      PiFi.Source.Bluetooth
     ])
   end
 

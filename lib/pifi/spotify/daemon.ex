@@ -30,7 +30,7 @@ defmodule PiFi.Spotify.Daemon do
   ## It plays into the loopback
 
   **librespot never opens the sound card now.** It writes to one half of an ALSA
-  loopback and `PiFi.Spotify.CaptureSource` reads the other, so `aplay` is the only
+  loopback and `PiFi.Player.CaptureSource` reads the other, so `aplay` is the only
   program that opens the card and a cast is a stream that `PiFi.Player` carries like
   any other. The rule about stopping the music before casting is gone with it.
 

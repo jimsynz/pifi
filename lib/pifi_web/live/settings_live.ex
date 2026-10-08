@@ -300,6 +300,26 @@ defmodule PiFiWeb.SettingsLive do
   # here: a `GenServer.call` that takes twenty seconds is a page that answers nothing
   # for twenty seconds. The work goes to a task and the answer comes back as a message.
   @impl Phoenix.LiveView
+  # **A stereo that was always discoverable is one anyone in the street can pair with**,
+  # so this is a window with a timeout that BlueZ closes rather than a setting. See
+  # `PiFi.Bluetooth.Sender`.
+  def handle_event("toggle_discoverable", _params, socket) do
+    open? = not socket.assigns.bluetooth_discoverable?
+
+    result = if open?, do: Bluetooth.Sender.open_window(), else: Bluetooth.Sender.close_window()
+
+    case result do
+      :ok ->
+        {:noreply, socket |> assign(:bluetooth_discoverable?, open?) |> refresh()}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Couldn't change whether your phone can find this device.")
+         |> refresh()}
+    end
+  end
+
   def handle_event("pair_bluetooth", %{"path" => path}, socket) do
     {:noreply, bluetooth_task(socket, path, :paired, fn -> Bluetooth.Devices.pair(path) end)}
   end
@@ -1527,6 +1547,13 @@ defmodule PiFiWeb.SettingsLive do
         Bluetooth carries SBC only, so a headset will not sound as good as the USB DAC.
       </p>
 
+      <p class="mt-2 text-sm text-ink-dim">
+        To play music from your phone instead, make this device discoverable and pair from
+        the phone. Turn Bluetooth on under
+        <.link navigate={~p"/settings/sources"} class="underline">Sources</.link>
+        to hear it.
+      </p>
+
       <div class="mt-4 flex gap-2">
         <button
           id="toggle-bluetooth"
@@ -1551,7 +1578,30 @@ defmodule PiFiWeb.SettingsLive do
         >
           {if @bluetooth_scanning?, do: "Looking…", else: "Look for devices"}
         </button>
+
+        <button
+          :if={@bluetooth?}
+          id="discoverable-bluetooth"
+          type="button"
+          phx-click="toggle_discoverable"
+          aria-pressed={to_string(@bluetooth_discoverable?)}
+          class={[
+            "control rounded-lg px-3 py-2 text-sm",
+            if(@bluetooth_discoverable?, do: "control-on", else: "")
+          ]}
+        >
+          {if @bluetooth_discoverable?, do: "Stop being discoverable", else: "Make discoverable"}
+        </button>
       </div>
+
+      <p
+        :if={@bluetooth_discoverable?}
+        id="bluetooth-discoverable"
+        class="mt-3 text-sm text-ink-dim"
+      >
+        Your phone can find this device for the next {Bluetooth.Sender.window()} seconds.
+        It stops by itself.
+      </p>
 
       <p :if={@bluetooth_scanning?} id="bluetooth-looking" class="mt-3 text-sm text-ink-dim">
         Hold the button on your headphones until the light flashes. This takes about half
@@ -2044,6 +2094,7 @@ defmodule PiFiWeb.SettingsLive do
     |> assign(:bluetooth?, Bluetooth.enabled?())
     |> assign(:bluetooth_adapter?, Bluetooth.adapter?())
     |> assign(:bluetooth_devices, bluetooth_devices())
+    |> assign(:bluetooth_discoverable?, Bluetooth.Sender.discoverable?())
     |> assign_new(:bluetooth_scanning?, fn -> false end)
     |> assign_new(:bluetooth_busy, fn -> nil end)
     |> assign(:source_list, source_list())
