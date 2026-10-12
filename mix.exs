@@ -293,7 +293,9 @@ defmodule PiFi.MixProject do
       # them. The main branch uses Bandit instead, and Phoenix already gives us
       # Bandit, so cowboy and cowlib leave the dependency tree.
       {:vintage_net_wizard,
-       github: "nerves-networking/vintage_net_wizard", ref: "c11eabea849e", targets: @all_targets},
+       github: "nerves-networking/vintage_net_wizard",
+       ref: "258f3b1a6085b8e1ba0a6c5b494d8f8cd505b434",
+       targets: @all_targets},
 
       # Targets
       # The stock rpi0_2 system holds no USB host stack and no USB audio driver,
