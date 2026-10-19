@@ -184,10 +184,19 @@ defmodule PiFi.PlayerControlsTest do
     end
 
     # One description, built in one place, so the table and the player cannot disagree.
+    #
+    # **Except for the clock.** Each reader works out `position_ms` from the monotonic
+    # clock as it reads, so two reads of a playing track straddle a millisecond about one
+    # time in a hundred. CI failed that way with 0 on the left and 1 on the right. The
+    # table is read first, so its position can be behind the player's but never ahead.
     test "the table and the player say the same thing" do
       playing(1)
 
-      assert Playback.state!() == Player.state()
+      {table_position, table} = Map.pop!(Playback.state!(), :position_ms)
+      {player_position, player} = Map.pop!(Player.state(), :position_ms)
+
+      assert table == player
+      assert table_position <= player_position
     end
 
     test "a stop reaches the table" do
