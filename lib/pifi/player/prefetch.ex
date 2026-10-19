@@ -32,6 +32,12 @@ defmodule PiFi.Player.Prefetch do
   who stops before the next track leaves a file that nothing releases, in the way that
   a stopped song did before `PiFi.Player.release_file/1`.
 
+  **It releases only a file that it waited for.** A file that was already whole when
+  it asked keeps whatever mark it had, because that mark belongs to someone else. The
+  next row can be the one that is playing — a repeat of one, or a repeat of all with
+  one row — and releasing that file let the cache evict an episode that a person was
+  part way through.
+
   ## Why a task, and not the player
 
   `PiFi.Player.Download.ensure/2` makes its caller a watcher, so every count of
@@ -84,7 +90,7 @@ defmodule PiFi.Player.Prefetch do
 
   defp hold(key, uri, item) do
     case Download.ensure(key, uri) do
-      {:ok, %{complete?: true}} -> Download.release(key)
+      {:ok, %{complete?: true}} -> :ok
       {:ok, %{complete?: false}} -> wait(key, item)
       {:error, reason} -> failed(item, reason)
     end

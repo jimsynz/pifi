@@ -8,8 +8,9 @@ defmodule PiFi.Playback.Queue.NextUp do
   `PiFi.Player.Prefetch`.
 
   **It answers what `advance` would**, which means a repeat of one gives the row that is
-  already playing. The audio of that row is already on the card, so the prefetch finds
-  nothing to do, which is the right answer.
+  already playing, and so does a repeat of all with one row. The audio of that row is
+  already on the card, so the prefetch finds nothing to do, which is the right answer.
+  It must also leave the mark on that file alone; see `PiFi.Player.Prefetch`.
   """
 
   use Ash.Resource.Actions.Implementation

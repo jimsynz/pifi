@@ -11,6 +11,7 @@ defmodule PiFi.PlayerPrefetchTest do
 
   alias PiFi.Cache
   alias PiFi.Playback
+  alias PiFi.Playback.Queue.Mode
   alias PiFi.Player.Download
   alias PiFi.Player.Prefetch
 
@@ -91,6 +92,7 @@ defmodule PiFi.PlayerPrefetchTest do
     Playback.clear_queue!()
 
     on_exit(fn ->
+      Mode.put_repeat(:off)
       Playback.clear_queue!()
       Application.delete_env(:pifi, Download)
       Application.delete_env(:pifi, :sources)
@@ -120,12 +122,11 @@ defmodule PiFi.PlayerPrefetchTest do
     end
   end
 
-  # **An ask for a file that is already released leaves nothing to wait for in the
-  # table.** Its task finds the file whole and releases it again, and the entry says
-  # `keep?: false` before and after. A task that outlived its test wrote after the
-  # sandbox owner had gone, and the next test's first write failed with `Database busy`,
-  # which is how CI failed "it gives the row after the one that plays". `Task.start/1`
-  # puts its caller in `$callers`, so that's how this finds the task.
+  # **`Prefetch.ask/1` answers before its task has done anything.** A test that reads the
+  # cache straight after it races that task, and a task that outlived its test wrote
+  # after the sandbox owner had gone, so the next test's first write failed with
+  # `Database busy`. That's how CI failed "it gives the row after the one that plays".
+  # `Task.start/1` puts its caller in `$callers`, so that's how this finds the task.
   defp ask_and_await(item) do
     answer = Prefetch.ask(item)
 
@@ -142,6 +143,31 @@ defmodule PiFi.PlayerPrefetchTest do
         {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
         self() in Keyword.get(dictionary, :"$callers", []),
         do: pid
+  end
+
+  # An episode that a person is part way through, with its whole file on the card and
+  # the `keep?` that `PiFi.Player.Download` writes.
+  defp episode_on_card do
+    episode =
+      Playback.upsert_item!(%{
+        source: "library",
+        source_ref: "episode",
+        title: "The episode",
+        kind: :track,
+        duration_ms: 600_000,
+        keeps_place?: true
+      })
+
+    {:ok, %{complete?: false}} = Download.ensure(episode.id, "http://example.test/episode.mp3")
+    assert_receive {:download, :done}, 2_000
+    assert held(episode).keep?
+
+    episode
+  end
+
+  defp prefetch_next_up do
+    {:ok, row} = Playback.queue_next_up()
+    ask_and_await(Playback.get_item!(row.item_id))
   end
 
   describe "the queue says which row is next" do
@@ -200,6 +226,26 @@ defmodule PiFi.PlayerPrefetchTest do
 
       assert ask_and_await(one) == :ok
       assert held(one).keep? == false
+    end
+  end
+
+  describe "a next row that is the one that plays" do
+    test "a repeat of one leaves the playing file held" do
+      episode = episode_on_card()
+      assert {:ok, _rows} = Playback.replace_queue([episode.id])
+      :ok = Mode.put_repeat(:one)
+
+      assert prefetch_next_up() == :ok
+      assert held(episode).keep?
+    end
+
+    test "a repeat of all with one row leaves the playing file held" do
+      episode = episode_on_card()
+      assert {:ok, _rows} = Playback.replace_queue([episode.id])
+      :ok = Mode.put_repeat(:all)
+
+      assert prefetch_next_up() == :ok
+      assert held(episode).keep?
     end
   end
 end
