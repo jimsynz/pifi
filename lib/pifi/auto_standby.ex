@@ -157,6 +157,7 @@ defmodule PiFi.AutoStandby do
   def handle_info(%Events.Standby{}, state), do: {:noreply, reschedule(state)}
 
   def handle_info(%Input.ButtonPressed{}, state), do: {:noreply, reschedule(state)}
+  def handle_info(%Input.KnobTurned{}, state), do: {:noreply, reschedule(state)}
   def handle_info(%Input.PageUsed{}, state), do: {:noreply, reschedule(state)}
 
   # **A cell that reaches the low point puts the device in standby**, because this device

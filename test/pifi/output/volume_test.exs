@@ -4,6 +4,7 @@ defmodule PiFi.Output.VolumeTest do
 
   alias PiFi.Event
   alias PiFi.Event.Device, as: DeviceEvents
+  alias PiFi.Event.Hint
   alias PiFi.Event.Player, as: Events
   alias PiFi.Output.Volume
   alias PiFi.Settings
@@ -194,6 +195,45 @@ defmodule PiFi.Output.VolumeTest do
       :ok = Volume.enable(false)
 
       assert_receive %Events.VolumeChanged{enabled?: false}
+    end
+  end
+
+  # A knob takes the `:hint` topic and never `:player`, so the level reaches it there.
+  describe "the hint for a knob" do
+    setup do
+      start_volume()
+      Event.subscribe(:hint)
+
+      :ok
+    end
+
+    test "a level that moves reaches a knob" do
+      :ok = Volume.enable(true)
+
+      assert_receive %Hint.Volume{percent: 100, adjustable?: true}
+
+      :ok = Volume.set_percent(40)
+
+      assert_receive %Hint.Volume{percent: 40, adjustable?: true}
+    end
+
+    test "a knob can move nothing while the control is off" do
+      :ok = Volume.enable(true)
+      :ok = Volume.enable(false)
+
+      assert_receive %Hint.Volume{adjustable?: false}
+    end
+
+    # The second card of `PiFi.Test.TwoCardOutput` holds no level, so a knob can move
+    # nothing on it even with the control on. The number does not move, so this is the
+    # one change that only the hint carries.
+    test "a card with no level takes the knob away" do
+      :ok = Volume.enable(true)
+      assert_receive %Hint.Volume{adjustable?: true}
+
+      :ok = PiFi.Player.select_output("rate48:CARD=second,DEV=0")
+
+      assert_receive %Hint.Volume{adjustable?: false}
     end
   end
 

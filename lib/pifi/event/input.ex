@@ -35,6 +35,29 @@ defmodule PiFi.Event.Input do
     defstruct [:peripheral, :button, hold: :short]
   end
 
+  defmodule KnobTurned do
+    @moduledoc """
+    A person turned a knob of a peripheral to another position.
+
+    `knob` counts from 1, in the order that the knobs sit on the board, left to right.
+    `position` is the position that the knob is on now, and `step` is how far it moved
+    to get there, so a control that sets a value reads the first and a control that
+    goes back and forward reads the second.
+
+    `peripheral` names the module that owns the knob, in the way that
+    `PiFi.Event.Input.ButtonPressed` names the board of a button.
+    """
+
+    @type t :: %__MODULE__{
+            peripheral: module(),
+            knob: pos_integer(),
+            position: integer(),
+            step: integer()
+          }
+
+    defstruct [:peripheral, :knob, :position, :step]
+  end
+
   defmodule PageUsed do
     @moduledoc """
     A person did something on a web page of this device.

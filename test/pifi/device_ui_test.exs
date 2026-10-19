@@ -50,6 +50,15 @@ defmodule PiFi.DeviceUiTest do
     })
   end
 
+  defp turn(knob, position, step) do
+    Event.publish(:input, %Input.KnobTurned{
+      peripheral: PiFi.Peripheral.HapticKnobs,
+      knob: knob,
+      position: position,
+      step: step
+    })
+  end
+
   describe "the buttons of the PiTFT" do
     test "the first button enters standby, and the next press leaves it" do
       press(1)
@@ -244,6 +253,139 @@ defmodule PiFi.DeviceUiTest do
   # **A hold of the track buttons moves the level.** A row of four holds every control
   # on a short press already, and a hold of one of them held none, so the level costs
   # no control that a person had. See `PiFi.Output.Volume`.
+  describe "the knobs" do
+    setup do
+      PiFi.Player.stop()
+      :ok = Event.subscribe(:view)
+      :ok = Event.subscribe(:hint)
+
+      on_exit(fn -> PiFi.Player.stop() end)
+
+      %{}
+    end
+
+    test "a turn of knob 1 opens a closed menu, and knob 2 becomes a stepper" do
+      turn(1, 1, 1)
+
+      assert_receive %View.MenuShown{depth: 0, index: 0}, 5000
+      assert_receive %Hint.Stepper{active?: true}, 5000
+      assert DeviceUi.places() == [:root]
+    end
+
+    test "the position of knob 1 is the row, and the ends are stops" do
+      turn(1, 1, 1)
+      assert_receive %View.MenuShown{index: 0, rows: rows}, 5000
+
+      turn(1, 2, 1)
+      assert_receive %View.MenuShown{index: 2}, 5000
+
+      turn(1, 99, 97)
+      last = length(rows) - 1
+      assert_receive %View.MenuShown{index: ^last}, 5000
+    end
+
+    test "a step right of knob 2 opens the row, and a step left comes back" do
+      turn(1, 1, 1)
+      assert_receive %View.MenuShown{}, 5000
+
+      turn(1, 1, 1)
+      assert_receive %View.MenuShown{index: 1}, 5000
+
+      turn(2, 2, 1)
+      assert_receive %View.MenuShown{depth: 1}, 5000
+
+      turn(2, 0, -1)
+      assert_receive %View.MenuShown{depth: 0, index: 1}, 5000
+    end
+
+    test "a step left of knob 2 at the root closes the menu, and the stepper goes" do
+      turn(1, 1, 1)
+      assert_receive %View.MenuShown{}, 5000
+
+      turn(2, 0, -1)
+      assert_receive %View.MenuClosed{}, 5000
+      assert_receive %Hint.Stepper{active?: false}, 5000
+      assert DeviceUi.places() == []
+    end
+
+    # One step too many at the root closes the menu, and the person who turns back
+    # wants the row they were on.
+    test "a menu that a person backed out of opens on the row they left" do
+      turn(1, 1, 1)
+      assert_receive %View.MenuShown{index: 0}, 5000
+
+      turn(1, 2, 1)
+      assert_receive %View.MenuShown{index: 2}, 5000
+
+      turn(2, 0, -1)
+      assert_receive %View.MenuClosed{}, 5000
+
+      turn(1, 3, 1)
+      assert_receive %View.MenuShown{depth: 0, index: 2}, 5000
+    end
+
+    test "a menu that closed itself opens again at the level it was on" do
+      turn(1, 1, 1)
+      assert_receive %View.MenuShown{}, 5000
+
+      turn(1, 1, 1)
+      assert_receive %View.MenuShown{index: 1}, 5000
+
+      turn(2, 2, 1)
+      assert_receive %View.MenuShown{depth: 1}, 5000
+      [:root, place] = DeviceUi.places()
+
+      # The period that a menu waits before it closes, cut short.
+      send(Process.whereis(DeviceUi), :close_menu)
+      assert_receive %View.MenuClosed{}, 5000
+
+      turn(1, 2, 1)
+      assert_receive %View.MenuShown{depth: 1}, 5000
+      assert DeviceUi.places() == [:root, place]
+    end
+
+    # A device with knobs and no button has no other way out of standby, and the turn
+    # that woke it must not also act behind a screen that is still coming on.
+    test "a turn in standby wakes the device and does nothing else" do
+      {:ok, :ok} = Playback.standby(true)
+      assert_receive %Player.Standby{entered?: true}, 5000
+
+      turn(1, 1, 1)
+
+      assert_receive %Player.Standby{entered?: false}, 5000
+      refute_receive %View.MenuShown{}, 200
+      assert DeviceUi.places() == []
+    end
+  end
+
+  describe "the level from knob 2" do
+    setup do
+      TwoCardOutput.use_it()
+      :ok = PiFi.Player.select_output("rate48:CARD=first,DEV=0")
+      start_supervised!(Volume)
+      :ok = Volume.enable(true)
+      :ok = Volume.set_percent(50)
+      flush()
+
+      :ok
+    end
+
+    test "with the menu closed, its position is the level" do
+      turn(2, 37, 1)
+
+      assert_receive %Player.VolumeChanged{percent: 37}, 5000
+    end
+
+    test "it moves nothing while the control is off" do
+      :ok = Volume.enable(false)
+      flush()
+
+      turn(2, 37, 1)
+
+      refute_receive %Player.VolumeChanged{percent: 37}, 200
+    end
+  end
+
   describe "a hold of the track buttons of the PiTFT" do
     setup do
       TwoCardOutput.use_it()

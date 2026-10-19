@@ -170,6 +170,12 @@ defmodule PiFi.MixProject do
       # is the project that must ask for it.
       {:circuits_gpio, "~> 2.1"},
       {:circuits_i2c, "~> 2.1"},
+      # `PiFi.Peripheral.HapticKnobs` talks to the knob board over USB serial. The
+      # library lives in `host/` of the repository that holds the board's firmware,
+      # because the two halves of the protocol have to change together. It brings
+      # `circuits_uart`, which is native code and a standard Nerves library.
+      {:foc_peripheral,
+       git: "https://harton.dev/mypihifiguy/foc_peripheral.git", branch: "main", sparse: "host"},
       # Home Assistant discovers this device as an ESPHome node and talks to it over
       # the native API. **Not over MQTT**: Home Assistant has no MQTT media player, so
       # a player has to speak the other protocol. `PiFi.HomeAssistant` says more.

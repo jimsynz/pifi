@@ -11,8 +11,9 @@ defmodule PiFi.Event do
   content of a source, and `PiFi.Event.Source` defines those. `:device` carries the
   state of the hardware that no person changes, and `PiFi.Event.Device` defines
   those. `:view`, `:input` and `:hint` belong to the device screen and its controls:
-  `PiFi.DeviceUi` publishes the view and the hints, and a peripheral publishes what
-  a person presses.
+  `PiFi.DeviceUi` publishes the view and the hints about the menu,
+  `PiFi.Output.Volume` publishes the hint about the level, and a peripheral publishes
+  what a person presses or turns.
   """
 
   @topics [:player, :source, :device, :view, :input, :hint]

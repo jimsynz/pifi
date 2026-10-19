@@ -39,6 +39,7 @@ defmodule PiFi.Output.Volume do
 
   alias PiFi.Event
   alias PiFi.Event.Device, as: DeviceEvents
+  alias PiFi.Event.Hint
   alias PiFi.Event.Player, as: Events
   alias PiFi.Output
   alias PiFi.Settings
@@ -211,11 +212,15 @@ defmodule PiFi.Output.Volume do
   @doc false
   @impl GenServer
   def handle_info(%DeviceEvents.OutputChanged{in_use: in_use}, state) do
-    state = card(state, in_use)
+    new_state = card(state, in_use)
 
-    write(state)
+    write(new_state)
 
-    {:noreply, state}
+    # A card with a level and one without change what a knob can do, and nothing
+    # else says so: `VolumeChanged` stays quiet, because the number did not move.
+    if new_state.supported? != state.supported?, do: publish_hint(new_state)
+
+    {:noreply, new_state}
   end
 
   def handle_info(%_{}, state), do: {:noreply, state}
@@ -234,7 +239,18 @@ defmodule PiFi.Output.Volume do
     end
   end
 
-  defp publish(state), do: Event.publish(:player, struct(Events.VolumeChanged, report(state)))
+  defp publish(state) do
+    Event.publish(:player, struct(Events.VolumeChanged, report(state)))
+    publish_hint(state)
+  end
+
+  # A knob takes the `:hint` topic and never `:player`. See `PiFi.Event.Hint`.
+  defp publish_hint(state) do
+    Event.publish(:hint, %Hint.Volume{
+      percent: state.percent,
+      adjustable?: state.enabled? and state.supported?
+    })
+  end
 
   defp report(state) do
     %{

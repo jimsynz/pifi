@@ -52,7 +52,8 @@ config :pifi,
     {PiFi.Peripheral.PiTft, []},
     {PiFi.Peripheral.PirateAudio, []},
     {PiFi.Peripheral.Battery, []},
-    {PiFi.Peripheral.ActivityLed, []}
+    {PiFi.Peripheral.ActivityLed, []},
+    {PiFi.Peripheral.HapticKnobs, []}
   ]
 
 # Erlinit can be configured without a rootfs_overlay. See

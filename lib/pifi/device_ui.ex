@@ -53,6 +53,22 @@ defmodule PiFi.DeviceUi do
   The track before is the one that a person asks for least, so it is the one that no
   button carries.
 
+  The haptic knob board has two knobs, which `PiFi.Peripheral.HapticKnobs` numbers
+  from the left:
+
+  | Knob | Menu closed | Menu open |
+  | ---- | ----------- | --------- |
+  | 1    | A turn opens the menu | The row, one detent each |
+  | 2    | The level | A step left is back, a step right opens or plays the row |
+
+  **The first turn of either knob in standby wakes the device and does nothing else**,
+  because a device with knobs and no button has no other way out of standby.
+
+  **Two knobs and no button carry the whole menu.** A knob has no press, so the second
+  one becomes a switch of three positions while the menu is open. The hints say which
+  feel each knob needs: `PiFi.Event.Hint.Detents` for the first, and
+  `PiFi.Event.Hint.Stepper` and `PiFi.Event.Hint.Volume` for the second.
+
   It uses `PiFi.Playback`, as the web interface does, so a press and a click take
   the same path.
 
@@ -73,6 +89,11 @@ defmodule PiFi.DeviceUi do
 
   A press that plays closes the menu as well, because a person who chose a track wants
   to read what plays.
+
+  **A menu opens where a person left it.** It keeps the path of the last one that
+  closed, whatever closed it, and reads each level of that path again when it opens. A
+  place that went away while the menu was closed ends the path there, so a source that
+  was turned off opens the level above it. The path lasts until the firmware restarts.
 
   ## The screen that goes dark
 
@@ -186,6 +207,7 @@ defmodule PiFi.DeviceUi do
 
     state = %{
       stack: [],
+      remembered: [],
       timer: nil,
       blank_seconds: stored_blank_seconds(),
       blank_ms: Keyword.get(opts, :blank_ms, 1000),
@@ -239,8 +261,21 @@ defmodule PiFi.DeviceUi do
     end
   end
 
-  # A knob and a touch panel send events of this topic as well, and each one arrives
-  # here before the part of this module that reads it exists.
+  # **The first turn in standby wakes the device and does nothing else.** A device
+  # whose only controls are knobs has no other way out of standby, and a turn that woke
+  # it must not also open the menu or move the level behind a screen that is still
+  # coming on. The player owns the state, so this reads it rather than keep a copy.
+  def handle_info(%Input.KnobTurned{} = event, state) do
+    state =
+      if Playback.state!().standby?,
+        do: wake(state),
+        else: turn(event.knob, event, state)
+
+    {:noreply, hold_lit(state)}
+  end
+
+  # A touch panel sends events of this topic as well, and each one arrives here before
+  # the part of this module that reads it exists.
   def handle_info(%_{}, state), do: {:noreply, state}
 
   # **The first press after the screen went dark brings it back and does nothing else.**
@@ -263,7 +298,7 @@ defmodule PiFi.DeviceUi do
   # the menu is closed.
   defp press(_row_of_four, button, hold, %{stack: []} = state) do
     case transport(button, hold) do
-      :open_menu -> state |> push(:root) |> announce()
+      :open_menu -> open(state)
       _other -> state
     end
   end
@@ -311,15 +346,39 @@ defmodule PiFi.DeviceUi do
   defp menu(4, :short, state), do: move(state, 1)
   defp menu(_button, _hold, state), do: state
 
+  # **The first turn of a blanked screen lights it and does nothing else**, for the same
+  # reason as the first press.
+  defp turn(_knob, _event, %{blanked?: true} = state), do: unblank(state)
+
+  # **Knob 1 moves through the menu, and a turn of it opens one that is closed.** A knob
+  # has no press, and a person who turns the knob beside a dark menu wants the menu.
+  # Once it is open, the knob has one detent for each row, so its position is the row.
+  defp turn(1, _event, %{stack: []} = state), do: open(state)
+  defp turn(1, event, state), do: move_to(state, event.position)
+
+  # **Knob 2 steps back and forward while the menu is open, and sets the level while it
+  # is closed.** A step left is back and a step right opens or plays the row, so a person
+  # with two knobs and no button can use the whole menu. See `PiFi.Event.Hint.Stepper`.
+  defp turn(2, %{step: step}, %{stack: [_ | _]} = state) when step < 0, do: back(state)
+  defp turn(2, %{step: step}, %{stack: [_ | _]} = state) when step > 0, do: select(state)
+
+  defp turn(2, event, %{stack: []} = state) do
+    set_volume(event.position)
+    state
+  end
+
+  defp turn(_knob, _event, state), do: state
+
   # **The ends of a level are stops, and the list does not go round.** A knob with
   # detents reads the count of this level, and a detent that ran past the end of the
   # list would turn for ever. See `PiFi.Event.Hint.Detents`.
   defp move(%{stack: []} = state, _step), do: state
+  defp move(state, step), do: move_to(state, List.last(state.stack).index + step)
 
-  defp move(state, step) do
+  defp move_to(state, index) do
     {above, [current]} = Enum.split(state.stack, -1)
     last = length(current.rows) - 1
-    index = (current.index + step) |> Kernel.max(0) |> Kernel.min(Kernel.max(last, 0))
+    index = index |> Kernel.max(0) |> Kernel.min(Kernel.max(last, 0))
 
     announce(%{state | stack: above ++ [%{current | index: index}]})
   end
@@ -371,6 +430,41 @@ defmodule PiFi.DeviceUi do
     %{state | stack: state.stack ++ [entry]}
   end
 
+  # **A menu opens where a person left it.** One step of a knob too many at the root
+  # closes the menu, and a person who opens it again wants the row they were on, and not
+  # the top of the list they had scrolled through.
+  defp open(%{remembered: []} = state), do: state |> push(:root) |> announce()
+
+  defp open(state) do
+    case restore(state.remembered) do
+      [] -> state |> push(:root) |> announce()
+      stack -> announce(%{state | stack: stack})
+    end
+  end
+
+  # Each level is read again, because a list changes while the menu is closed, and each
+  # row is held inside the new length. **A place that no longer exists ends the path
+  # there**: `PiFi.DeviceUi.Menu.level/1` gives the root for it, and a level below the
+  # root that came back as the root is a source that was turned off or a container that
+  # went away.
+  defp restore(remembered) do
+    Enum.reduce_while(remembered, [], fn {place, index}, stack ->
+      case Menu.level(place) do
+        %{place: ^place} = level ->
+          last = Kernel.max(length(level.rows) - 1, 0)
+          {:cont, stack ++ [Map.put(level, :index, Kernel.min(index, last))]}
+
+        _gone ->
+          {:halt, stack}
+      end
+    end)
+  end
+
+  defp wake(state) do
+    report(Playback.standby(false))
+    state
+  end
+
   # **A screen reads the whole level, and it draws the part that fits.** This module
   # knows no size of a screen, and a screen knows how many rows it can draw. The hint
   # carries the count for a knob, which needs one detent for each row.
@@ -385,6 +479,7 @@ defmodule PiFi.DeviceUi do
     })
 
     Event.publish(:hint, %Hint.Detents{count: length(current.rows), index: current.index})
+    Event.publish(:hint, %Hint.Stepper{active?: true})
 
     hold_open(state)
   end
@@ -396,8 +491,10 @@ defmodule PiFi.DeviceUi do
   defp close(state) do
     Event.publish(:view, %View.MenuClosed{})
     Event.publish(:hint, %Hint.Detents{count: 0, index: 0})
+    Event.publish(:hint, %Hint.Stepper{active?: false})
 
-    let_go(%{state | stack: []})
+    remembered = Enum.map(state.stack, &{&1.place, &1.index})
+    let_go(%{state | stack: [], remembered: remembered})
   end
 
   defp hold_open(state) do
@@ -485,6 +582,16 @@ defmodule PiFi.DeviceUi do
 
       _other ->
         :ok
+    end
+  end
+
+  # A knob sets the level outright, and it reads whether the control is on first, as a
+  # held button does. A knob that turns while the control is off is limp and moves
+  # nothing that a person can hear. See `PiFi.Event.Hint.Volume`.
+  defp set_volume(percent) do
+    case Playback.volume!() do
+      %{enabled?: true} -> report(Playback.set_volume(clamp(percent)))
+      _other -> :ok
     end
   end
 

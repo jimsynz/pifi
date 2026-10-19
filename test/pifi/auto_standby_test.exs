@@ -96,6 +96,28 @@ defmodule PiFi.AutoStandbyTest do
       assert_receive %Player.Standby{entered?: true}, 5000
     end
 
+    # A person whose device has knobs and no button uses nothing else, and a device
+    # that took no turn for a sign of life went to standby under their hand.
+    test "a turn of a knob starts the period again" do
+      pid = start_timer()
+
+      Enum.each(1..20, fn position ->
+        Event.publish(:input, %Input.KnobTurned{
+          peripheral: PiFi.Peripheral.HapticKnobs,
+          knob: 1,
+          position: position,
+          step: 1
+        })
+
+        Process.sleep(10)
+      end)
+
+      refute_receive %Player.Standby{}, 100
+
+      assert Process.alive?(pid)
+      assert_receive %Player.Standby{entered?: true}, 5000
+    end
+
     test "a person who uses a web page starts the period again" do
       pid = start_timer()
 

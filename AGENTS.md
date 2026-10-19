@@ -20,8 +20,9 @@ Licence: Apache-2.0.
   CPU aren't tight. That measurement predates the HLS support and the artwork cache.
 - **A DAC can be on USB, on the I2S pins, or a Bluetooth speaker.** The USB port
   usually holds a DAC (the HiFimeDIY one), a Pirate Audio board puts a PCM5102A on the
-  I2S pins, and `PiFi.Bluetooth` makes a paired speaker another ALSA name. The one USB
-  data port is why the knob uses I2C.
+  I2S pins, and `PiFi.Bluetooth` makes a paired speaker another ALSA name. The haptic
+  knob board is a USB serial device too, so a device with a USB DAC and the knobs needs
+  a hub on its one data port. See `PiFi.Peripheral.HapticKnobs`.
 - **A USB card plays at 48000 Hz, because 44100 Hz is rough.** USB audio sends one
   isochronous packet in each 1 ms frame, so 44100 Hz needs 44.1 samples in a packet
   and a controller must alternate the size of them. The dwc2 controller of this board
@@ -430,9 +431,11 @@ The software has five parts. They talk through Phoenix PubSub.
    peripherals, and they share one behaviour. A peripheral gets typed events, it owns its
    layout, fonts, and scroll window, and it publishes what the person does.
 5. **`PiFi.DeviceUi`** holds the navigation state for the device screen. It
-   receives the input events, and it publishes the view events and the hints. It
-   owns the selected index and the list, because the knob needs a detent count
-   and only `PiFi.DeviceUi` knows the length of the list.
+   receives the input events, and it publishes the view events and the hints about
+   the menu. It owns the selected index and the list, because the knob needs a
+   detent count and only `PiFi.DeviceUi` knows the length of the list.
+   `PiFi.Output.Volume` publishes the hint about the level, because it is the one
+   process that sees every change of it.
 
 Every message is a struct from `PiFi.Event`, on one of six topics: `:player`,
 `:source`, `:device`, `:view`, `:input`, and `:hint`. `:device` carries the state of
