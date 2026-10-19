@@ -12,8 +12,8 @@ defmodule PiFi.Event do
   state of the hardware that no person changes, and `PiFi.Event.Device` defines
   those. `:view`, `:input` and `:hint` belong to the device screen and its controls:
   `PiFi.DeviceUi` publishes the view and the hints about the menu,
-  `PiFi.Output.Volume` publishes the hint about the level, and a peripheral publishes
-  what a person presses or turns.
+  `PiFi.Output.Volume` publishes the hint about the level, `PiFi.Player` the one about
+  whether the track can move, and a peripheral publishes what a person presses or turns.
   """
 
   @topics [:player, :source, :device, :view, :input, :hint]

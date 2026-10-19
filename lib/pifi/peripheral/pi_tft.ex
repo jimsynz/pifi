@@ -60,10 +60,10 @@ defmodule PiFi.Peripheral.PiTft do
   alias PiFi.Device.Identity
   alias PiFi.Event
   alias PiFi.Event.Device, as: DeviceEvents
-  alias PiFi.Event.Input
   alias PiFi.Event.Player
   alias PiFi.Event.View, as: ViewEvents
   alias PiFi.Peripheral.Battery
+  alias PiFi.Peripheral.ButtonJobs
   alias PiFi.Peripheral.Buttons
   alias PiFi.Peripheral.PiTft.{Ili9341, Screen, Stmpe610}
   alias PiFi.Playback
@@ -75,9 +75,42 @@ defmodule PiFi.Peripheral.PiTft do
   # for it.
   @volume_ms :timer.seconds(3)
 
+  # How long a person holds a button before it counts as a hold, the same as the Pirate
+  # Audio. `PiFi.Peripheral.Buttons` reads no hold at all for a board that names no
+  # threshold, so every hold job would do nothing.
+  @hold_ms 600
+
   @doc "The name that the settings page draws."
   @impl PiFi.Peripheral
   def title, do: "PiTFT 2.8 inch screen"
+
+  @doc """
+  What each of the four buttons does until a person changes it, from the one nearest
+  the corner that the ribbon leaves.
+
+  **Standby sits at the end of the row**, as it does on the web page, because a person
+  who wants the device quiet reaches for the end. **A hold of the track buttons moves
+  the level**: down and up sit beside each other and in that order, and 2 and 4 already
+  mean back and forward. **A hold of the play button opens the menu**, the one hold that
+  carried nothing else. With the menu open the row is back, up, open and down, and a
+  hold does nothing, because a person in a list is choosing a row.
+  """
+  @spec button_jobs() :: [PiFi.Peripheral.ButtonJobs.jobs()]
+  def button_jobs do
+    [
+      %{press: :standby, hold: :none, menu_press: :back, menu_hold: :none},
+      %{press: :previous, hold: :volume_down, menu_press: :row_up, menu_hold: :none},
+      %{press: :play_pause, hold: :open_menu, menu_press: :select, menu_hold: :none},
+      %{press: :next, hold: :volume_up, menu_press: :row_down, menu_hold: :none}
+    ]
+  end
+
+  @doc "The jobs of the buttons, which a person can change. See `button_jobs/0`."
+  @impl PiFi.Peripheral
+  def settings, do: ButtonJobs.settings(__MODULE__)
+
+  @impl PiFi.Peripheral
+  def put_settings(values), do: ButtonJobs.put_settings(__MODULE__, values)
 
   @doc """
   Take hold of the screen and the touch controller, and draw the first frame.
@@ -90,7 +123,7 @@ defmodule PiFi.Peripheral.PiTft do
   def init(opts) do
     with {:ok, screen} <- Ili9341.open(opts),
          {:ok, stmpe} <- Stmpe610.open(),
-         {:ok, buttons} <- Buttons.open(),
+         {:ok, buttons} <- Buttons.open(hold_ms: Keyword.get(opts, :hold_ms, @hold_ms)),
          {:ok, renderer} <- Renderer.start(Screen.size()) do
       first_frame(%{
         screen: screen,
@@ -202,8 +235,8 @@ defmodule PiFi.Peripheral.PiTft do
   Say that a person pressed a button.
 
   The lines of the buttons send a message for each change of level, and this turns a
-  press into `PiFi.Event.Input.ButtonPressed`. **This module says which button and
-  not what the button does.** `PiFi.DeviceUi` decides that.
+  press into `PiFi.Event.Input.ButtonPressed`, carrying the jobs that a person gave the
+  button. `PiFi.DeviceUi` decides what each job does. See `PiFi.Peripheral.ButtonJobs`.
   """
   @impl PiFi.Peripheral
   def handle_info(:clear_volume, %{view: %{volume_percent: nil}} = state), do: {:ok, state}
@@ -215,11 +248,7 @@ defmodule PiFi.Peripheral.PiTft do
   def handle_info(message, state) do
     case Buttons.press(state.buttons, message) do
       {:ok, button, hold, buttons} ->
-        Event.publish(:input, %Input.ButtonPressed{
-          peripheral: __MODULE__,
-          button: button,
-          hold: hold
-        })
+        Event.publish(:input, ButtonJobs.pressed(__MODULE__, button, hold))
 
         {:ok, %{state | buttons: buttons}}
 

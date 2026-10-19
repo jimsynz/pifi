@@ -8,66 +8,51 @@ defmodule PiFi.DeviceUi do
   @moduledoc """
   What the controls of the device do.
 
-  A peripheral says that a person pressed a button, and this module decides what the
-  press means. **The mapping lives here and nowhere else.** A peripheral names a
-  button by its place on the board, because a board has four buttons in a row and
-  no label, and a device that changed the order of its controls would otherwise need
-  a change in the driver of the hardware.
+  A peripheral says that a person pressed a button or turned a knob, along with the job
+  that a person gave that control on the settings page. This module decides what each
+  job does to the device. **It holds no table for any board.** Each board names its own
+  defaults: see `PiFi.Peripheral.PiTft.button_jobs/0`,
+  `PiFi.Peripheral.PirateAudio.button_jobs/0` and `PiFi.Peripheral.HapticKnobs`.
 
-  The buttons of the PiTFT, in the order that they sit:
+  A button press carries two jobs, one for the menu closed and one for it open. This
+  module picks between them, because it's the only part that knows for certain whether
+  the menu is open when the press arrives.
 
-  | Button | What it does | A hold |
-  | ------ | ------------ | ------ |
-  | 1      | Standby, in and out | |
-  | 2      | The track before | The level down |
-  | 3      | Play, or pause | The menu |
-  | 4      | The track after | The level up |
+  | Job | What a press does |
+  | --- | ----------------- |
+  | Standby | Standby, in and out |
+  | Previous track, next track | The track before or after |
+  | Play or pause | Play, or pause |
+  | Volume down, volume up | The level, 5% at a time |
+  | Open the menu | Opens it where a person left it, if it's closed |
+  | Back, row up, open or play the row, row down | Moves through the menu, if it's open |
+  | Nothing | Nothing |
 
-  Standby is the leftmost, as it is on the web page, because a person who wants the
-  device quiet reaches for the end of the row.
+  **A press in standby wakes the device and does nothing else**, whatever its job,
+  because a person can reassign every button and leave none on standby.
 
-  The same four buttons carry the menu while the menu is open:
+  A haptic knob's job decides its feel as well, so `PiFi.Peripheral.HapticKnobs` picks
+  the job for the menu open or closed itself and `PiFi.Event.Input.KnobTurned` names
+  only that one:
 
-  | Button | What it does |
-  | ------ | ------------ |
-  | 1      | Back, and out of the menu at the root |
-  | 2      | The row above |
-  | 3      | Open the row, or play it |
-  | 4      | The row below |
+  | Job | Menu | What a turn does |
+  | --- | ---- | ---------------- |
+  | Open the menu | Closed | Opens it where a person left it |
+  | Rows | Open | The position is the row, one detent each |
+  | Back and forward | Open | A step left is back, a step right opens or plays the row |
+  | Volume | Closed | The position is the level |
+  | Jog | Closed | Skips within the track, further for a faster turn |
 
-  **The row of four is the board that draws a menu.** A board of two buttons carries
-  three controls of the transport already, and a tree needs four: up, down, in and out.
-  The Pirate Audio therefore keeps the controls that it has.
+  By default the left knob opens the menu and moves through its rows, and the right one
+  steps back and forward through it, and sets the level or jogs while it is closed.
 
-  The Pirate Audio has two that answer, down the left of the screen:
-
-  | Button | How long | What it does |
-  | ------ | -------- | ------------ |
-  | 1      | A tap    | Play, or pause |
-  | 1      | A hold   | Standby, in and out |
-  | 2      | A tap    | The track after |
-
-  **Two buttons carry three controls, so one of them carries two.** A board of four has a
-  button for standby and therefore reads no hold at all.
-
-  The track before is the one that a person asks for least, so it is the one that no
-  button carries.
-
-  The haptic knob board has two knobs, which `PiFi.Peripheral.HapticKnobs` numbers
-  from the left:
-
-  | Knob | Menu closed | Menu open |
-  | ---- | ----------- | --------- |
-  | 1    | A turn opens the menu | The row, one detent each |
-  | 2    | The level | A step left is back, a step right opens or plays the row |
-
-  **The first turn of either knob in standby wakes the device and does nothing else**,
+  **The first turn of any knob in standby wakes the device and does nothing else**,
   because a device with knobs and no button has no other way out of standby.
 
-  **Two knobs and no button carry the whole menu.** A knob has no press, so the second
-  one becomes a switch of three positions while the menu is open. The hints say which
-  feel each knob needs: `PiFi.Event.Hint.Detents` for the first, and
-  `PiFi.Event.Hint.Stepper` and `PiFi.Event.Hint.Volume` for the second.
+  **Two knobs and no button carry the whole menu.** A knob has no press, so one becomes
+  a switch of three positions while the menu is open. The hints say which feel each
+  knob needs: `PiFi.Event.Hint.Menu`, `PiFi.Event.Hint.Detents`,
+  `PiFi.Event.Hint.Volume` and `PiFi.Event.Hint.Scrub`.
 
   It uses `PiFi.Playback`, as the web interface does, so a press and a click take
   the same path.
@@ -128,7 +113,6 @@ defmodule PiFi.DeviceUi do
   alias PiFi.Event.Hint
   alias PiFi.Event.Input
   alias PiFi.Event.View
-  alias PiFi.Peripheral
   alias PiFi.Playback
   alias PiFi.Settings
 
@@ -139,6 +123,16 @@ defmodule PiFi.DeviceUi do
   # answers a long press one time. 5 percent therefore needs four holds to move a
   # quarter of the way, and a larger step would make the control too coarse to set.
   @volume_step 5
+
+  # **How a jog wheel turns steps into time.** A step at 2 rad/s or slower moves 5
+  # seconds, and one at 10 rad/s or faster moves a minute, with a straight line between.
+  # These are a first guess, to tune by hand. The wait is how long the knob must be still
+  # before its steps become one skip.
+  @jog_slow 2.0
+  @jog_fast 10.0
+  @jog_slow_seconds 5
+  @jog_fast_seconds 60
+  @jog_settle_ms 175
 
   # **The longest period is an hour.** A person who wants a screen that stays lit
   # chooses 0 instead.
@@ -212,7 +206,9 @@ defmodule PiFi.DeviceUi do
       blank_seconds: stored_blank_seconds(),
       blank_ms: Keyword.get(opts, :blank_ms, 1000),
       blank_timer: nil,
-      blanked?: false
+      blanked?: false,
+      jog_ms: 0,
+      jog_timer: nil
     }
 
     {:ok, hold_lit(state)}
@@ -236,8 +232,14 @@ defmodule PiFi.DeviceUi do
 
   @doc false
   @impl GenServer
+  # **A press in standby wakes the device and does nothing else**, as a turn of a knob
+  # does. A person can give every button a job, and one that left no button on standby
+  # would leave no way out of it.
   def handle_info(%Input.ButtonPressed{} = event, state) do
-    state = press(event.peripheral, event.button, event.hold, state)
+    state =
+      if Playback.state!().standby?,
+        do: wake(state),
+        else: press(event, state)
 
     {:noreply, hold_lit(state)}
   end
@@ -269,9 +271,15 @@ defmodule PiFi.DeviceUi do
     state =
       if Playback.state!().standby?,
         do: wake(state),
-        else: turn(event.knob, event, state)
+        else: turn(event.function, event, state)
 
     {:noreply, hold_lit(state)}
+  end
+
+  # The jog wheel has stopped for long enough: the steps it took become one skip.
+  def handle_info(:jog, state) do
+    report(Playback.skip(state.jog_ms))
+    {:noreply, %{state | jog_ms: 0, jog_timer: nil}}
   end
 
   # A touch panel sends events of this topic as well, and each one arrives here before
@@ -280,99 +288,89 @@ defmodule PiFi.DeviceUi do
 
   # **The first press after the screen went dark brings it back and does nothing else.**
   # A person who presses a button to read what plays must not skip the episode.
-  defp press(_peripheral, _button, _hold, %{blanked?: true} = state), do: unblank(state)
+  defp press(_event, %{blanked?: true} = state), do: unblank(state)
 
-  # **The board decides the meaning, so the event carries the board.** A row of four and
-  # a pad of two cannot share one mapping, and the driver of a board must never hold the
-  # meaning of a press.
-  #
-  # **A board of two buttons reads no menu.** Its three controls of the transport take
-  # every press that it has, and a tree needs four: up, down, in and out.
-  defp press(Peripheral.PirateAudio, button, hold, state) do
-    pirate_audio(button, hold)
+  # **A press carries the job for the menu closed and the one for it open**, and this
+  # picks, because it is the one part that knows which holds now. Each board names what
+  # its buttons do until a person changes it: see `PiFi.Peripheral.PiTft.button_jobs/0`
+  # and `PiFi.Peripheral.PirateAudio.button_jobs/0`.
+  defp press(event, %{stack: []} = state), do: job(event.function, state)
+  defp press(event, state), do: job(event.menu_function, state)
 
+  defp job(:standby, state), do: doing(state, fn -> standby() end)
+  defp job(:previous, state), do: doing(state, fn -> report(Playback.previous()) end)
+  defp job(:play_pause, state), do: doing(state, fn -> play_pause() end)
+  defp job(:next, state), do: doing(state, fn -> report(Playback.next()) end)
+  defp job(:volume_down, state), do: doing(state, fn -> step_volume(-@volume_step) end)
+  defp job(:volume_up, state), do: doing(state, fn -> step_volume(@volume_step) end)
+  defp job(:open_menu, %{stack: []} = state), do: open(state)
+
+  # The four moves of a level do nothing with the menu closed: a person can give them
+  # to a press of the closed menu, and there is no list for them to move through.
+  defp job(:back, %{stack: [_ | _]} = state), do: back(state)
+  defp job(:row_up, %{stack: [_ | _]} = state), do: move(state, -1)
+  defp job(:select, %{stack: [_ | _]} = state), do: select(state)
+  defp job(:row_down, %{stack: [_ | _]} = state), do: move(state, 1)
+  defp job(_nothing_here, state), do: state
+
+  # A job that acts on the player and leaves the menu as it is.
+  defp doing(state, action) do
+    action.()
     state
   end
 
-  # The menu takes the row of four while it is open, and the transport takes it while
-  # the menu is closed.
-  defp press(_row_of_four, button, hold, %{stack: []} = state) do
-    case transport(button, hold) do
-      :open_menu -> open(state)
-      _other -> state
-    end
-  end
-
-  defp press(_row_of_four, button, hold, state), do: menu(button, hold, state)
-
-  # **Two buttons carry three controls, so a hold of the first is the third.** A board of
-  # four has a button for standby and needs no hold at all.
-  defp pirate_audio(1, :long), do: standby()
-  defp pirate_audio(1, :short), do: play_pause()
-  defp pirate_audio(2, :short), do: report(Playback.next())
-  defp pirate_audio(_button, _hold), do: :ok
-
-  defp transport(1, :short), do: standby()
-  defp transport(2, :short), do: report(Playback.previous())
-  defp transport(3, :short), do: play_pause()
-  defp transport(4, :short), do: report(Playback.next())
-
-  # **A hold of the track buttons moves the level.** A row of four carries every control
-  # that this device needs on a short press already, and a hold of one of them held no
-  # control at all, so the level costs no control that a person had. It sits on the two
-  # that move through the tracks, because down and up must sit beside each other and in
-  # that order, and 2 and 4 are the two that already mean back and forward.
-  #
-  # A hold of 1 is absent on purpose: a hold of the standby button on a stereo means
-  # nothing, and the Pirate Audio uses it for standby itself.
-  defp transport(2, :long), do: step_volume(-@volume_step)
-  defp transport(4, :long), do: step_volume(@volume_step)
-
-  # **A hold of the play button opens the menu.** It is the one hold of a row of four
-  # that carried nothing: 1 is absent on purpose, and 2 and 4 move the level. A person
-  # holds the button in the middle of the transport to leave the transport.
-  defp transport(3, :long), do: :open_menu
-
-  # A board may hold more buttons than this device knows what to do with, and a hold of
-  # a button with no second control is not a second control.
-  defp transport(_button, _hold), do: :ok
-
-  # The four controls of a level. A hold while the menu is open carries nothing: a
-  # person in a list is choosing a row, and the level of the volume is not what they
-  # came for.
-  defp menu(1, :short, state), do: back(state)
-  defp menu(2, :short, state), do: move(state, -1)
-  defp menu(3, :short, state), do: select(state)
-  defp menu(4, :short, state), do: move(state, 1)
-  defp menu(_button, _hold, state), do: state
-
   # **The first turn of a blanked screen lights it and does nothing else**, for the same
   # reason as the first press.
-  defp turn(_knob, _event, %{blanked?: true} = state), do: unblank(state)
+  defp turn(_function, _event, %{blanked?: true} = state), do: unblank(state)
 
-  # **Knob 1 moves through the menu, and a turn of it opens one that is closed.** A knob
-  # has no press, and a person who turns the knob beside a dark menu wants the menu.
-  # Once it is open, the knob has one detent for each row, so its position is the row.
-  defp turn(1, _event, %{stack: []} = state), do: open(state)
-  defp turn(1, event, state), do: move_to(state, event.position)
+  # **A knob names its job, so this reads the job and not the knob.** A person gives each
+  # knob its jobs on the settings page, and the peripheral names the one that holds now.
+  # The menu can open or close between the turn and this, so each job checks it too.
+  # See `PiFi.Event.Input.KnobTurned`.
+  defp turn(:open_menu, _event, %{stack: []} = state), do: open(state)
+  defp turn(:rows, event, %{stack: [_ | _]} = state), do: move_to(state, event.position)
 
-  # **Knob 2 steps back and forward while the menu is open, and sets the level while it
-  # is closed.** A step left is back and a step right opens or plays the row, so a person
-  # with two knobs and no button can use the whole menu. See `PiFi.Event.Hint.Stepper`.
-  defp turn(2, %{step: step}, %{stack: [_ | _]} = state) when step < 0, do: back(state)
-  defp turn(2, %{step: step}, %{stack: [_ | _]} = state) when step > 0, do: select(state)
+  # A step left is back and a step right opens or plays the row, so a person with two
+  # knobs and no button can use the whole menu.
+  defp turn(:back_forward, %{step: step}, %{stack: [_ | _]} = state) when step < 0,
+    do: back(state)
 
-  defp turn(2, event, %{stack: []} = state) do
+  defp turn(:back_forward, %{step: step}, %{stack: [_ | _]} = state) when step > 0,
+    do: select(state)
+
+  defp turn(:volume, event, %{stack: []} = state) do
     set_volume(event.position)
     state
   end
 
-  defp turn(_knob, _event, state), do: state
+  defp turn(:jog, event, %{stack: []} = state), do: jog(state, event)
+
+  defp turn(_function, _event, state), do: state
+
+  # **A jog wheel collects its steps and skips once, when the hand stops.** Each step
+  # would otherwise start a skip of its own, and a skip of FLAC bisects the file. A step
+  # moves further for a faster turn: a slow turn finds a place a few seconds at a time,
+  # and a flick crosses minutes.
+  defp jog(state, event) do
+    if state.jog_timer, do: Process.cancel_timer(state.jog_timer)
+
+    %{
+      state
+      | jog_ms: state.jog_ms + event.step * jog_step_ms(event.velocity),
+        jog_timer: Process.send_after(self(), :jog, @jog_settle_ms)
+    }
+  end
+
+  defp jog_step_ms(velocity) do
+    speed = abs(velocity)
+    share = (speed - @jog_slow) / (@jog_fast - @jog_slow)
+    seconds = @jog_slow_seconds + (@jog_fast_seconds - @jog_slow_seconds) * min(max(share, 0), 1)
+    round(seconds * 1000)
+  end
 
   # **The ends of a level are stops, and the list does not go round.** A knob with
   # detents reads the count of this level, and a detent that ran past the end of the
   # list would turn for ever. See `PiFi.Event.Hint.Detents`.
-  defp move(%{stack: []} = state, _step), do: state
   defp move(state, step), do: move_to(state, List.last(state.stack).index + step)
 
   defp move_to(state, index) do
@@ -479,7 +477,7 @@ defmodule PiFi.DeviceUi do
     })
 
     Event.publish(:hint, %Hint.Detents{count: length(current.rows), index: current.index})
-    Event.publish(:hint, %Hint.Stepper{active?: true})
+    Event.publish(:hint, %Hint.Menu{open?: true})
 
     hold_open(state)
   end
@@ -491,7 +489,7 @@ defmodule PiFi.DeviceUi do
   defp close(state) do
     Event.publish(:view, %View.MenuClosed{})
     Event.publish(:hint, %Hint.Detents{count: 0, index: 0})
-    Event.publish(:hint, %Hint.Stepper{active?: false})
+    Event.publish(:hint, %Hint.Menu{open?: false})
 
     remembered = Enum.map(state.stack, &{&1.place, &1.index})
     let_go(%{state | stack: [], remembered: remembered})

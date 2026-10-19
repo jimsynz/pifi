@@ -17,6 +17,38 @@ defmodule PiFi.Settings do
 
   use Ash.Domain, otp_app: :pifi
 
+  @typedoc """
+  One value that a person can change on the settings page, for a source or a
+  peripheral.
+
+  `key` names the field to the `put_settings/1` of its owner, and it is also the name
+  of the control on a page. `type` decides the control: `:text` shows the value,
+  `:password` hides it, `:number` takes a whole number, and `:select` offers the
+  `options`, each a value and the words a person reads for it. Each one is a type
+  that `PiFiWeb.CoreComponents.input/1` draws, and the settings page passes it
+  through with no rule of its own.
+
+  `value` is what the owner reports now, and it is nil for a field with
+  `write_only?` set. A page then shows an empty control, and it never sends the
+  value of that field to a browser.
+
+  `link` names one page that tells a person more, such as where to ask for a key.
+  It is separate from `description` because the web interface draws an anchor and
+  the device screen can open nothing.
+
+  See `c:PiFi.Source.settings/0` and `c:PiFi.Peripheral.settings/0`.
+  """
+  @type field :: %{
+          required(:key) => String.t(),
+          required(:title) => String.t(),
+          required(:description) => String.t() | nil,
+          required(:link) => %{href: String.t(), title: String.t()} | nil,
+          required(:type) => :number | :password | :select | :text,
+          required(:value) => String.t() | nil,
+          required(:write_only?) => boolean(),
+          optional(:options) => [{String.t(), String.t()}]
+        }
+
   alias PiFi.Settings.Cache
 
   resources do

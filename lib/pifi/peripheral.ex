@@ -129,7 +129,26 @@ defmodule PiFi.Peripheral do
   """
   @callback screen?() :: boolean()
 
-  @optional_callbacks handle_info: 2, screen?: 0
+  @doc """
+  The values of this peripheral that a person can change, such as what each knob does.
+
+  The settings page draws them under the peripheral, as it does for a source, and
+  holds no knowledge of any peripheral. A peripheral with nothing to change names no
+  callback. See `PiFi.Settings.field/0`.
+  """
+  @callback settings() :: [PiFi.Settings.field()]
+
+  @doc """
+  Check and keep the values that a person sent from the settings page.
+
+  It returns the sentence that the page shows. A running peripheral starts again after
+  a save, so it reads the new values in `c:init/1` like any other start. See
+  `put_settings/2`.
+  """
+  @callback put_settings(%{String.t() => String.t()}) ::
+              {:ok, String.t()} | {:error, String.t()}
+
+  @optional_callbacks handle_info: 2, screen?: 0, settings: 0, put_settings: 1
 
   @doc """
   The peripherals that this device can hold.
@@ -205,13 +224,38 @@ defmodule PiFi.Peripheral do
       false
   """
   @spec screen?(module()) :: boolean()
-  def screen?(module) do
-    # **`function_exported?/3` answers for a module that is loaded, and no other.** A
-    # release of this firmware loads every module at the boot, and a host build loads
-    # one when something calls it, so a check that stood alone here read `false` for a
-    # peripheral that nothing had touched yet.
-    Code.ensure_loaded?(module) and function_exported?(module, :screen?, 0) and
-      module.screen?()
+  def screen?(module), do: implements?(module, :screen?, 0) and module.screen?()
+
+  @doc """
+  The values of a peripheral that a person can change. A peripheral with none gives an
+  empty list. See `c:settings/0`.
+
+      iex> PiFi.Peripheral.settings(PiFi.Peripheral.Battery)
+      []
+  """
+  @spec settings(module()) :: [PiFi.Settings.field()]
+  def settings(module) do
+    if implements?(module, :settings, 0), do: module.settings(), else: []
+  end
+
+  @doc """
+  Keep the values that a person sent for a peripheral, and start it again if it runs.
+
+  **A save restarts the peripheral**, so it reads its new values in `c:init/1` and
+  needs no second path for a change while it runs. A peripheral that a person has not
+  put in use takes the values and stays stopped.
+  """
+  @spec put_settings(module(), %{String.t() => String.t()}) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def put_settings(module, values) do
+    with true <- implements?(module, :put_settings, 1),
+         {:ok, message} <- module.put_settings(values) do
+      if running?(module), do: restart(module)
+      {:ok, message}
+    else
+      false -> {:error, "#{module.title()} has nothing to change."}
+      {:error, message} -> {:error, message}
+    end
   end
 
   @doc """
@@ -331,6 +375,19 @@ defmodule PiFi.Peripheral do
       {^module, options} -> options
       nil -> []
     end
+  end
+
+  # **`function_exported?/3` answers for a module that is loaded, and no other.** A
+  # release of this firmware loads every module at the boot, and a host build loads one
+  # when something calls it, so a check that stood alone read `false` for a peripheral
+  # that nothing had touched yet.
+  defp implements?(module, function, arity) do
+    Code.ensure_loaded?(module) and function_exported?(module, function, arity)
+  end
+
+  defp restart(module) do
+    stop(module)
+    report(module, start(module))
   end
 
   defp report(_module, :ok), do: :ok

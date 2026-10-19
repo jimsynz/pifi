@@ -7,6 +7,9 @@ defmodule PiFi.Event.Hint do
   `PiFi.DeviceUi` owns the list, so it is the one part that can say. It owns the menu
   as well, so it also says when a knob should step back and forward through it.
 
+  **The scrub hint comes from `PiFi.Player`**, for the same reason as the volume hint
+  below: it is the one part that knows whether the track that plays can move.
+
   **The volume hint comes from `PiFi.Output.Volume`, and not from `PiFi.DeviceUi`.**
   The level changes from the web page, from Home Assistant and from a button, and the
   one process that sees every change is the one that owns the number. `PiFi.DeviceUi`
@@ -31,18 +34,35 @@ defmodule PiFi.Event.Hint do
     defstruct count: 0, index: 0
   end
 
-  defmodule Stepper do
+  defmodule Menu do
     @moduledoc """
-    Whether a control should step back and forward through the menu.
+    Whether the menu is open.
 
-    `active?` is true while the menu is open. A knob that has no other way to go back
-    or to open a row then becomes a switch of three positions: a step one way is back
-    and a step the other way is forward.
+    A control can do one thing while the menu is open and another while it is closed:
+    a knob that sets the level with the menu closed can step back and forward through
+    it once it opens. `PiFi.Event.Hint.Detents` says how many rows the open level has,
+    and this says whether there is a level at all, which a count cannot: a level with
+    no rows is still open, and a person still needs a way back out of it.
     """
 
-    @type t :: %__MODULE__{active?: boolean()}
+    @type t :: %__MODULE__{open?: boolean()}
 
-    defstruct active?: false
+    defstruct open?: false
+  end
+
+  defmodule Scrub do
+    @moduledoc """
+    Whether the track that plays can be skipped within.
+
+    `PiFi.Player` publishes this, because it is the one part that knows: a live stream,
+    a cast and a paused track take no skip, and nor does a format whose frames this
+    firmware cannot read. A jog wheel goes limp when it is false, so it says by feel
+    that there is nothing to move through.
+    """
+
+    @type t :: %__MODULE__{available?: boolean()}
+
+    defstruct available?: false
   end
 
   defmodule Volume do

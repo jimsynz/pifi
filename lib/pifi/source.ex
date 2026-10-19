@@ -66,35 +66,6 @@ defmodule PiFi.Source do
   @type unsupported :: {:error, module()}
 
   @typedoc """
-  One value of a source that a person can change.
-
-  `key` names the field to `put_settings/1`, and it is also the name of the control
-  on a page. `type` decides the control: `:text` shows the value, `:password`
-  hides it, and `:number` takes a whole number. Each one is a type that
-  `PiFiWeb.CoreComponents.input/1` draws, and the settings page passes it through
-  with no rule of its own.
-
-  `value` is what the source reports now, and it is nil for a field with
-  `write_only?` set. A page then shows an empty control, and it never sends the
-  value of that field to a browser.
-
-  `link` names one page that tells a person more, such as where to ask for a key.
-  It is separate from `description` because the web interface draws an anchor and
-  the device screen can open nothing.
-
-  See `c:settings/0`.
-  """
-  @type field :: %{
-          key: String.t(),
-          title: String.t(),
-          description: String.t() | nil,
-          link: %{href: String.t(), title: String.t()} | nil,
-          type: :number | :password | :text,
-          value: String.t() | nil,
-          write_only?: boolean()
-        }
-
-  @typedoc """
   One control of a source that does something, and changes no value.
 
   `name` names the control to `run_settings_action/1`. `icon` works in the way that
@@ -530,7 +501,7 @@ defmodule PiFi.Source do
 
   A source with nothing to change leaves this out. See `settings/1`.
   """
-  @callback settings() :: [field()]
+  @callback settings() :: [PiFi.Settings.field()]
 
   @doc """
   Write the values that a person typed.
@@ -834,7 +805,7 @@ defmodule PiFi.Source do
   See `c:settings/0`. A source that implements no settings gives an empty list, so
   a settings page needs no knowledge of which sources hold settings.
   """
-  @spec settings(module()) :: [field()]
+  @spec settings(module()) :: [PiFi.Settings.field()]
   def settings(module) do
     if implements?(module, :settings, 0), do: module.settings(), else: []
   end

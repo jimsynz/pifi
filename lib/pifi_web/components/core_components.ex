@@ -159,7 +159,13 @@ defmodule PiFiWeb.CoreComponents do
   attr(:type, :string,
     default: "text",
     values: ~w(color date datetime-local email month number password
-               range search tel text time url week)
+               range search select tel text time url week)
+  )
+
+  attr(:options, :list,
+    default: [],
+    doc:
+      "the choices of a select, as `{label, value}`, for `Phoenix.HTML.Form.options_for_select/2`"
   )
 
   attr(:field, Phoenix.HTML.FormField,
@@ -183,6 +189,20 @@ defmodule PiFiWeb.CoreComponents do
     |> assign_new(:name, fn -> field.name end)
     |> assign_new(:value, fn -> field.value end)
     |> input()
+  end
+
+  def input(%{type: "select"} = assigns) do
+    ~H"""
+    <div>
+      <label :if={@label} for={@id} class="mb-1 block text-xs uppercase tracking-widest text-ink-faint">
+        {@label}
+      </label>
+      <select name={@name} id={@id} class={[field_class(), @class]} {@rest}>
+        {Form.options_for_select(@options, @value)}
+      </select>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
   end
 
   def input(assigns) do

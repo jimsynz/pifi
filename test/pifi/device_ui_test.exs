@@ -11,6 +11,7 @@ defmodule PiFi.DeviceUiTest do
   alias PiFi.Event.Player
   alias PiFi.Event.View
   alias PiFi.Output.Volume
+  alias PiFi.Peripheral.ButtonJobs
   alias PiFi.Peripheral.PirateAudio
   alias PiFi.Peripheral.PiTft
   alias PiFi.Playback
@@ -42,20 +43,20 @@ defmodule PiFi.DeviceUiTest do
 
   defp station(title), do: Stations.create(%{country_code: "NZ", title: title})
 
+  # The event carries the jobs that the board's settings give, as the board sends it.
   defp press(button, peripheral \\ PiTft, hold \\ :short) do
-    Event.publish(:input, %Input.ButtonPressed{
-      peripheral: peripheral,
-      button: button,
-      hold: hold
-    })
+    Event.publish(:input, ButtonJobs.pressed(peripheral, button, hold))
   end
 
-  defp turn(knob, position, step) do
+  # A knob names its job, so a test names the job and the knob is any one.
+  defp turn(function, position, step, velocity \\ 0.0) do
     Event.publish(:input, %Input.KnobTurned{
       peripheral: PiFi.Peripheral.HapticKnobs,
-      knob: knob,
+      knob: 1,
+      function: function,
       position: position,
-      step: step
+      step: step,
+      velocity: velocity
     })
   end
 
@@ -95,6 +96,53 @@ defmodule PiFi.DeviceUiTest do
 
       assert Process.alive?(Process.whereis(PiFi.DeviceUi))
       refute_receive %Player.Standby{}, 200
+    end
+  end
+
+  describe "the jobs that a person gives the buttons" do
+    test "a button set to nothing does nothing" do
+      {:ok, _message} = ButtonJobs.put_settings(PiTft, %{"button_1_press" => "none"})
+
+      press(1)
+
+      refute_receive %Player.Standby{}, 200
+    end
+
+    test "a button does the job that a person gave it" do
+      {:ok, _message} = ButtonJobs.put_settings(PiTft, %{"button_4_press" => "standby"})
+
+      press(4)
+
+      assert_receive %Player.Standby{entered?: true}, 5000
+    end
+
+    # A person can take standby off every button, and a device they can't wake from
+    # the board is one they have to find a browser for.
+    test "any button wakes the device from standby, and does nothing else" do
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: :warning) end)
+
+      {:ok, :ok} = Playback.standby(true)
+      assert_receive %Player.Standby{entered?: true}, 5000
+
+      log =
+        capture_log(fn ->
+          press(3)
+          assert_receive %Player.Standby{entered?: false}, 5000
+          Process.sleep(200)
+        end)
+
+      refute log =~ "The control did nothing"
+    end
+
+    test "a job of the menu does nothing while the menu is closed" do
+      {:ok, _message} = ButtonJobs.put_settings(PiTft, %{"button_1_press" => "row_down"})
+      :ok = Event.subscribe(:view)
+
+      press(1)
+
+      refute_receive %View.MenuShown{}, 200
+      refute_receive %Player.Standby{}, 0
     end
   end
 
@@ -264,74 +312,84 @@ defmodule PiFi.DeviceUiTest do
       %{}
     end
 
-    test "a turn of knob 1 opens a closed menu, and knob 2 becomes a stepper" do
-      turn(1, 1, 1)
+    test "a knob that opens the menu opens it, and says the menu is open" do
+      turn(:open_menu, 1, 1)
 
       assert_receive %View.MenuShown{depth: 0, index: 0}, 5000
-      assert_receive %Hint.Stepper{active?: true}, 5000
+      assert_receive %Hint.Menu{open?: true}, 5000
       assert DeviceUi.places() == [:root]
     end
 
-    test "the position of knob 1 is the row, and the ends are stops" do
-      turn(1, 1, 1)
+    test "a knob of rows sets the row, and the ends are stops" do
+      turn(:open_menu, 1, 1)
       assert_receive %View.MenuShown{index: 0, rows: rows}, 5000
 
-      turn(1, 2, 1)
+      turn(:rows, 2, 1)
       assert_receive %View.MenuShown{index: 2}, 5000
 
-      turn(1, 99, 97)
+      turn(:rows, 99, 97)
       last = length(rows) - 1
       assert_receive %View.MenuShown{index: ^last}, 5000
     end
 
-    test "a step right of knob 2 opens the row, and a step left comes back" do
-      turn(1, 1, 1)
+    test "a step right of back and forward opens the row, and a step left comes back" do
+      turn(:open_menu, 1, 1)
       assert_receive %View.MenuShown{}, 5000
 
-      turn(1, 1, 1)
+      turn(:rows, 1, 1)
       assert_receive %View.MenuShown{index: 1}, 5000
 
-      turn(2, 2, 1)
+      turn(:back_forward, 2, 1)
       assert_receive %View.MenuShown{depth: 1}, 5000
 
-      turn(2, 0, -1)
+      turn(:back_forward, 0, -1)
       assert_receive %View.MenuShown{depth: 0, index: 1}, 5000
     end
 
-    test "a step left of knob 2 at the root closes the menu, and the stepper goes" do
-      turn(1, 1, 1)
+    test "a step back at the root closes the menu, and says it is closed" do
+      turn(:open_menu, 1, 1)
       assert_receive %View.MenuShown{}, 5000
 
-      turn(2, 0, -1)
+      turn(:back_forward, 0, -1)
       assert_receive %View.MenuClosed{}, 5000
-      assert_receive %Hint.Stepper{active?: false}, 5000
+      assert_receive %Hint.Menu{open?: false}, 5000
+      assert DeviceUi.places() == []
+    end
+
+    # A job can arrive a moment after the menu that it belongs to closed, and it then
+    # does nothing rather than act on a menu that isn't there.
+    test "a job of the open menu does nothing with the menu closed" do
+      turn(:rows, 3, 1)
+      turn(:back_forward, 2, 1)
+
+      refute_receive %View.MenuShown{}, 200
       assert DeviceUi.places() == []
     end
 
     # One step too many at the root closes the menu, and the person who turns back
     # wants the row they were on.
     test "a menu that a person backed out of opens on the row they left" do
-      turn(1, 1, 1)
+      turn(:open_menu, 1, 1)
       assert_receive %View.MenuShown{index: 0}, 5000
 
-      turn(1, 2, 1)
+      turn(:rows, 2, 1)
       assert_receive %View.MenuShown{index: 2}, 5000
 
-      turn(2, 0, -1)
+      turn(:back_forward, 0, -1)
       assert_receive %View.MenuClosed{}, 5000
 
-      turn(1, 3, 1)
+      turn(:open_menu, 3, 1)
       assert_receive %View.MenuShown{depth: 0, index: 2}, 5000
     end
 
     test "a menu that closed itself opens again at the level it was on" do
-      turn(1, 1, 1)
+      turn(:open_menu, 1, 1)
       assert_receive %View.MenuShown{}, 5000
 
-      turn(1, 1, 1)
+      turn(:rows, 1, 1)
       assert_receive %View.MenuShown{index: 1}, 5000
 
-      turn(2, 2, 1)
+      turn(:back_forward, 2, 1)
       assert_receive %View.MenuShown{depth: 1}, 5000
       [:root, place] = DeviceUi.places()
 
@@ -339,7 +397,7 @@ defmodule PiFi.DeviceUiTest do
       send(Process.whereis(DeviceUi), :close_menu)
       assert_receive %View.MenuClosed{}, 5000
 
-      turn(1, 2, 1)
+      turn(:open_menu, 2, 1)
       assert_receive %View.MenuShown{depth: 1}, 5000
       assert DeviceUi.places() == [:root, place]
     end
@@ -350,7 +408,7 @@ defmodule PiFi.DeviceUiTest do
       {:ok, :ok} = Playback.standby(true)
       assert_receive %Player.Standby{entered?: true}, 5000
 
-      turn(1, 1, 1)
+      turn(:open_menu, 1, 1)
 
       assert_receive %Player.Standby{entered?: false}, 5000
       refute_receive %View.MenuShown{}, 200
@@ -358,7 +416,40 @@ defmodule PiFi.DeviceUiTest do
     end
   end
 
-  describe "the level from knob 2" do
+  # **Several steps of a jog wheel become one skip, once the knob stops.** Nothing plays
+  # here, so the skip itself is refused; what this reads is the time the wheel gathers
+  # and whether it is spent. The test log runs at `:warning`, so the refusal, which
+  # `report/1` logs at `:info`, is not there to count.
+  describe "a jog wheel" do
+    defp jogged_ms, do: :sys.get_state(DeviceUi).jog_ms
+
+    test "slow steps gather a few seconds each, and are spent when the knob stops" do
+      turn(:jog, 1, 1, 1.0)
+      turn(:jog, 2, 1, 1.0)
+      turn(:jog, 3, 1, 1.0)
+
+      assert jogged_ms() == 15_000
+
+      Process.sleep(400)
+      assert jogged_ms() == 0
+    end
+
+    test "a fast step crosses a minute, and a step back takes time away" do
+      turn(:jog, 1, 1, 12.0)
+      turn(:jog, 0, -1, -1.0)
+
+      assert jogged_ms() == 55_000
+    end
+
+    test "a jog with the menu open gathers nothing" do
+      turn(:open_menu, 1, 1)
+      turn(:jog, 1, 1, 1.0)
+
+      assert jogged_ms() == 0
+    end
+  end
+
+  describe "the level from a knob" do
     setup do
       TwoCardOutput.use_it()
       :ok = PiFi.Player.select_output("rate48:CARD=first,DEV=0")
@@ -371,7 +462,7 @@ defmodule PiFi.DeviceUiTest do
     end
 
     test "with the menu closed, its position is the level" do
-      turn(2, 37, 1)
+      turn(:volume, 37, 1)
 
       assert_receive %Player.VolumeChanged{percent: 37}, 5000
     end
@@ -380,7 +471,7 @@ defmodule PiFi.DeviceUiTest do
       :ok = Volume.enable(false)
       flush()
 
-      turn(2, 37, 1)
+      turn(:volume, 37, 1)
 
       refute_receive %Player.VolumeChanged{percent: 37}, 200
     end
@@ -454,7 +545,7 @@ defmodule PiFi.DeviceUiTest do
 
       log =
         capture_log(fn ->
-          press(1, PiFi.Peripheral.PirateAudio)
+          press(1, PirateAudio)
           Process.sleep(200)
         end)
 
@@ -469,7 +560,7 @@ defmodule PiFi.DeviceUiTest do
 
       log =
         capture_log(fn ->
-          press(2, PiFi.Peripheral.PirateAudio)
+          press(2, PirateAudio)
           Process.sleep(200)
         end)
 
@@ -479,15 +570,15 @@ defmodule PiFi.DeviceUiTest do
 
     # Two buttons hold three controls, so the hold of the first is the third.
     test "a hold of the first button enters standby, and the next hold leaves it" do
-      press(1, PiFi.Peripheral.PirateAudio, :long)
+      press(1, PirateAudio, :long)
       assert_receive %Player.Standby{entered?: true}, 5000
 
-      press(1, PiFi.Peripheral.PirateAudio, :long)
+      press(1, PirateAudio, :long)
       assert_receive %Player.Standby{entered?: false}, 5000
     end
 
-    # A board of four holds a button for standby and reads no hold at all.
-    test "a hold of a button of the row of four does nothing" do
+    # The PiTFT has a button of its own for standby, so a hold of it does nothing.
+    test "a hold of the standby button of the PiTFT does nothing" do
       press(1, PiTft, :long)
       Process.sleep(100)
 
@@ -496,7 +587,7 @@ defmodule PiFi.DeviceUiTest do
 
     # This board holds two that answer, and the other two are broken.
     test "a third button does nothing, because this board holds no third" do
-      press(3, PiFi.Peripheral.PirateAudio)
+      press(3, PirateAudio)
       Process.sleep(100)
 
       assert Process.alive?(Process.whereis(PiFi.DeviceUi))

@@ -83,10 +83,10 @@ defmodule PiFi.Peripheral.PirateAudio do
   alias PiFi.Device.Identity
   alias PiFi.Event
   alias PiFi.Event.Device, as: DeviceEvents
-  alias PiFi.Event.Input
   alias PiFi.Event.Player
   alias PiFi.Event.View
   alias PiFi.Peripheral.Battery
+  alias PiFi.Peripheral.ButtonJobs
   alias PiFi.Peripheral.Buttons
   alias PiFi.Peripheral.PirateAudio.{Screen, St7789}
   alias PiFi.Playback
@@ -116,6 +116,31 @@ defmodule PiFi.Peripheral.PirateAudio do
   @doc "The name that the settings page draws."
   @impl PiFi.Peripheral
   def title, do: "Pirate Audio 1.3 inch screen"
+
+  @doc """
+  What each of the two buttons down the left of the screen does until a person changes
+  it, from the top.
+
+  **Two buttons carry three controls, so a hold of the first is the third**: a tap of 1
+  plays or pauses, a hold of it is standby, and a tap of 2 is the next track. The track
+  before is the one that a person asks for least, so it is the one that no button
+  carries. **A board of two buttons reads no menu**, since a tree needs four controls,
+  so the buttons do the same with the menu open.
+  """
+  @spec button_jobs() :: [PiFi.Peripheral.ButtonJobs.jobs()]
+  def button_jobs do
+    [
+      %{press: :play_pause, hold: :standby, menu_press: :play_pause, menu_hold: :standby},
+      %{press: :next, hold: :none, menu_press: :next, menu_hold: :none}
+    ]
+  end
+
+  @doc "The jobs of the buttons, which a person can change. See `button_jobs/0`."
+  @impl PiFi.Peripheral
+  def settings, do: ButtonJobs.settings(__MODULE__)
+
+  @impl PiFi.Peripheral
+  def put_settings(values), do: ButtonJobs.put_settings(__MODULE__, values)
 
   @doc """
   Take hold of the screen and draw the first frame.
@@ -276,11 +301,7 @@ defmodule PiFi.Peripheral.PirateAudio do
   def handle_info(message, state) do
     case Buttons.press(state.buttons, message) do
       {:ok, button, hold, buttons} ->
-        Event.publish(:input, %Input.ButtonPressed{
-          peripheral: __MODULE__,
-          button: button,
-          hold: hold
-        })
+        Event.publish(:input, ButtonJobs.pressed(__MODULE__, button, hold))
 
         {:ok, %{state | buttons: buttons}}
 

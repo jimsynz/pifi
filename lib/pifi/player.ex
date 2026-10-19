@@ -86,6 +86,7 @@ defmodule PiFi.Player do
   alias PiFi.Artwork
   alias PiFi.Event
   alias PiFi.Event.Device, as: DeviceEvents
+  alias PiFi.Event.Hint
   alias PiFi.Event.Player, as: Events
   alias PiFi.Output
   alias PiFi.Playback
@@ -342,6 +343,20 @@ defmodule PiFi.Player do
     end
   end
 
+  @doc """
+  Whether the track that plays can be skipped within now.
+
+  It reads the table, as `status/0` does, so a knob that starts while a track plays
+  learns where things stand without a call. `PiFi.Event.Hint.Scrub` says when it changes.
+  """
+  @spec scrubbable?() :: boolean()
+  def scrubbable? do
+    case :ets.whereis(@mirror) do
+      :undefined -> false
+      table -> match?([{:scrub, true}], :ets.lookup(table, :scrub))
+    end
+  end
+
   defp read(table) do
     case :ets.lookup(table, :state) do
       [{:state, %State{} = state}] -> {:ok, report(state)}
@@ -461,7 +476,23 @@ defmodule PiFi.Player do
   defp mirror(%State{} = state) do
     :ets.insert(@mirror, {:state, state})
 
-    :ok
+    hint_scrub(state.started_at != nil and skippable?(state))
+  end
+
+  # **Whether a skip can land changes in many callbacks**, as a track starts, pauses,
+  # stops or gives way to a stream, and this is the one place that every one of them
+  # passes. So it publishes `PiFi.Event.Hint.Scrub` here, and only when the answer
+  # changes: the table keeps the last one, and a progress event each second must not
+  # wake a knob. A paused track takes no skip, so it counts as one that can't move.
+  defp hint_scrub(available?) do
+    case :ets.lookup(@mirror, :scrub) do
+      [{:scrub, ^available?}] ->
+        :ok
+
+      _changed ->
+        :ets.insert(@mirror, {:scrub, available?})
+        Event.publish(:hint, %Hint.Scrub{available?: available?})
+    end
   end
 
   # The one description of what the player is doing. `status/0` builds it from the

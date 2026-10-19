@@ -32,6 +32,46 @@ defmodule PiFi.Test.Lamp do
   @impl PiFi.Peripheral
   def handle_event(_event, state), do: {:ok, state}
 
+  @colour_key "peripheral.lamp.colour"
+  @colours [{"warm", "Warm"}, {"cool", "Cool"}]
+
+  # One setting, so a test can prove that a peripheral's values reach the page and
+  # that a save starts it again.
+  @impl PiFi.Peripheral
+  def settings do
+    [
+      %{
+        key: "colour",
+        title: "Colour",
+        description: nil,
+        link: nil,
+        type: :select,
+        options: @colours,
+        value: colour(),
+        write_only?: false
+      }
+    ]
+  end
+
+  @impl PiFi.Peripheral
+  def put_settings(%{"colour" => colour}) do
+    if List.keymember?(@colours, colour, 0) do
+      PiFi.Settings.put!(@colour_key, colour)
+      {:ok, "Saved."}
+    else
+      {:error, "That isn't a colour."}
+    end
+  end
+
+  def put_settings(_values), do: {:error, "That isn't a colour."}
+
+  defp colour do
+    case PiFi.Settings.fetch(@colour_key) do
+      {:ok, %{value: colour}} -> colour
+      _unset -> "warm"
+    end
+  end
+
   @impl PiFi.Peripheral
   def terminate(_reason, %{report_to: nil}), do: :ok
 

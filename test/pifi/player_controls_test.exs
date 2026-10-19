@@ -11,6 +11,7 @@ defmodule PiFi.PlayerControlsTest do
   use PiFi.DataCase, async: false
 
   alias PiFi.Event
+  alias PiFi.Event.Hint
   alias PiFi.Event.Player, as: Events
   alias PiFi.Playback
   alias PiFi.Player
@@ -586,6 +587,43 @@ defmodule PiFi.PlayerControlsTest do
 
     test "nothing selected holds no skip" do
       assert {:error, :not_playing} = Player.skip(30_000)
+    end
+  end
+
+  # A jog wheel goes limp when there is nothing to move through, so the player says
+  # when a skip could land and when it no longer can. See `PiFi.Event.Hint.Scrub`.
+  describe "the scrub hint" do
+    setup do
+      :ok = Event.subscribe(:hint)
+      :ok
+    end
+
+    test "a track that takes a skip says so, and a pause takes it away" do
+      playing(1)
+
+      assert_receive %Hint.Scrub{available?: true}, 2000
+      assert Player.scrubbable?()
+
+      assert :ok = Player.pause(true)
+      assert_receive %Hint.Scrub{available?: false}, 2000
+      refute Player.scrubbable?()
+    end
+
+    test "a live stream takes no skip, so it never says one could land" do
+      Episodes.holds(live?: true)
+      playing(1)
+
+      refute_receive %Hint.Scrub{available?: true}, 500
+      refute Player.scrubbable?()
+    end
+
+    # The progress events of a track that plays run through the same place, and a knob
+    # must not wake once a second for an answer that didn't change.
+    test "it says it once, and not on each progress event" do
+      playing(1)
+      assert_receive %Hint.Scrub{available?: true}, 2000
+
+      refute_receive %Hint.Scrub{}, 2500
     end
   end
 end

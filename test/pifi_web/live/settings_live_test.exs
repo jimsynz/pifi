@@ -386,6 +386,61 @@ defmodule PiFiWeb.SettingsLiveTest do
     end
   end
 
+  describe "the page of a peripheral" do
+    setup do
+      Application.put_env(:pifi, :peripherals, [{Lamp, report_to: self()}])
+
+      on_exit(fn ->
+        Peripheral.stop(Lamp)
+        Application.delete_env(:pifi, :peripherals)
+
+        case PiFi.Settings.fetch("peripheral.lamp.colour") do
+          {:ok, setting} -> PiFi.Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+
+      :ok
+    end
+
+    test "a peripheral with settings leads to its own page", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
+
+      assert has_element?(view, ~s{#peripheral-row-lamp a[href="/settings/peripherals/lamp"]})
+    end
+
+    test "the page draws each value, and a choice as a list", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals/lamp")
+
+      assert has_element?(view, "#peripheral-form select[name='peripheral[colour]']")
+      assert has_element?(view, "#peripheral-form option[value='warm'][selected]")
+    end
+
+    test "a save keeps the value, and starts a running peripheral again", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals/lamp")
+      view |> element("#enable-peripheral-lamp") |> render_click()
+
+      view |> form("#peripheral-form", peripheral: %{colour: "cool"}) |> render_submit()
+
+      assert_receive {:lamp_terminated, :shutdown}
+      assert has_element?(view, "#peripheral-form option[value='cool'][selected]")
+      assert Peripheral.running?(Lamp)
+    end
+
+    test "a value that the peripheral refuses says why", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/settings/peripherals/lamp")
+
+      html = render_submit(view, "save_peripheral", %{"peripheral" => %{"colour" => "plaid"}})
+
+      assert html =~ "That isn&#39;t a colour."
+    end
+
+    test "a peripheral that this firmware doesn't know leads back to the list", %{conn: conn} do
+      assert {:error, {:live_redirect, %{to: "/settings/peripherals"}}} =
+               live(conn, ~p"/settings/peripherals/toaster")
+    end
+  end
+
   describe "the refresh periods of a source" do
     setup do
       on_exit(fn ->

@@ -116,6 +116,16 @@ defmodule PiFiWeb.SettingsLive do
     end
   end
 
+  def handle_params(%{"peripheral" => slug}, _uri, socket) do
+    case Peripheral.from_slug(slug) do
+      {:ok, module} ->
+        {:noreply, socket |> title() |> load_peripheral(module)}
+
+      {:error, :not_a_peripheral} ->
+        {:noreply, push_navigate(socket, to: ~p"/settings/peripherals")}
+    end
+  end
+
   # **A device with no screen has no page about one.** A person reaches this address
   # from a device that had a panel and then lost it, or by typing it, and the menu that
   # they came from is the honest place to send them.
@@ -399,7 +409,8 @@ defmodule PiFiWeb.SettingsLive do
   def handle_event("enable_peripheral", %{"slug" => slug, "enabled" => enabled}, socket) do
     with {:ok, module} <- Peripheral.from_slug(slug),
          :ok <- Peripheral.enable(module, enabled == "true") do
-      {:noreply, socket |> put_flash(:info, peripheral_in_use(module)) |> refresh()}
+      {:noreply,
+       socket |> put_flash(:info, peripheral_in_use(module)) |> reload_peripheral(module)}
     else
       {:error, :not_a_peripheral} ->
         {:noreply, push_navigate(socket, to: ~p"/settings/peripherals")}
@@ -409,6 +420,19 @@ defmodule PiFiWeb.SettingsLive do
          socket
          |> put_flash(:error, "Couldn't start that: #{inspect(reason)}")
          |> refresh()}
+    end
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("save_peripheral", %{"peripheral" => values}, socket) do
+    module = socket.assigns.peripheral.module
+
+    case Peripheral.put_settings(module, values) do
+      {:ok, message} ->
+        {:noreply, socket |> put_flash(:info, message) |> reload_peripheral(module)}
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
     end
   end
 
@@ -887,23 +911,7 @@ defmodule PiFiWeb.SettingsLive do
 
       <.form :if={@source.fields != []} for={@source.form} id="source-form" phx-submit="save_source">
         <div class="space-y-3">
-          <div :for={field <- @source.fields}>
-            <.input
-              field={@source.form[field.key]}
-              type={to_string(field.type)}
-              label={field.title}
-              placeholder={placeholder(field)}
-            />
-            <p :if={field.description} class="mt-1 text-sm text-ink-dim">
-              {field.description}
-              <a
-                :if={field.link}
-                href={field.link.href}
-                class="text-accent underline"
-                rel="noopener"
-              >{field.link.title}</a>
-            </p>
-          </div>
+          <.setting_field :for={field <- @source.fields} form={@source.form} field={field} />
         </div>
 
         <button type="submit" id="save-source" class="control mt-3 rounded-lg px-4 py-2 text-sm">
@@ -1007,28 +1015,57 @@ defmodule PiFiWeb.SettingsLive do
             ]}
           />
 
-          <span class="min-w-0 grow">
+          <.link
+            :if={peripheral.settings?}
+            navigate={~p"/settings/peripherals/#{peripheral.slug}"}
+            class="min-w-0 grow"
+          >
+            <span class="block truncate text-ink">{peripheral.title}</span>
+            <span class="block truncate text-xs text-ink-faint">
+              {peripheral_state(peripheral)}
+            </span>
+          </.link>
+
+          <span :if={not peripheral.settings?} class="min-w-0 grow">
             <span class="block truncate text-ink">{peripheral.title}</span>
             <span class="block truncate text-xs text-ink-faint">
               {peripheral_state(peripheral)}
             </span>
           </span>
 
-          <button
-            type="button"
-            id={"enable-peripheral-#{peripheral.slug}"}
-            phx-click="enable_peripheral"
-            phx-value-slug={peripheral.slug}
-            phx-value-enabled={to_string(not peripheral.enabled?)}
-            class={[
-              "control shrink-0 rounded-lg px-3 py-1.5 text-xs",
-              peripheral.enabled? && "control-on"
-            ]}
-          >
-            {if peripheral.enabled?, do: "Disable", else: "Enable"}
-          </button>
+          <.enable_peripheral peripheral={peripheral} />
+
+          <.icon :if={peripheral.settings?} name="ph-caret-right" class="size-5 shrink-0 text-ink" />
         </li>
       </ul>
+    </.section>
+    """
+  end
+
+  def render(%{live_action: :peripheral} = assigns) do
+    ~H"""
+    <.section id="settings-peripheral" title={@peripheral.title} back={~p"/settings/peripherals"}>
+      <div class="mb-4 flex items-center gap-3 border-b border-edge pb-4">
+        <.icon
+          name="ph-cpu"
+          class={[
+            "size-5 shrink-0",
+            if(@peripheral.running?, do: "text-accent", else: "text-ink-faint")
+          ]}
+        />
+        <span class="grow text-sm text-ink-dim">{peripheral_state(@peripheral)}</span>
+        <.enable_peripheral peripheral={@peripheral} />
+      </div>
+
+      <.form for={@peripheral.form} id="peripheral-form" phx-submit="save_peripheral">
+        <div class="space-y-3">
+          <.setting_field :for={field <- @peripheral.fields} form={@peripheral.form} field={field} />
+        </div>
+
+        <button type="submit" id="save-peripheral" class="control mt-3 rounded-lg px-4 py-2 text-sm">
+          Save
+        </button>
+      </.form>
     </.section>
     """
   end
@@ -1877,6 +1914,53 @@ defmodule PiFiWeb.SettingsLive do
     """
   end
 
+  attr(:peripheral, :map, required: true)
+
+  defp enable_peripheral(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id={"enable-peripheral-#{@peripheral.slug}"}
+      phx-click="enable_peripheral"
+      phx-value-slug={@peripheral.slug}
+      phx-value-enabled={to_string(not @peripheral.enabled?)}
+      class={[
+        "control shrink-0 rounded-lg px-3 py-1.5 text-xs",
+        @peripheral.enabled? && "control-on"
+      ]}
+    >
+      {if @peripheral.enabled?, do: "Disable", else: "Enable"}
+    </button>
+    """
+  end
+
+  # One value of a source or a peripheral. See `PiFi.Settings.field/0`.
+  attr(:form, Phoenix.HTML.Form, required: true)
+  attr(:field, :map, required: true)
+
+  defp setting_field(assigns) do
+    ~H"""
+    <div>
+      <.input
+        field={@form[@field.key]}
+        type={to_string(@field.type)}
+        label={@field.title}
+        placeholder={placeholder(@field)}
+        options={select_options(@field)}
+      />
+      <p :if={@field.description} class="mt-1 text-sm text-ink-dim">
+        {@field.description}
+        <a
+          :if={@field.link}
+          href={@field.link.href}
+          class="text-accent underline"
+          rel="noopener"
+        >{@field.link.title}</a>
+      </p>
+    </div>
+    """
+  end
+
   # **The browser sends the file to a temporary path, and this reads it there.**
   # `PiFi.Artwork` writes the bytes to the cache, so the picture reaches the disk one
   # time and the temporary file goes when this function answers.
@@ -1904,6 +1988,28 @@ defmodule PiFiWeb.SettingsLive do
 
   # A source reads its own current values, and a description of one carries a count
   # or a state, so both come again after each change. See `PiFi.Source`.
+  defp load_peripheral(socket, module) do
+    fields = Peripheral.settings(module)
+
+    assign(socket, :peripheral, %{
+      module: module,
+      title: module.title(),
+      slug: Peripheral.slug(module),
+      enabled?: Peripheral.enabled?(module),
+      running?: Peripheral.running?(module),
+      fields: fields,
+      form: to_form(Map.new(fields, &{&1.key, &1.value || ""}), as: :peripheral)
+    })
+  end
+
+  # A start or a save changes whether the peripheral runs, so its page reads it again.
+  defp reload_peripheral(socket, module) do
+    case socket.assigns.live_action do
+      :peripheral -> socket |> refresh() |> load_peripheral(module)
+      _other -> refresh(socket)
+    end
+  end
+
   defp load_source(socket, module) do
     fields = Source.settings(module)
 
@@ -2259,7 +2365,8 @@ defmodule PiFiWeb.SettingsLive do
         title: module.title(),
         slug: Peripheral.slug(module),
         enabled?: Peripheral.enabled?(module),
-        running?: Peripheral.running?(module)
+        running?: Peripheral.running?(module),
+        settings?: Peripheral.settings(module) != []
       }
     end)
   end
@@ -2296,6 +2403,13 @@ defmodule PiFiWeb.SettingsLive do
   # what a person must type instead.
   defp placeholder(%{write_only?: true, title: title}), do: title
   defp placeholder(_field), do: nil
+
+  # A field gives each option as its value and the words a person reads, and
+  # `Phoenix.HTML.Form.options_for_select/2` takes them the other way round.
+  defp select_options(%{options: options}),
+    do: Enum.map(options, fn {value, label} -> {label, value} end)
+
+  defp select_options(_field), do: []
 
   defp output_summary(%{devices: []}), do: "No sound card found"
 

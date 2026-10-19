@@ -313,9 +313,14 @@ defmodule PiFi.MixProject do
       # `btbcm` driver loads, which is the part that cannot come from NBPR: a blob is
       # loaded before any of the rootfs is this project's code. The daemon and the
       # library that speak to it are NBPR packages. See `PiFi.Bluetooth`.
+      #
+      # 0.2.1 adds the CH341 USB serial driver, for `PiFi.Peripheral.HapticKnobs`.
+      # **A new tag needs `nerves_system_br` at the version of the system's own
+      # `mix.lock`**, or the checksum of the prebuilt artefact doesn't match and Nerves
+      # builds the whole system locally. Moving the tag alone left it at the old one.
       {:nerves_system_pifi_rpi0_2,
        git: "https://harton.dev/mypihifiguy/nerves_system_pifi_rpi0_2.git",
-       tag: "v0.2.0",
+       tag: "v0.2.1",
        runtime: false,
        targets: :pifi_rpi0_2,
        nerves: [compile: true]},

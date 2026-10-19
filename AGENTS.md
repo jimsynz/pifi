@@ -196,8 +196,8 @@ Licence: Apache-2.0.
   row one button at a time, and read it from
   `PiFi.Event.Input.ButtonPressed`: four presses in one go give a list of events
   that holds no order of place, and two builds named the wrong row from such a list.
-  `PiFi.DeviceUi` decides what a place in the row means, and the driver names the
-  place alone.
+  A person gives each button its jobs on the board's settings page, and
+  `PiFi.Peripheral.ButtonJobs` puts them in the event.
 - **A dark screen has two causes, and a press does not mean the same thing under each
   one.** Standby stops the audio. A blank leaves the audio playing and turns the light
   off, because the light is a large part of what a portable device takes from its cell.
@@ -434,8 +434,12 @@ The software has five parts. They talk through Phoenix PubSub.
    receives the input events, and it publishes the view events and the hints about
    the menu. It owns the selected index and the list, because the knob needs a
    detent count and only `PiFi.DeviceUi` knows the length of the list.
-   `PiFi.Output.Volume` publishes the hint about the level, because it is the one
-   process that sees every change of it.
+   `PiFi.Output.Volume` publishes the hint about the level, and `PiFi.Player` the one
+   about whether the track can be skipped within, because each is the one process that
+   sees every change of its answer. A button or a knob names the job that a person gave
+   it, and `PiFi.DeviceUi` decides what the job does. A button names one job for the
+   menu closed and one for it open, and `PiFi.DeviceUi` picks; a knob picks for itself,
+   because its feel has to match the job.
 
 Every message is a struct from `PiFi.Event`, on one of six topics: `:player`,
 `:source`, `:device`, `:view`, `:input`, and `:hint`. `:device` carries the state of

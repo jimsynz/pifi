@@ -165,5 +165,59 @@ defmodule PiFi.PeripheralTest do
     end
   end
 
+  describe "the settings of a peripheral" do
+    setup do
+      on_exit(fn ->
+        case PiFi.Settings.fetch("peripheral.lamp.colour") do
+          {:ok, setting} -> PiFi.Settings.delete!(setting)
+          {:error, _reason} -> :ok
+        end
+      end)
+    end
+
+    test "a peripheral names its values, as a source does" do
+      assert [%{key: "colour", type: :select, value: "warm"}] = Peripheral.settings(Lamp)
+    end
+
+    test "a save keeps the value" do
+      assert {:ok, _message} = Peripheral.put_settings(Lamp, %{"colour" => "cool"})
+      assert [%{value: "cool"}] = Peripheral.settings(Lamp)
+    end
+
+    # A running peripheral reads its values when it starts, so a save starts it again
+    # rather than reach into it.
+    test "a save starts a running peripheral again" do
+      knows([{Lamp, report_to: self()}])
+      :ok = Peripheral.enable(Lamp, true)
+      before = Process.whereis(Lamp)
+
+      assert {:ok, _message} = Peripheral.put_settings(Lamp, %{"colour" => "cool"})
+
+      assert_receive {:lamp_terminated, :shutdown}
+      assert Peripheral.running?(Lamp)
+      refute Process.whereis(Lamp) == before
+    end
+
+    test "a save of a peripheral that is out of use starts nothing" do
+      knows([{Lamp, []}])
+
+      assert {:ok, _message} = Peripheral.put_settings(Lamp, %{"colour" => "cool"})
+      refute Peripheral.running?(Lamp)
+    end
+
+    test "a value that the peripheral refuses restarts nothing" do
+      knows([{Lamp, report_to: self()}])
+      :ok = Peripheral.enable(Lamp, true)
+
+      assert {:error, _message} = Peripheral.put_settings(Lamp, %{"colour" => "plaid"})
+      refute_receive {:lamp_terminated, _reason}, 100
+    end
+
+    test "a peripheral with nothing to change says so" do
+      assert {:error, message} = Peripheral.put_settings(PiFi.Peripheral.Battery, %{})
+      assert message =~ "nothing to change"
+    end
+  end
+
   defp knows(peripherals), do: Application.put_env(:pifi, :peripherals, peripherals)
 end
