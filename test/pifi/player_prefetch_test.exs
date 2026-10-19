@@ -120,6 +120,30 @@ defmodule PiFi.PlayerPrefetchTest do
     end
   end
 
+  # **An ask for a file that is already released leaves nothing to wait for in the
+  # table.** Its task finds the file whole and releases it again, and the entry says
+  # `keep?: false` before and after. A task that outlived its test wrote after the
+  # sandbox owner had gone, and the next test's first write failed with `Database busy`,
+  # which is how CI failed "it gives the row after the one that plays". `Task.start/1`
+  # puts its caller in `$callers`, so that's how this finds the task.
+  defp ask_and_await(item) do
+    answer = Prefetch.ask(item)
+
+    for task <- started_by_this_test() do
+      ref = Process.monitor(task)
+      assert_receive {:DOWN, ^ref, :process, ^task, _reason}, 2000
+    end
+
+    answer
+  end
+
+  defp started_by_this_test do
+    for pid <- Process.list(),
+        {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+        self() in Keyword.get(dictionary, :"$callers", []),
+        do: pid
+  end
+
   describe "the queue says which row is next" do
     test "it gives the row after the one that plays, and it moves no mark" do
       first = Library.track("first")
@@ -174,7 +198,7 @@ defmodule PiFi.PlayerPrefetchTest do
 
       Req.Test.stub(Download, fn _conn -> raise "the network must not be read again" end)
 
-      assert Prefetch.ask(one) == :ok
+      assert ask_and_await(one) == :ok
       assert held(one).keep? == false
     end
   end
