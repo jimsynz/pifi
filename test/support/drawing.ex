@@ -2,7 +2,7 @@ defmodule PiFi.Test.Drawing do
   @moduledoc """
   Draws one Emerge tree and gives the pixels, for a test that reads them.
 
-  **Emerge 0.4 draws for a renderer and not for a call.** A test that wants the
+  **Emerge draws for a renderer and not for a call.** A test that wants the
   pixels of one tree therefore starts a renderer, uploads the tree, takes the frame,
   and gives the renderer back. `PiFi.Screen.Renderer` is the same path that a
   screen of the device takes, so a test reads what a person sees.

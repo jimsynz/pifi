@@ -224,10 +224,15 @@ config :nerves, source_date_epoch: "1787022821"
 # A screen of this device opens no window and drives no display: it renders to
 # pixels and writes them to a panel over SPI. See `PiFi.Screen.Renderer`.
 #
-# **An empty list is the raster NIF, and Emerge 0.4 publishes one.** 0.3 published a
-# NIF for each of three backends and none for no backend, so this project took
-# `[:wayland]`, the smallest of the three, and called nothing in it. That variant
+# **An empty list is the raster NIF, and Emerge publishes one since 0.4.** 0.3
+# published a NIF for each of three backends and none for no backend, so this project
+# took `[:wayland]`, the smallest of the three, and called nothing in it. That variant
 # names `libxkbcommon`, and the raster NIF needs no library of a display at all.
+#
+# **A GPU entry here cannot help this board.** 0.5 takes `[headless: [:opengl]]` as
+# well, but it publishes no artefact for that combination, so the target would build
+# Skia from source. The headless GPU artefact it does publish is Vulkan, which the
+# VideoCore IV of a Pi Zero 2 W has no driver for.
 #
 # **The host needs the same line as the target.** `EmergeSkia.BuildConfig` chooses
 # `[:drm]` by itself, that variant names `libgbm`, and a build machine without Mesa

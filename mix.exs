@@ -212,10 +212,10 @@ defmodule PiFi.MixProject do
       # display: it gives the pixels back, and the peripheral writes them to the
       # screen over SPI.
       #
-      # `config/target.exs` names the backend, because `EmergeSkia.BuildConfig`
+      # `config/config.exs` names the backend, because `EmergeSkia.BuildConfig`
       # sees `MIX_TARGET` and chooses the DRM one by itself, and it holds the reason
       # that the choice is what it is.
-      {:emerge, "~> 0.4.0-beta.1"},
+      {:emerge, "~> 0.5.0"},
       # The fuel gauge of the UPS-Lite pHAT. It reads the charge of the cell over I2C,
       # and it holds no native code of its own: `wafer` is the layer that talks to
       # `circuits_i2c`. See `PiFi.Peripheral.Battery`.

@@ -78,12 +78,20 @@ defmodule PiFi.Screen.Renderer do
   another face is a screen that a person can read, and a screen that will not start
   is a black panel. See `load_display_face/1`.
 
-  ## `rendering_api: :raster`
+  ## `renderer: %Emerge.Config.Renderer{api: :raster}`
 
-  The board holds no GPU that this firmware uses, and `config/target.exs` names
+  The board holds no GPU that this firmware uses, and `config/config.exs` names
   `compiled_backends: []`, so the NIF that the device runs is the raster one. Naming
   the API here says the same thing in the one place that a reader of this module
   looks.
+
+  **Headless output cannot draw on this GPU.** Emerge compiles the headless backend
+  for OpenGL or Vulkan only, never for raster, and it publishes no precompiled
+  headless OpenGL artefact, so that route means building Skia from source. The one
+  headless GPU artefact for `aarch64-unknown-linux-gnu` is Vulkan, and the
+  VideoCore IV of a Pi Zero 2 W has no Vulkan driver: Mesa's `v3dv` starts at the
+  VideoCore VI of a Pi 4. Raising `gpu_mem` in the Nerves system buys nothing on its
+  own. See `EmergeSkia.BuildConfig.Schema` for the backend and API matrix.
   """
 
   require Logger
@@ -108,16 +116,17 @@ defmodule PiFi.Screen.Renderer do
   def start(size, assets \\ assets())
 
   def start({width, height}, assets) do
-    with {:ok, renderer} <-
-           EmergeSkia.start(
-             otp_app: :pifi,
-             backend: :headless,
-             rendering_api: :raster,
-             width: width,
-             height: height,
-             assets: assets,
-             headless: [target: self(), mode: :binary, pixel_format: :rgba8888]
-           ) do
+    config = %Emerge.Config{
+      output: %Emerge.Config.Headless{
+        target: self(),
+        size: {width, height},
+        frames: %Emerge.Config.BinaryFrames{pixel_format: :rgba8888}
+      },
+      renderer: %Emerge.Config.Renderer{api: :raster},
+      assets: Keyword.put(assets, :otp_app, :pifi)
+    }
+
+    with {:ok, renderer} <- EmergeSkia.start(config) do
       load_display_face(renderer)
 
       {:ok, renderer}

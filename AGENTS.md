@@ -227,18 +227,30 @@ Licence: Apache-2.0.
     directory real and removes each NIF that does not name the target triple.
   - **`config/config.exs` must name `compiled_backends`, and the value is `[]`.**
     `EmergeSkia.BuildConfig` chooses `[:drm]` by itself, that variant names `libgbm`,
-    and `libgbm` needs Mesa. Emerge 0.4 publishes an artefact for `[]`, which is the
+    and `libgbm` needs Mesa. Emerge publishes an artefact for `[]`, which is the
     `--raster` NIF, so this project needs neither Mesa nor `libxkbcommon` and it
     compiles nothing from source. **The line belongs in the shared config, and not in
     `config/target.exs`.** The host runs the tests of each screen, so a host that names
     no value downloads the DRM NIF and 132 of those tests stop with `EmergeSkia.Native
     is not available`.
-  - **Emerge 0.4 draws for a renderer, and not for a call.**
+  - **The screens cannot move to the GPU, and raising `gpu_mem` would waste the
+    memory.** Emerge compiles the headless backend for OpenGL or Vulkan and never for
+    raster, so drawing a headless frame on the GPU means `[headless: [:opengl]]`.
+    Emerge publishes no artefact for that, so the target would build Skia from source.
+    The one headless GPU artefact for `aarch64-unknown-linux-gnu` is Vulkan, and
+    Mesa's `v3dv` starts at the VideoCore VI of a Pi 4: the VideoCore IV of this board
+    has the `vc4` driver and GLES 2.0 only. `EmergeSkia.BuildConfig.Schema` holds the
+    backend and API matrix.
+  - **Emerge draws for a renderer, and not for a call.**
     `EmergeSkia.render_to_pixels/2` took a tree in 0.3 and reads the last frame of a
     running renderer now. `EmergeSkia.start/1` gives a renderer, each
     `EmergeSkia.upload_tree/2` sends one frame to the process that started it, and a
     frame arrives for an unchanged tree as well. `PiFi.Screen.Renderer` holds that
     exchange for a screen and `PiFi.Test.Drawing` holds it for a test.
+  - **`EmergeSkia.start/1` takes an `%Emerge.Config{}` since 0.5**, with the output,
+    renderer, input, assets, diagnostics and runtime each a record of its own. The
+    flat keyword list of 0.4 is gone. `PiFi.Screen.Renderer.start/2` is the one place
+    that builds it.
   - **Emerge refuses a runtime path by its extension, and it reads no byte to
     decide.** The list that it holds by default names `.png`, `.jpg` and five other
     types, and a name of the cache carries no type, so a thumbnail is
