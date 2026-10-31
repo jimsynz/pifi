@@ -29,6 +29,10 @@ defmodule PiFi.Podcast.Index do
 
   alias PiFi.Settings
 
+  # Sobelow reads `@sobelow_skip` from the source. This registration stops the
+  # compiler warning that no Elixir code reads the attribute.
+  Module.register_attribute(__MODULE__, :sobelow_skip, persist: true)
+
   @base_url "https://api.podcastindex.org/api/1.0"
   @default_limit 40
   @key_setting "podcast_index_key"
@@ -178,6 +182,8 @@ defmodule PiFi.Podcast.Index do
       "73a1fffed61c1d30d858beb1fc48f355386449d2"
   """
   @spec signature(String.t(), String.t(), String.t()) :: String.t()
+  # The index defines SHA-1, so no other hash gives an answer that it accepts.
+  @sobelow_skip ["Crypto.WeakHash"]
   def signature(key, secret, date) do
     :crypto.hash(:sha, key <> secret <> date) |> Base.encode16(case: :lower)
   end

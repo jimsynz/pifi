@@ -123,5 +123,8 @@ defmodule PiFi.Cache.Entry.Changes.Write do
     end
   end
 
+  # AshStorage defines the checksum of a blob as base64 MD5, and checks a download
+  # against it. It detects a damaged file, and it guards nothing.
+  @sobelow_skip ["Crypto.WeakHash"]
   defp checksum(bytes), do: :crypto.hash(:md5, bytes) |> Base.encode64()
 end
