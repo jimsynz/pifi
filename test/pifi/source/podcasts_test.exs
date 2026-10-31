@@ -307,10 +307,8 @@ defmodule PiFi.Source.PodcastsTest do
       assert "Episode 1" in titles_of(created)
     end
 
-    # Oban makes a job unique by its arguments, and AshOban puts a `nil` in them, which
-    # the SQLite engine of Oban cannot compare. Two opens therefore ask twice. The
-    # `where` of the trigger is what holds the reads to one: the job reads the show
-    # again, and the first read already made the copy new.
+    # A trigger job is unique to its record until it finishes, so the second open finds
+    # the first job in the queue and adds nothing.
     test "two people opening the same show read the feed one time" do
       stub_feed(feed_xml(item(1)))
       created = aged(show(), 2)
@@ -318,7 +316,7 @@ defmodule PiFi.Source.PodcastsTest do
       opened(created)
       opened(created)
 
-      assert %{success: 1, cancelled: 1} = Oban.drain_queue(queue: :default)
+      assert %{success: 1, cancelled: 0} = Oban.drain_queue(queue: :default)
     end
 
     test "a feed that fails keeps the episodes and holds the reason" do

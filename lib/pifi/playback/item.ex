@@ -192,10 +192,9 @@ defmodule PiFi.Playback.Item do
       # looks for work: `AshOban.run_trigger/2` is the one way that this job arrives,
       # and `PiFi.Jellyfin.Sync.Favourites` is the other caller of it.
       #
-      # Two presses ask twice, and `where` is what holds the reads to one. Oban
-      # cannot make the job unique, because AshOban puts `tenant: nil` in the
-      # arguments and its SQLite engine compares them as JSON. The job reads the item
-      # again instead, and an item that lost its mark cancels the job.
+      # Two presses give one job, because a trigger job is unique to its item until
+      # it finishes. `where` still matters: the job reads the item again when it
+      # runs, and an item that lost its mark in the meantime cancels the job.
       trigger :cache_audio do
         action :cache_audio
         where expr(caches_audio?)

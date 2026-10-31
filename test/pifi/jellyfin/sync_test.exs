@@ -656,16 +656,16 @@ defmodule PiFi.Jellyfin.SyncTest do
       :ok
     end
 
-    # The mark itself puts one job in the queue, so this counts what the run adds.
+    # The mark itself puts a job in the queue, and the run would find that one and add
+    # nothing. Cancelling it stands in for the mark made while the network was down.
     test "it puts one job in the queue for each marked item" do
       [one] = items(expr(kind == :track))
       {:ok, _item} = PiFi.Playback.set_favourite(one)
-
-      before = length(cache_jobs())
+      Oban.cancel_all_jobs(Oban.Job)
 
       assert {:ok, 1} = Jellyfin.cache_favourites()
 
-      assert length(cache_jobs()) == before + 1
+      assert length(cache_jobs()) == 1
     end
 
     test "a device that marked nothing asks for nothing" do

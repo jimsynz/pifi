@@ -97,13 +97,9 @@ Licence: Apache-2.0.
   `HLS.Storage.Req` exists in a build or does not, and the answer depends on the
   order that the dependencies compile in. `PiFi.Player.Hls.Storage` is ours, and
   it holds the timeouts of this firmware. Do not use the one from `kim_hls`.
-- **Two traps of SQLite, and each one cost a debugging cycle.** `ago/2` gives no
-  answer on AshSqlite: a filter on it matches no row, and a calculation of it gives
-  `nil` for a row that holds a date. Use `datetime_add(now(), -n, :unit)` instead.
-  And Oban cannot make a job unique when one argument holds `nil`, because its
-  SQLite engine compares the arguments as JSON. AshOban always puts `tenant: nil` in
-  them, so no trigger job of this firmware is unique. Give the trigger a `where`
-  instead, and let the second job cancel itself.
+- **`ago/2` gives no answer on AshSqlite.** A filter on it matches no row, and a
+  calculation of it gives `nil` for a row that holds a date. Use
+  `datetime_add(now(), -n, :unit)` instead.
 - **If a later version needs another binary, use NBPR**, not a Nerves system
   fork. See <https://github.com/jimsynz/nbpr>. NBPR ships binaries and shared
   libraries, and no header files.

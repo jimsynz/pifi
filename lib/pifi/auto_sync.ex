@@ -54,10 +54,9 @@ defmodule PiFi.AutoSync do
   put a job in the queue when the catalogue held no station, which is the same answer
   that an unset time gives here.
 
-  **The time is written before the job goes in the queue.** Two events in one moment
-  would otherwise put two jobs there, and Oban cannot hold them to one: its SQLite
-  engine compares the arguments as JSON, and AshOban always puts `tenant: nil` in them,
-  so no trigger job of this firmware is unique.
+  **The time is written before the job goes in the queue.** A scheduled action is
+  unique only until it finishes, so an event that arrived just after a quick job
+  completed would otherwise run the whole job again.
   """
 
   use GenServer
