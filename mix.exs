@@ -300,7 +300,7 @@ defmodule PiFi.MixProject do
       # Bandit, so cowboy and cowlib leave the dependency tree.
       {:vintage_net_wizard,
        github: "nerves-networking/vintage_net_wizard",
-       ref: "258f3b1a6085b8e1ba0a6c5b494d8f8cd505b434",
+       ref: "6df7ab2a423e95e0a220861e13769574e10e2a68",
        targets: @all_targets},
 
       # Targets
