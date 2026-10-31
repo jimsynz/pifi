@@ -44,7 +44,7 @@ defmodule PiFi.Cache do
       define :put_from_url, action: :put_from_url, args: [:namespace]
       define :fetch, action: :by_key, args: [:namespace, :entry_key]
       define :fetch_many, action: :by_keys, args: [:namespace, :entry_keys]
-      define :list_entries, action: :read
+      define :list_entries, action: :list
       define :entries_in, action: :by_namespace, args: [:namespace]
       define :touch, action: :touch
       define :keep, action: :keep

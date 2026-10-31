@@ -71,7 +71,14 @@ defmodule PiFi.Cache.Entry do
   actions do
     default_accept []
 
-    defaults [:read]
+    read :list do
+      description """
+      Every entry, with no page.
+
+      `AshStorage.BlobResource` adds the `:read` of this resource, and that one requires
+      keyset pagination, so a caller that wants the whole cache reads this.
+      """
+    end
 
     read :by_key do
       description "Read one entry of one namespace."
