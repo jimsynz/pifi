@@ -9,4 +9,8 @@ defmodule PiFi.Repo do
   """
 
   use AshSqlite.Repo, otp_app: :pifi
+
+  def min_sqlite_version do
+    %Version{major: 3, minor: 53, patch: 4}
+  end
 end
