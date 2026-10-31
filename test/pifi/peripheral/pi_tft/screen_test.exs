@@ -272,6 +272,43 @@ defmodule PiFi.Peripheral.PiTft.ScreenTest do
       assert byte_size(menu_pixels(view)) == width * height * 4
     end
 
+    # **An album is chosen by its artist as much as by its name**, and the source gives
+    # the artist as the subtitle of the row.
+    test "a row draws its subtitle under the title" do
+      texts = album_view(["Moana"], 0) |> Screen.render() |> Tree.texts()
+
+      assert "Moana" in texts
+      assert "Artist of Moana" in texts
+    end
+
+    # A row with a subtitle takes two lines, so the window holds four of them and not six.
+    test "a level with subtitles draws a window of four rows" do
+      texts = album_view(Enum.map(1..10, &"Album #{&1}"), 0) |> Screen.render() |> Tree.texts()
+
+      assert "Album 4" in texts
+      refute "Album 5" in texts
+    end
+
+    test "a level with no subtitles draws a window of six rows" do
+      texts = menu_view(Enum.map(1..10, &"Row #{&1}"), 0) |> Screen.render() |> Tree.texts()
+
+      assert "Row 6" in texts
+      refute "Row 7" in texts
+    end
+
+    test "a level of four rows with subtitles fits the screen" do
+      {width, height} = Screen.size()
+      view = album_view(Enum.map(1..4, &"Album #{&1}"), 3)
+
+      assert byte_size(menu_pixels(view)) == width * height * 4
+    end
+
+    defp album_view(titles, index) do
+      rows = Enum.map(titles, &%{title: &1, subtitle: "Artist of #{&1}", kind: :open})
+
+      %{Screen.new() | menu: %{title: "Recently added", rows: rows, index: index, depth: 2}}
+    end
+
     # A title that is longer than the screen must not push the mark off the row.
     test "a title that is far longer than the screen still draws" do
       {width, height} = Screen.size()

@@ -12,8 +12,8 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   of the product. See `PiFi.Screen.Style` for the colours, the type and the edges that
   every part of this screen takes.
 
-  A browse view comes with `PiFi.DeviceUi`, which owns the list and the selected
-  index. This module draws no list today.
+  A level of the menu comes from `PiFi.DeviceUi`, which owns the list and the selected
+  index. This module draws the rows of it that fit.
   """
 
   use Emerge.UI
@@ -28,7 +28,13 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   # **How many rows of a level this panel draws.** A row is 19 pixels of text in a band
   # of 5 above and below, and the head takes 21 of the 240. Six rows leave the list
   # reading as a list and each line reading from a chair.
+  #
+  # **A row with a subtitle takes a second line, so a level that has one draws four.**
+  # An album with no artist beside it is a name that a person can't choose by, and a
+  # level of albums is where the menu is used most. A level with no subtitle at all, such
+  # as the root, keeps the six.
   @menu_rows 6
+  @menu_rows_with_subtitles 4
 
   @typedoc """
   What the screen draws.
@@ -185,20 +191,26 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   # can.** A list that scrolled on every press would move under a person who is reading
   # it, so the row stays where it is until it reaches the last line of the window.
   defp menu_rows(menu) do
-    rows = Enum.slice(menu.rows, start_of(menu), @menu_rows)
+    window = window_of(menu.rows)
+    start = start_of(menu, window)
 
     column(
       [width(fill()), height(fill()), spacing(2)],
-      Enum.map(Enum.with_index(rows, start_of(menu)), fn {row, index} ->
-        menu_row(row, index == menu.index)
-      end)
+      menu.rows
+      |> Enum.slice(start, window)
+      |> Enum.with_index(start)
+      |> Enum.map(fn {row, index} -> menu_row(row, index == menu.index) end)
     )
   end
 
-  defp start_of(%{rows: rows, index: index}) do
-    last = Kernel.max(length(rows) - @menu_rows, 0)
+  defp window_of(rows) do
+    if Enum.any?(rows, & &1.subtitle), do: @menu_rows_with_subtitles, else: @menu_rows
+  end
 
-    index |> Kernel.-(@menu_rows - 2) |> Kernel.max(0) |> Kernel.min(last)
+  defp start_of(%{rows: rows, index: index}, window) do
+    last = Kernel.max(length(rows) - window, 0)
+
+    index |> Kernel.-(window - 2) |> Kernel.max(0) |> Kernel.min(last)
   end
 
   # The row that a person is on draws a block of colour, because a colour of the text
@@ -210,15 +222,29 @@ defmodule PiFi.Peripheral.PiTft.Screen do
   defp menu_row(row, on?) do
     Row.ends(
       [
-        el(
-          Style.display(15) ++ [Font.color(if(on?, do: Style.ground(), else: Style.ink()))],
-          text(row.title)
-        )
+        column([width(fill()), spacing(2)], [
+          el(
+            Style.display(15) ++ [Font.color(if(on?, do: Style.ground(), else: Style.ink()))],
+            text(row.title)
+          ),
+          menu_subtitle(row.subtitle, on?)
+        ])
       ],
       [menu_mark(row.kind, on?)],
       spacing: 8
     )
     |> then(fn line -> el(menu_row_style(on?), line) end)
+  end
+
+  # The dim ink of a subtitle on the cyan band of the row that a person is on would be
+  # cyan on cyan, so that row draws it in the ground colour as it does its title.
+  defp menu_subtitle(nil, _on?), do: none()
+
+  defp menu_subtitle(subtitle, on?) do
+    el(
+      [Font.size(12), Font.color(if(on?, do: Style.ground(), else: Style.ink_dim()))],
+      text(subtitle)
+    )
   end
 
   defp menu_row_style(true) do
