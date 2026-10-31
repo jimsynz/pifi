@@ -38,6 +38,59 @@ defmodule PiFi.Peripheral.PiTftTest do
     %{state: state}
   end
 
+  describe "rotation settings" do
+    test "offers both landscape orientations with the existing orientation as default" do
+      field = Enum.find(PiTft.settings(), &(&1.key == "rotation"))
+      assert field.value == "landscape"
+      assert Enum.map(field.options, &elem(&1, 0)) == ["landscape", "landscape_inverted"]
+    end
+
+    test "a saved rotation reaches the panel and overrides the startup option" do
+      assert {:ok, _} = PiTft.put_settings(%{"rotation" => "landscape_inverted"})
+      assert Enum.find(PiTft.settings(), &(&1.key == "rotation")).value == "landscape_inverted"
+      RecordingScreen.use_it()
+      assert {:ok, _} = PiTft.init(rotation: :landscape)
+      assert {0x36, <<0xE8>>} in RecordingScreen.commands()
+
+      assert {:ok, _} = PiTft.put_settings(%{"rotation" => "landscape"})
+      RecordingScreen.use_it()
+      assert {:ok, _} = PiTft.init(rotation: :landscape_inverted)
+      assert {0x36, <<0x28>>} in RecordingScreen.commands()
+    end
+
+    test "without a saved rotation the startup option still works" do
+      RecordingScreen.use_it()
+      assert {:ok, _} = PiTft.init(rotation: :landscape_inverted)
+      assert {0x36, <<0xE8>>} in RecordingScreen.commands()
+    end
+
+    test "invalid rotation saves neither rotation nor button changes" do
+      assert {:error, _} =
+               PiTft.put_settings(%{"rotation" => "portrait", "button_1_press" => "none"})
+
+      assert {:error, _} = PiFi.Settings.fetch("peripheral.pi-tft.rotation")
+      assert {:error, _} = PiFi.Settings.fetch("peripheral.pi-tft.button_1_press")
+    end
+
+    test "invalid buttons do not save a valid rotation" do
+      assert {:error, _} =
+               PiTft.put_settings(%{
+                 "rotation" => "landscape_inverted",
+                 "button_1_press" => "invalid"
+               })
+
+      assert {:error, _} = PiFi.Settings.fetch("peripheral.pi-tft.rotation")
+    end
+
+    test "saving only buttons preserves the rotation" do
+      assert {:ok, _} = PiTft.put_settings(%{"rotation" => "landscape_inverted"})
+      assert {:ok, _} = PiTft.put_settings(%{"button_1_press" => "none"})
+
+      assert {:ok, %{value: "landscape_inverted"}} =
+               PiFi.Settings.fetch("peripheral.pi-tft.rotation")
+    end
+  end
+
   test "it draws the first frame while it takes hold of the screen" do
     RecordingScreen.use_it()
 

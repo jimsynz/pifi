@@ -69,6 +69,10 @@ defmodule PiFi.Peripheral.PiTft do
   alias PiFi.Playback
   alias PiFi.Screen.Network
   alias PiFi.Screen.Renderer
+  alias PiFi.Settings
+
+  @rotation_key "peripheral.pi-tft.rotation"
+  @rotations [{"landscape", "Landscape"}, {"landscape_inverted", "Landscape (180°)"}]
 
   # How long the level stays on the glass after a person stops moving it. Long enough
   # to read the number, and short enough that the track comes back before they look
@@ -105,15 +109,53 @@ defmodule PiFi.Peripheral.PiTft do
     ]
   end
 
-  @doc "The jobs of the buttons, which a person can change. See `button_jobs/0`."
+  @doc "The screen orientation and the jobs of the buttons. See `button_jobs/0`."
   @impl PiFi.Peripheral
-  def settings, do: ButtonJobs.settings(__MODULE__)
+  def settings do
+    [
+      %{
+        key: "rotation",
+        title: "Screen rotation",
+        description: "Turn the display upside down to suit how you mounted it.",
+        link: nil,
+        type: :select,
+        options: @rotations,
+        value: Atom.to_string(rotation(:landscape)),
+        write_only?: false
+      }
+      | ButtonJobs.settings(__MODULE__)
+    ]
+  end
 
   @impl PiFi.Peripheral
-  def put_settings(values), do: ButtonJobs.put_settings(__MODULE__, values)
+  def put_settings(values) do
+    chosen = Map.get(values, "rotation")
+
+    if not Map.has_key?(values, "rotation") or List.keymember?(@rotations, chosen, 0) do
+      with {:ok, _message} <- ButtonJobs.put_settings(__MODULE__, values) do
+        if chosen, do: Settings.put!(@rotation_key, chosen)
+        {:ok, "Saved the PiTFT settings."}
+      end
+    else
+      {:error, "Choose one of the screen rotations."}
+    end
+  end
+
+  defp rotation(default) do
+    case Settings.fetch(@rotation_key) do
+      {:ok, %{value: "landscape"}} -> :landscape
+      {:ok, %{value: "landscape_inverted"}} -> :landscape_inverted
+      _unset -> default
+    end
+  end
 
   @doc """
   Take hold of the screen and the touch controller, and draw the first frame.
+
+  The saved rotation takes precedence over the `:rotation` option. Without a saved
+  choice, the option defaults to `:landscape`. Both orientations keep the 320 by 240
+  layout; the physical button numbers and their jobs stay the same. Saving settings
+  restarts this peripheral, so the new orientation applies immediately.
 
   Every option goes to `PiFi.Peripheral.PiTft.Ili9341.open/1`. The touch
   controller takes the defaults of `PiFi.Peripheral.PiTft.Stmpe610.open/1`, and it
@@ -121,6 +163,8 @@ defmodule PiFi.Peripheral.PiTft do
   """
   @impl PiFi.Peripheral
   def init(opts) do
+    opts = Keyword.put(opts, :rotation, rotation(Keyword.get(opts, :rotation, :landscape)))
+
     with {:ok, screen} <- Ili9341.open(opts),
          {:ok, stmpe} <- Stmpe610.open(),
          {:ok, buttons} <- Buttons.open(hold_ms: Keyword.get(opts, :hold_ms, @hold_ms)),
