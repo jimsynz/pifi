@@ -241,6 +241,8 @@ h1, h2, h3, h4 {
   border: 2px solid var(--color-ink);
 }
 
+/* The bars take the colour of the text around them, because the one place that draws a
+   meter is a `control-on` box, which is filled cyan. A cyan bar there is an empty box. */
 @utility meter {
   display: flex;
   align-items: flex-end;
@@ -249,7 +251,7 @@ h1, h2, h3, h4 {
   & span {
     width: 3px;
     height: 0.7rem;
-    background: var(--color-cyan);
+    background: currentColor;
     transform-origin: bottom;
     animation: meter-bar 900ms steps(3, end) infinite;
   }
