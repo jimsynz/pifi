@@ -150,7 +150,7 @@ defmodule PiFi.MixProject do
       # read of what changed.
       {:ash_storage,
        github: "ash-project/ash_storage",
-       ref: "28b895410cb9a4b90b49242ce8617682a7b8fc77",
+       ref: "dc17feb6a894d27c180840f83288a70496a90d2a",
        override: true},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
