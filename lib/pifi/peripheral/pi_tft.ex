@@ -129,17 +129,20 @@ defmodule PiFi.Peripheral.PiTft do
 
   @impl PiFi.Peripheral
   def put_settings(values) do
-    chosen = Map.get(values, "rotation")
-
-    if not Map.has_key?(values, "rotation") or List.keymember?(@rotations, chosen, 0) do
-      with {:ok, _message} <- ButtonJobs.put_settings(__MODULE__, values) do
-        if chosen, do: Settings.put!(@rotation_key, chosen)
-        {:ok, "Saved the PiTFT settings."}
-      end
-    else
-      {:error, "Choose one of the screen rotations."}
+    with {:ok, rotation} <- chosen_rotation(values),
+         {:ok, _message} <- ButtonJobs.put_settings(__MODULE__, values) do
+      if rotation, do: Settings.put!(@rotation_key, rotation)
+      {:ok, "Saved the PiTFT settings."}
     end
   end
+
+  defp chosen_rotation(%{"rotation" => chosen}) do
+    if List.keymember?(@rotations, chosen, 0),
+      do: {:ok, chosen},
+      else: {:error, "Choose one of the screen rotations."}
+  end
+
+  defp chosen_rotation(_values), do: {:ok, nil}
 
   defp rotation(default) do
     case Settings.fetch(@rotation_key) do
