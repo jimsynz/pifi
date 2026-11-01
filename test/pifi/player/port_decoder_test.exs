@@ -58,7 +58,9 @@ defmodule PiFi.Player.PortDecoderTest do
       assert {[], state} = PortDecoder.handle_end_of_stream(:input, nil, %{state | port: :fake})
       assert state.ending?
 
-      assert {[redemand: :output], state} = PortDecoder.handle_info(:flush, nil, state)
+      assert {[redemand: :output], state} =
+               PortDecoder.handle_info({:fake, {:exit_status, 0}}, nil, state)
+
       assert state.port == nil
 
       assert {actions, state} = demand(state, 8)
@@ -67,30 +69,24 @@ defmodule PiFi.Player.PortDecoderTest do
       assert state.held == <<>>
     end
 
-    # The program answers while the element waits, so the wait starts again and the
-    # samples of that answer wait for the sink with the rest.
-    test "an answer of the program puts the wait off" do
+    # **The programs keep the tail of the audio until their input closes**, so what
+    # they write after the end of the input is part of the track. The stream ends
+    # when the program exits, and not before.
+    test "an answer after the input ended is kept, and the stream waits for the exit" do
       {_actions, state} = feed([@flac_header <> "the samples"])
 
       assert {[], state} = PortDecoder.handle_end_of_stream(:input, nil, %{state | port: :fake})
 
-      first = state.flush_timer
+      assert {actions, state} =
+               PortDecoder.handle_info({:fake, {:data, " and the tail"}}, nil, state)
 
-      assert {_actions, state} =
-               PortDecoder.handle_info({:fake, {:data, "more samples"}}, nil, state)
+      refute {:end_of_stream, :output} in actions
+      assert state.held == "the samples and the tail"
 
-      assert state.held == "the samplesmore samples"
-      assert state.flush_timer != first
-    end
-
-    # A track that plays holds no timer at all.
-    test "a program that answers while the track plays starts no wait" do
-      {_actions, state} = feed([@flac_header <> "the samples"])
-
-      assert {_actions, state} = PortDecoder.handle_info({nil, {:data, "more"}}, nil, state)
-
-      assert state.flush_timer == nil
-      refute state.ending?
+      {_actions, state} = PortDecoder.handle_info({:fake, {:exit_status, 0}}, nil, state)
+      assert {actions, _state} = demand(state, 8)
+      assert audio(actions) == "the samples and the tail"
+      assert List.last(actions) == {:end_of_stream, :output}
     end
 
     # An element that holds no port has nothing to wait for, apart from the sink.
