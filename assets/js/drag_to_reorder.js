@@ -1,17 +1,3 @@
-// A person moves a row of the play queue by dragging it. A mouse drags it, and so does
-// a finger.
-//
-// **Pointer events, and not the drag and drop of HTML.** That interface reaches no
-// touch screen, and a phone is the interface that this device gets most of the time.
-// One pointer covers the mouse, the finger and the pen.
-//
-// The hook moves the row in the page while the person drags it, so they read the new
-// order as they make it. The server holds the order, so the drop sends one `move` and
-// `PiFiWeb.QueueLive` draws the list again from `PiFi.Playback.Queue`.
-//
-// **The handle takes the pointer, and the list keeps the listener.** A capture sends
-// every later event of that pointer to the handle, so a fast drag that leaves the row
-// does not lose it, and a row that LiveView draws again needs no listener of its own.
 export const DragToReorder = {
   mounted() {
     this.el.addEventListener("pointerdown", (event) => this.start(event))

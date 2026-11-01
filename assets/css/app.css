@@ -1,6 +1,3 @@
-/* See the Tailwind configuration guide for advanced usage
-   https://tailwindcss.com/docs/configuration */
-
 @import "tailwindcss";
 @plugin "../vendor/heroicons";
 @plugin "../vendor/phosphor";
@@ -8,35 +5,14 @@
 @source "../js";
 @source "../../lib/pifi_web";
 
-/* Cinder writes some utilities in its own templates, and `invisible` and `flex-1` are
-   two of them. Tailwind gives no CSS for a class that it does not read, so the "0
-   active" mark showed at zero and a filter input did not fill its panel. The themes of
-   Cinder are not read, because `PiFiWeb.CinderTheme` takes the place of each one. */
 @source "../../deps/cinder/lib";
 @source not "../../deps/cinder/lib/cinder/themes";
 
-/* Add variants based on LiveView classes */
 @custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
 @custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
 @custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
 
-/* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
-
-
-/* ---------------------------------------------------------------------------
-   Neubrutalism.
-
-   The web interface follows the style of the PiFi website and of the screens of
-   the device: flat colour, a hard border, an offset shadow with no blur, and no
-   round corner anywhere. See <https://neubrutalism.com/#anatomy> for the rules,
-   `sass/main.scss` of the website for the palette, and `PiFi.Screen.Style` for
-   the same decisions made for a 240 pixel panel.
-
-   **The utilities keep the names that they had.** A template names `faceplate`,
-   `glass`, `recess` and `control`, and this file changes what each one means, so
-   the whole interface moves and no template of a page has to.
-   --------------------------------------------------------------------------- */
 
 @font-face {
   font-family: "Archivo Black";
@@ -70,17 +46,7 @@
   --color-ink-faint: #6b6b6b;
 
   --color-accent: #2fc6e8;
-
-  /* **An error has to be readable on the ground that it lands on.** The pale reds of
-     Tailwind are built for a dark ground, and this scheme is light by default, so
-     `text-red-200` on the beige shell was very nearly invisible: a person who pressed
-     a control and got a refusal read nothing at all. This one measures 5.9:1 against
-     `--color-shell`, and the dark scheme below borrows the coral of the palette,
-     which measures 6.8:1 there. Both clear the 4.5:1 that body text needs. */
   --color-danger: #b3261e;
-
-  /* The shadow is a colour of its own, because a black shadow on a dark ground is
-     nothing at all. The dark scheme below borrows the cyan of the mark for it. */
   --color-shadow: #101010;
 
   --border-weight: 3px;
@@ -92,14 +58,6 @@
     "Liberation Mono", monospace;
 }
 
-/* A black shadow on a dark ground is invisible, and the offset shadow is the whole
-   point of the style, so the dark scheme borrows the glow of the mark. This is the
-   choice that `sass/main.scss` of the website makes, for the same reason.
-
-   **These are plain custom properties and not a second `@theme`.** Tailwind merges
-   every `@theme` block into one set of values, so a `@theme` inside a media query
-   does not scope to that query: it replaces the light value, and the light scheme
-   then never draws at all. An override on `:root` is what a media query can hold. */
 @media (prefers-color-scheme: dark) {
   :root {
     --color-shell: #131313;
@@ -121,16 +79,6 @@
   }
 }
 
-/* **Square corners are mandatory, and this rule is how a dependency gets them.**
-   Cinder writes 115 `rounded-*` classes into templates that this project does not
-   own, and `PiFiWeb.CinderTheme` reaches only the class slots that Cinder exposes.
-   A reset of lower specificity loses to `.rounded-lg`, so this one carries
-   `!important`.
-
-   It covers the classes in our own templates as well, and those could be swept
-   instead. That sweep touches 104 places, changes not one pixel while this rule
-   stands, and would have to be redone the moment Cinder moves. It is not worth the
-   diff until the dependency stops needing the rule. */
 *,
 *::before,
 *::after {
@@ -141,7 +89,6 @@ html {
   background: var(--color-shell);
 }
 
-/* The faint grid of the website, which reads as a drawing board under the panels. */
 body {
   background:
     repeating-linear-gradient(
@@ -164,29 +111,21 @@ h1, h2, h3, h4 {
   letter-spacing: -0.01em;
 }
 
-/* **The focus ring must clear the shadow.** A decorative offset shadow can hide a
-   ring that sits on the edge of the element, so this one stands off it. */
 :focus-visible {
   outline: 3px solid var(--color-cyan);
   outline-offset: 3px;
 }
 
-/* **A rule between two rows carries the weight of a border and not of a hairline.**
-   The templates name `divide-y`, which Tailwind draws at one pixel, and a hairline is
-   the grammar of the style that this one replaces. */
 .divide-y > :not([hidden]) ~ :not([hidden]) {
   border-top-width: var(--border-weight);
   border-color: var(--color-ink);
 }
 
-/* The bar at the head of the page. A heavy rule under it, and no gradient. */
 @utility faceplate {
   background: var(--color-fascia);
   border-bottom: var(--border-weight) solid var(--color-ink);
 }
 
-/* The brushed metal and the curved glass of the old fascia have no place in a style
-   whose grammar is the flat fill. They stay as names so that no template changes. */
 @utility brushed {
   background-image: none;
 }
@@ -195,32 +134,23 @@ h1, h2, h3, h4 {
   position: relative;
 }
 
-/* A card: flat fill, heavy outline, hard offset shadow. */
 @utility glass {
   background: var(--color-panel);
   border: var(--border-weight) solid var(--color-ink);
   box-shadow: 5px 5px 0 0 var(--color-shadow);
 }
 
-/* A well that something sits in. Flat, and the border does the work that the inner
-   shadow used to do. */
 @utility recess {
   background: var(--color-recess);
   border: var(--border-weight) solid var(--color-ink);
 }
 
-/* The display face of the mark, for a heading and for the name of a thing in a list.
-   **The body stays in the utility face.** The contrast between a loud display and a
-   calm body is the whole typographic trick, and a list of 13 pixel rows set in a black
-   weight is a list that no person reads. */
 @utility display {
   font-family: var(--font-display);
   font-weight: 400;
   letter-spacing: -0.01em;
 }
 
-/* A label: short, in capitals, and spaced out. `VOLUME` and `VIEWING` are labels, and
-   the screens of the device write theirs the same way. See `PiFi.Screen.Style`. */
 @utility label {
   font-family: var(--font-display);
   font-size: 0.6875rem;
@@ -234,15 +164,11 @@ h1, h2, h3, h4 {
   letter-spacing: 0.02em;
 }
 
-/* A light on the faceplate. It is a block of colour and it does not glow: a glow is
-   a blur, and the blur of a hard shadow is always zero. */
 @utility led {
   background: var(--color-cyan);
   border: 2px solid var(--color-ink);
 }
 
-/* The bars take the colour of the text around them, because the one place that draws a
-   meter is a `control-on` box, which is filled cyan. A cyan bar there is an empty box. */
 @utility meter {
   display: flex;
   align-items: flex-end;
@@ -283,8 +209,6 @@ h1, h2, h3, h4 {
   }
 }
 
-/* A control lifts towards a person who points at it, and it presses down when they
-   press it. **The lift is a move and a larger shadow, and never a blur.** */
 @utility control {
   color: var(--color-ink);
   background: var(--color-panel);
@@ -312,15 +236,10 @@ h1, h2, h3, h4 {
   }
 }
 
-/* The control of the page that a person is on. A block of colour says it, and the
-   colour is the first one of the mark. */
 @utility control-on {
   color: var(--color-ink);
   background: var(--color-cyan);
 
-  /* A mark inside the control takes the colour of the control. A class of the old
-     style named the accent for the icon, and an accent icon on an accent block is a
-     block with nothing in it. */
   & :where(*) {
     color: var(--color-ink);
   }
@@ -330,19 +249,6 @@ h1, h2, h3, h4 {
   }
 }
 
-/* A control that is not part of the faceplate proper.
-
-   **The top row holds two kinds of thing, and they were drawn as one.** The sources
-   are what a person switches between, and search, playlists, the queue, history and
-   settings are how they get around. Nine boxes of the same weight gave the eye nothing
-   to rest on, and the row ran out of width as soon as a fourth source arrived.
-
-   So the sources keep the box, and these lose it. The border is what says "this
-   changes what you are listening to", which makes the weight carry information rather
-   than decoration. It also gives back about a third of the row.
-
-   It keeps the lift of `control`, and halves it: these are still controls, and a row
-   where only some things answered the pointer would read as a row of dead icons. */
 @utility control-quiet {
   color: var(--color-ink-dim);
   background: transparent;
@@ -365,11 +271,6 @@ h1, h2, h3, h4 {
   }
 }
 
-/* The page that a person is on, for a control with no box to fill.
-
-   `control-on` fills the box with cyan, and a quiet control has no box: the colour
-   would have bled to the edge of a shape that is not there. The mark takes the accent
-   instead, which is the same colour saying the same thing. */
 @utility control-quiet-on {
   color: var(--color-accent);
 
@@ -378,30 +279,6 @@ h1, h2, h3, h4 {
   }
 }
 
-/* A box that scrolls sideways, and keeps the offset shadow of what is inside it.
-   **`overflow-x` set to anything but `visible` makes `overflow-y` compute to the same
-   value**, so a row that scrolls sideways clips the shadow at its foot as well. The
-   row of the sources met this: each control kept its border and lost the shadow that
-   the rest of the interface has.
-
-   The padding gives the shadow room to fall into, inside the box that clips, and the
-   negative margin takes that room back out of the layout. It holds the 3 pixels of a
-   shadow at rest. A control that a person points at moves 2 pixels and grows its
-   shadow to 5, so a corner of it clips while the pointer is on it, and that is the
-   price of a row that scrolls.
-
-   **The bar itself is hidden.** A 3 pixel border and a hard shadow are what this
-   interface is made of, and a scrollbar drawn in the same ink read as another one of
-   those: a heavy black rule under the sources that looked like part of the faceplate.
-   The row still scrolls by swipe, by drag and by a trackpad, and with the utilities
-   quietened it rarely has anywhere to scroll to.
-
-   **Hiding it cost the one thing it was doing**, which was saying that there is more.
-   A telephone at 390 pixels draws three sources of four, and a person with no bar and
-   no fade has no reason to think the fourth exists. So the last few pixels of the row
-   fade out. A row that fits has nothing under the fade and shows no change; a row that
-   does not fit ends in a control that is visibly cut, which is the oldest way there is
-   of saying "keep going". */
 @utility scroller {
   scrollbar-width: none;
   margin: -0.25rem;
@@ -413,7 +290,6 @@ h1, h2, h3, h4 {
   }
 }
 
-/* An input is a card that a person types in. */
 input[type="text"],
 input[type="search"],
 input[type="number"],

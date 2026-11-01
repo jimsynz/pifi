@@ -1,11 +1,6 @@
 defmodule PiFi.BundlexProject do
   @moduledoc """
-  The native code of this firmware.
-
-  **This is the only thing here that is not Elixir**, and it is here because there is no
-  ALAC decoder on Hex and AirPlay sends ALAC. Bundlex already cross-compiles the
-  Membrane NIFs for this target, so it is the toolchain the project has rather than a
-  new one — and `mix.exs` already sets the four `TARGET_*` variables it reads.
+  ALAC decoder.
   """
 
   use Bundlex.Project

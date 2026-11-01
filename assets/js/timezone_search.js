@@ -1,12 +1,3 @@
-// Arrow keys move through the matches of the time zone search, Enter picks one and
-// Escape closes the list. The server filters and the server saves, so this hook only
-// tracks which row is highlighted: LiveView can't keep that between keystrokes without a
-// round trip for each one.
-//
-// The highlight is `aria-selected` on the button, which the template styles, so a list
-// that LiveView draws again after a keystroke simply loses it and the next arrow starts
-// from the top. Enter with nothing highlighted falls through to the form, which saves
-// whatever name a person typed in full.
 export const TimezoneSearch = {
   mounted() {
     this.input = this.el.querySelector("input")

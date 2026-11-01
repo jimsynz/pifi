@@ -66,13 +66,6 @@ defmodule PiFi.MixProject do
     ]
   end
 
-  # **An NBPR package is a target dependency, so its modules do not exist on the host.**
-  # A child spec that names one as an atom compiles anywhere, and a call to one does
-  # not: `PiFi.Spotify` calls `binary_path/0` and `argv/1` of the librespot package so
-  # that it can start MuonTrap itself and capture what the daemon says.
-  #
-  # This says which of those are expected to be absent. A module that is missing for any
-  # other reason still warns.
   defp elixirc_options(:host) do
     [
       no_warn_undefined: [
@@ -86,7 +79,6 @@ defmodule PiFi.MixProject do
 
   defp elixirc_options(_target), do: []
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger, :runtime_tools, :os_mon],
@@ -98,128 +90,41 @@ defmodule PiFi.MixProject do
     [preferred_targets: [run: :host, test: :host]]
   end
 
-  # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # 0.3.0 adds `:unsupported_libc` to the schema of `NBPR.BrPackage`, and
-      # `nbpr_vorbis_tools` needs that option. 0.2.1 refused it and stopped the
-      # build.
       {:nbpr, "~> 0.3"},
-      # Membrane holds no decoder for Vorbis or for FLAC, so
-      # `PiFi.Player.PortDecoder` drives a program instead. NBPR gives the
-      # program for the target, and it ships a binary and no header file, which is
-      # all that a port needs.
-      #
-      # These are target only. A host holds its own `flac` and `oggdec`, and that
-      # is how the pipeline was read end to end before the packages existed.
-      #
-      # `nbpr_flac` brings `nbpr_libogg`, and that is what makes `flac --ogg` work.
-      # Every FLAC station of New Zealand sends FLAC inside an Ogg container, so
-      # this firmware needs that option and nothing else would serve.
       {:nbpr_flac, "~> 1.5", organization: "nbpr", targets: @all_targets},
       {:nbpr_vorbis_tools, "~> 1.4", organization: "nbpr", targets: @all_targets},
       {:nbpr_libvips, "~> 8.18", organization: "nbpr", targets: @all_targets},
       {:nbpr_librespot, "~> 0.8", organization: "nbpr", targets: @all_targets},
-      # **Bluetooth audio needs four of these and the system holds none of them.** The
-      # version of each follows the thing it packages, so none of them reads like a
-      # version of NBPR. `bluez_alsa` is what turns a paired speaker into an ALSA
-      # device, which is the whole reason this fits: the audio path of this firmware
-      # already ends at an ALSA name. See `PiFi.Bluetooth`.
-      # **BlueZ speaks D-Bus and nothing else**, so pairing needs a client for it.
-      #
-      # This one is pure Erlang: the tarball holds no C at all, and its `make` is
-      # erlang.mk and not a compiler, so it cross-compiles for this board like any
-      # other BEAM code. It also names no dependency of its own, which the Elixir one
-      # beside it on Hex could not manage: `ex_dbus` pins `saxy ~> 1.4.0` for reading
-      # introspection XML, and this firmware is on 1.6.
-      #
-      # It is unmaintained, last released in 2021. See `PiFi.Bluetooth.Bus` for what
-      # was measured against a real adapter before anything was built on top of it.
       {:dbus, "~> 0.8"},
       {:nbpr_dbus, "~> 1.14", organization: "nbpr", targets: @all_targets},
       {:nbpr_bluez5_utils, "~> 5.79", organization: "nbpr", targets: @all_targets},
       {:nbpr_sbc, "~> 2.1", organization: "nbpr", targets: @all_targets},
       {:nbpr_bluez_alsa, "~> 4.3", organization: "nbpr", targets: @all_targets},
-      # Dependencies for all targets
       {:ash, "~> 3.0"},
       {:ash_oban, "~> 0.9"},
       {:ash_sqlite, "~> 0.2"},
-      # `PiFi.Cache` models the cache on disk with this. It is not on Hex, and its
-      # author says that the API iterates, so this names a reference and pins it in
-      # the way that `vintage_net_wizard` is pinned. A new reference therefore needs a
-      # read of what changed.
       {:ash_storage,
        github: "ash-project/ash_storage",
        ref: "dc17feb6a894d27c180840f83288a70496a90d2a",
        override: true},
       {:ash_state_machine, "~> 0.2"},
       {:bandit, "~> 1.5"},
-      # It builds `c_src/pifi/alac`, which is the one piece of native code here. There is no
-      # ALAC decoder on Hex and AirPlay sends ALAC. See `bundlex.exs`.
       {:bundlex, "~> 1.5"},
-      # AirPlay speaks RTSP and not HTTP, so the receiver needs the acceptor pool
-      # under Bandit rather than Bandit itself. See `PiFi.AirPlay.Server`.
       {:thousand_island, "~> 1.5"},
-      # The browse page gives Cinder a query, and Cinder holds the loading state, the
-      # sort, the page controls and the URL state. It is pure Elixir, and so is
-      # `ash_phoenix`, which it needs.
       {:cinder, "~> 0.18"},
-      # `PiFi.Peripheral.PiTft` owns the SPI bus of the screen and the data line
-      # that goes with it. `PiFi.Peripheral.Battery` owns the I2C bus of the fuel
-      # gauge, and `max1704x` and `wafer` both name `circuits_i2c` as optional, so this
-      # is the project that must ask for it.
       {:circuits_gpio, "~> 2.1"},
       {:circuits_i2c, "~> 2.1"},
-      # `PiFi.Peripheral.HapticKnobs` talks to the knob board over USB serial. The
-      # library lives in `host/` of the repository that holds the board's firmware,
-      # because the two halves of the protocol have to change together. It brings
-      # `circuits_uart`, which is native code and a standard Nerves library.
       {:foc_peripheral,
        git: "https://harton.dev/mypihifiguy/foc_peripheral.git", branch: "main", sparse: "host"},
-      # Home Assistant discovers this device as an ESPHome node and talks to it over
-      # the native API. **Not over MQTT**: Home Assistant has no MQTT media player, so
-      # a player has to speak the other protocol. `PiFi.HomeAssistant` says more.
-      #
-      # `homex` points at a branch of a fork, because the media player entity is ours
-      # and it is not upstream yet. Both packages are Elixir alone: `espex` needs
-      # `protobuf` and `thousand_island`, and this firmware already holds the second
-      # through Bandit. `emqtt` of `homex` is optional and this project asks for none
-      # of it, which matters because that one holds native code.
       {:espex, "~> 0.9"},
       {:homex, github: "jimsynz/homex", branch: "feat/media-player-entity"},
-      # **`nerves_time`, `vintage_net` and `nbpr` all name `muontrap ~> 1.0`, and this
-      # forces 2.0 on them.** `homex` names `~> 2.0`. Version 2 breaks only the cgroup
-      # options (cgroup v1 is gone and `:cgroup_controllers`/`:cgroup_sets` became one
-      # `:cgroup` map), and neither this firmware nor any of those three passes one.
-      # Remove the override when all three accept version 2.
       {:muontrap, "~> 2.0", override: true},
       {:circuits_spi, "~> 2.1"},
-      # `membrane_core` needs `ratio`, and `ratio` names
-      # `decimal ~> 1.6 or ~> 2.0`. `ecto_sqlite3` needs `decimal ~> 3.0`, so the
-      # two do not agree.
-      #
-      # The requirement of `ratio` is out of date. `decimal` is optional there,
-      # and `Ratio.DecimalConversion` reads the `coef`, `exp` and `sign` fields of
-      # the struct and calls no function of the library. Version 3 keeps those
-      # three fields, and each of its breaking changes is in the context defaults,
-      # in `parse`, in `cast`, or in `to_string`. This override is therefore safe.
-      #
-      # Remove it when a `ratio` release accepts version 3.
       {:decimal, "~> 3.0", override: true},
-      # `PiFi.Peripheral.PiTft` draws the device screen with this. It holds a
-      # Rust NIF that lays a tree out and draws it with Skia, and the firmware
-      # calls the raster part of it. That part opens no window and it drives no
-      # display: it gives the pixels back, and the peripheral writes them to the
-      # screen over SPI.
-      #
-      # `config/config.exs` names the backend, because `EmergeSkia.BuildConfig`
-      # sees `MIX_TARGET` and chooses the DRM one by itself, and it holds the reason
-      # that the choice is what it is.
-      {:emerge, "~> 0.5.0"},
-      # The fuel gauge of the UPS-Lite pHAT. It reads the charge of the cell over I2C,
-      # and it holds no native code of its own: `wafer` is the layer that talks to
-      # `circuits_i2c`. See `PiFi.Peripheral.Battery`.
-      {:max1704x, "~> 0.1.1"},
+      {:emerge, "~> 0.5"},
+      {:max1704x, "~> 0.1"},
       {:membrane_aac_fdk_plugin, "~> 0.19"},
       {:membrane_aac_plugin, "~> 0.19"},
       {:membrane_core, "~> 1.0"},
@@ -227,13 +132,6 @@ defmodule PiFi.MixProject do
       {:membrane_mp3_mad_plugin, "~> 0.18"},
       {:membrane_mpeg_ts_plugin, "~> 2.4"},
       {:gettext, "~> 1.0"},
-      # **Phosphor holds one weight across the whole set, and Heroicons does not.** The
-      # solid set of Heroicons fills a gear and leaves a magnifying glass as a thin
-      # ring, and beside a border of 3 pixels that difference is the thing that a
-      # person sees. `assets/vendor/phosphor.js` reads the bold weight of this.
-      #
-      # Heroicons stays, because Cinder names four of its chevrons and this project
-      # does not own those templates. See `assets/vendor/phosphor.js`.
       {:phosphor_icons,
        [
          github: "phosphor-icons/core",
@@ -259,22 +157,9 @@ defmodule PiFi.MixProject do
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_dashboard, "~> 0.8"},
       {:phoenix_live_view, "~> 1.0"},
-      # The sync job fetches the station list. `req` already arrives through a
-      # dependency of Membrane, and this line makes the reliance explicit, so a
-      # change there cannot take it away.
       {:req, "~> 0.7"},
-      {:ring_logger, "~> 0.11.0"},
-      # `PiFi.Podcast.Feed.Parser` reads a podcast feed with this. It is pure
-      # Elixir and it holds no dependency of its own, so it needs nothing from the
-      # Nerves system. `Saxy.Partial` takes one chunk at a time, so a 13 MB feed
-      # never arrives in memory as one binary.
+      {:ring_logger, "~> 0.11"},
       {:saxy, "~> 1.6"},
-      # **A device runs on a person's clock and stores every time in UTC.** Elixir ships
-      # no time zone database, so `DateTime.shift_zone/2` answers
-      # `{:error, :utc_only_time_zone_database}` without one. This one compiles the IANA
-      # data into modules at build time, which is what suits a read-only rootfs:
-      # `tzdata` downloads its updates at runtime and writes them beside itself, and
-      # there is nowhere on this device for it to do that. See `PiFi.Device.Timezone`.
       {:tz, "~> 0.28"},
       {:shoehorn, "~> 0.9.1"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
@@ -283,41 +168,15 @@ defmodule PiFi.MixProject do
       {:toolshed, "~> 0.5.0"},
       {:usage_rules, "~> 1.0", only: [:dev]},
       {:nerves_runtime, "~> 0.13.12"},
+
+      # Target deps
       {:nerves_pack, "~> 0.7.1", targets: @all_targets},
-      # These two arrive through `nerves_pack`, and this firmware calls each one
-      # itself, so naming them here means that a change there cannot take them
-      # away. `req` is named for the same reason.
-      #
-      # `PiFi.Podcast.Index` asks `nerves_time` whether the clock is right,
-      # because the Podcast Index holds a window of 3 minutes and a board with no
-      # battery starts in 1970. `PiFi.Device.Network.Report` and
-      # `PiFi.Setup.Monitor` read `vintage_net`.
       {:nerves_time, "~> 0.4", targets: @all_targets},
       {:vintage_net, "~> 0.13", targets: @all_targets},
-      # Release 0.4.17 is from 2024-06-05, and it needs plug_cowboy. Each cowlib
-      # release from 2.9.0 to 2.19.0 holds two advisories, and no release fixes
-      # them. The main branch uses Bandit instead, and Phoenix already gives us
-      # Bandit, so cowboy and cowlib leave the dependency tree.
       {:vintage_net_wizard,
        github: "nerves-networking/vintage_net_wizard",
        ref: "6df7ab2a423e95e0a220861e13769574e10e2a68",
        targets: @all_targets},
-
-      # Targets
-      # The stock rpi0_2 system holds no USB host stack and no USB audio driver,
-      # so a USB DAC cannot work on it. It also gives 192 MB to the GPU and
-      # reserves 128 MB of CMA, and this device drives no display over HDMI. See
-      # the README of the system.
-      #
-      # 0.2.0 turns the Bluetooth of the kernel on and ships the firmware blob that the
-      # `btbcm` driver loads, which is the part that cannot come from NBPR: a blob is
-      # loaded before any of the rootfs is this project's code. The daemon and the
-      # library that speak to it are NBPR packages. See `PiFi.Bluetooth`.
-      #
-      # 0.2.1 adds the CH341 USB serial driver, for `PiFi.Peripheral.HapticKnobs`.
-      # **A new tag needs `nerves_system_br` at the version of the system's own
-      # `mix.lock`**, or the checksum of the prebuilt artefact doesn't match and Nerves
-      # builds the whole system locally. Moving the tag alone left it at the old one.
       {:nerves_system_pifi_rpi0_2,
        git: "https://harton.dev/mypihifiguy/nerves_system_pifi_rpi0_2.git",
        tag: "v0.2.1",
@@ -327,13 +186,7 @@ defmodule PiFi.MixProject do
 
       # Dev/test deps.
       {:credo, "~> 1.7", runtime: false, only: [:dev, :test], target: :host},
-      # Phoenix LiveView needs this to read the HTML that a test renders.
       {:lazy_html, ">= 0.1.0", only: :test, target: :host},
-      # `esbuild` and `tailwind` hold no target of their own on purpose. The
-      # `firmware` alias runs `assets.deploy`, so a target build needs both tasks.
-      # Each program runs on the build machine and writes to `priv/static`, and a
-      # firmware build uses `MIX_ENV=prod`, so `runtime:` keeps both out of the
-      # release.
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:ex_check_ng, "~> 1.0.0-rc.2", only: [:dev, :test], targets: :host},
       {:ex_doc, "~> 0.40", only: [:dev, :test], targets: :host},
@@ -346,8 +199,6 @@ defmodule PiFi.MixProject do
   def release do
     [
       overwrite: true,
-      # Erlang distribution is not started automatically.
-      # See https://nerves-pack.hexdocs.pm/readme.html#erlang-distribution
       cookie: "#{@app}_cookie",
       include_erts: &Nerves.Release.erts/0,
       steps: [
@@ -361,24 +212,6 @@ defmodule PiFi.MixProject do
     ]
   end
 
-  # **A firmware says which `MIX_ENV` built it, and nothing else does.** The two
-  # builds differ in a way that matters: `config/target.exs` gives `nerves_ssh` an
-  # application environment only when `Mix.env()` is `:dev`, so a development image
-  # carries an SSH daemon and a production one carries none. A `.fw` file carries no
-  # sign of which it is, and neither does a running device.
-  #
-  # That was tolerable while a person wrote every card by hand. `PiFi.Device.Upgrade`
-  # takes a firmware from the releases of the forge now and applies it without asking,
-  # so a development image attached to a release would put a shell on every device
-  # that took it.
-  #
-  # `NERVES_FW_MISC` is the field for this, and Nerves sets four others and not this
-  # one. `fwup.conf` of the system writes it into the u-boot environment, so
-  # `fwup -m -i <file>.fw` reads it before a device applies anything and
-  # `Nerves.Runtime.KV.get_active("nerves_fw_misc")` reads it after.
-  #
-  # A release step runs inside `mix firmware` and before fwup does, in the one
-  # operating system process, so the variable reaches it.
   defp stamp_environment(release) do
     System.put_env("NERVES_FW_MISC", "env=#{Mix.env()}")
 
@@ -394,20 +227,9 @@ defmodule PiFi.MixProject do
     release
   end
 
-  # Uncomment the following line if using Phoenix > 1.8.
   defp listeners(:host, :dev), do: [Phoenix.CodeReloader]
   defp listeners(_, _), do: []
 
-  # **A source build of an NBPR package reads its Buildroot recipe from `priv`**, and
-  # `nbpr_librespot` is the one package here that carries one. `mix nbpr.fetch` looks in
-  # `_build/<target>/lib/<dep>/priv`, which is a symbolic link that Mix makes when it
-  # compiles that dependency, and the fetch runs before any of that happens. Buildroot
-  # then stopped with
-  # `'…/nbpr_librespot/priv/buildroot': no such file or directory`.
-  #
-  # **It only shows when no prebuilt artefact exists**, because a package that has one
-  # is unpacked and never built. The cache key holds the version of the Nerves system,
-  # so every package rebuilds after a new one, which is why this hid until 0.2.0.
   defp vendored_priv(_args) do
     source = Path.expand("deps/nbpr_librespot/priv")
     target = Path.join([Mix.Project.build_path(), "lib", "nbpr_librespot", "priv"])
@@ -429,63 +251,15 @@ defmodule PiFi.MixProject do
       setup: ["deps.get", "assets.setup", "assets.build"],
       test: ["ash.setup --quiet", "test"],
       credo: ["credo --strict"],
-      # `assets.deploy` comes first, because `priv/static/assets` holds no file
-      # that the repository keeps, and the release copies `priv` as it finds it.
-      # It also runs before `nbpr.fetch`, so a fault in the assets stops the build
-      # before the 10 minutes that a source build of the NBPR packages needs.
-      #
-      # **`deps.compile` comes before `nbpr.fetch` because a source build reads a
-      # dependency's `priv`.** A vendored Buildroot package such as the one in
-      # `nbpr_librespot` lives at `priv/buildroot`, and `_build/<target>/lib/<dep>/priv`
-      # is a symbolic link that Mix makes when it compiles that dependency. A fetch that
-      # ran first met no link and Buildroot stopped with
-      # `'…/nbpr_librespot/priv/buildroot': no such file or directory`.
-      #
-      # It only shows when no prebuilt artefact exists, which is every package after a
-      # new version of the Nerves system, so it hid until 0.2.0 landed.
-      #
-      # **It makes the link rather than compiling the dependency.** `deps.compile` is
-      # what normally makes it, and running that inside this alias — for every
-      # dependency or for the one — left Mix answering `The task "firmware" could not
-      # be found` for the step after it, because compiling `nerves` again part way
-      # through takes the task with it.
-      # It comes **after** `assets.deploy`, because that step compiles the project and
-      # Mix replaces the link while it does.
       firmware: ["assets.deploy", &vendored_priv/1, "nbpr.fetch", "firmware"]
     ]
   end
 
-  # Bundlex keeps each precompiled library in two places, and each place holds a
-  # directory named after the URL of the archive.
-  #
-  # `deps/bundlex/priv/shared/precompiled` is the cache, and every target shares
-  # it, because `_build/<target>/lib/bundlex/priv` is a symbolic link to it. Each
-  # plugin then gets a copy under
-  # `_build/<target>/lib/<plugin>/priv/bundlex/nif`, and the copy happens when the
-  # plugin compiles.
-  #
-  # A build for the host therefore leaves an x86 library in the cache, a later
-  # build for a target copies it beside the NIF, and the Nerves scrub step stops
-  # with "Unexpected executable format".
-  #
-  # This step runs before the release assembles, and after each plugin compiles.
-  # It removes from both places each library that does not match the architecture
-  # of this build. A later build for another architecture gets its own library
-  # again, because Bundlex downloads what it does not find.
   defp prune_foreign_precompiled(release) do
     with {:ok, %{"TARGET_ARCH" => arch}} <- Map.fetch(@bundlex_targets, Mix.target()),
          {:ok, keep} <- precompiled_name(arch) do
       build = Mix.Project.build_path()
 
-      # `_build/<target>/lib/bundlex/priv` is a symbolic link into `deps`, and it
-      # holds every architecture that any build has fetched. Replace the link with
-      # a copy, so this step can remove the foreign libraries from the copy and
-      # leave `deps` as it is.
-      #
-      # An earlier version of this step removed them from `deps` instead. That
-      # broke each build for the host: the library beside a host NIF is itself a
-      # symbolic link into that shared directory, and the NIF then failed to load
-      # with `unifex_create/0 is undefined`.
       materialise_symlink(Path.join([build, "lib", "bundlex", "priv"]))
 
       [
@@ -501,13 +275,6 @@ defmodule PiFi.MixProject do
     prune_foreign_rustler(release)
   end
 
-  # Bundlex leaves the object files it linked the NIF from in `priv`, beside the library,
-  # and everything in `priv` goes into the firmware. Nothing reads them after the link.
-  #
-  # Only this application's own. `_build/<target>/lib/<dep>/priv` is a symbolic link into
-  # `deps` for every dependency that builds a native, so the same wildcard across all of
-  # them reaches outside this build and makes the next one for another target rebuild
-  # what it deleted. `prune_foreign_precompiled/1` above records what that cost.
   defp drop_native_objects(release) do
     [Mix.Project.build_path(), "lib", "#{@app}", "priv", "bundlex", "*", "*_obj"]
     |> Path.join()
@@ -517,22 +284,11 @@ defmodule PiFi.MixProject do
     release
   end
 
-  # **`rustler_precompiled` shares one directory between targets, in the way that
-  # Bundlex does.** It writes the NIF that it fetched into `deps/<dep>/priv/native`,
-  # and `_build/<target>/lib/<dep>/priv` is a symbolic link to that directory, so a
-  # build for the host leaves an x86 library where a build for the target copies it.
-  # The scrub step of Nerves then stops with `Unexpected executable format`.
-  #
-  # The name of each file holds the triple that it was built for, and the four
-  # `TARGET_` variables above name the one that this build wants.
   defp prune_foreign_rustler(release) do
     with {:ok, env} <- Map.fetch(@bundlex_targets, Mix.target()) do
       keep = triple(env)
       build = Mix.Project.build_path()
 
-      # The link is `priv`, and `native` is a directory inside it, so this must
-      # replace `priv` itself. A step that named `priv/native/..` read through the
-      # link, materialised nothing, and removed the host NIF from `deps`.
       build
       |> Path.join("lib/*/priv")
       |> Path.wildcard()

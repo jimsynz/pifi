@@ -17,23 +17,9 @@ config :pifi,
        check_origin: false,
        debug_errors: true
 
-# This block holds the configuration for the host only. A device must not get
-# these keys.
-#
-# The esbuild and tailwind programs are not in the image, and code reload needs
-# mix. `live_reload` also holds regexes, and `mix release` cannot write a regex
-# into the release configuration.
-#
-# `config/target.exs` cannot remove a key. `Config` merges two keyword lists, so
-# an empty list there leaves the original list unchanged. A key must therefore
-# not reach a target build in the first place.
 if Mix.target() == :host do
   config :pifi,
          PiFiWeb.Endpoint,
-         # A dev firmware makes its own secret at each first start, and it keeps
-         # the secret under `/root`. See `PiFi.DeviceSecrets`. The host keeps
-         # this fixed secret, so a session in local development stays valid after
-         # a restart.
          secret_key_base: "pXfI5KnH7ehUWe6JjHZ2r1GzxdF7cX9F50DAa8z9/AKKabtJSx7uK10bzn05jrco",
          code_reloader: true,
          watchers: [
