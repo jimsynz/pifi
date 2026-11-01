@@ -60,18 +60,7 @@ defmodule PiFiWeb.Shell do
   alias PiFi.Source
   alias PiFiWeb.Title
 
-  @doc """
-  Mark the source that the device is playing, for the top row of the faceplate.
-
-  **The row is the input selector of a stereo and not a breadcrumb.** It marks what
-  the device is on, and the breadcrumb of the browser says where a person is reading.
-  A person who casts from a telephone presses nothing here, so a row that followed the
-  address of the page would go on showing the station they happened to be looking at.
-
-  It reads the player and not `PiFi.Source.chosen/0`, because that setting moves when a
-  person opens a page — `PiFiWeb.BrowseLive` writes it so that the browser opens where
-  they left off — and a row built on it would follow the reading rather than the music.
-  """
+  @doc "Assign the source currently playing to the shell navigation."
   @spec assign_playing(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def assign_playing(socket) do
     assign(socket, :playing_source, playing_slug(socket.assigns.player_state))
@@ -93,14 +82,7 @@ defmodule PiFiWeb.Shell do
     assign(socket, :sources, sources)
   end
 
-  @doc """
-  Say what this page is, for the tab of a browser.
-
-  **A page calls this rather than assigning `:page_title` itself**, because the title
-  is not the page alone: it is the name of the device, and the track if one is playing.
-  See `PiFiWeb.Title`. This keeps the words of the page and composes the rest, so a
-  page needs no knowledge of the player.
-  """
+  @doc "Set the current page name and compose the browser title."
   @spec put_page(Phoenix.LiveView.Socket.t(), String.t() | nil) :: Phoenix.LiveView.Socket.t()
   def put_page(socket, page) do
     socket
@@ -131,14 +113,6 @@ defmodule PiFiWeb.Shell do
     {:cont, socket}
   end
 
-  # **Every event of the player can change the tab, so this reads the player rather than
-  # the event.** A `Progress` moves the position, a `Stopped` takes the track away and a
-  # `Standby` replaces the lot, and matching each one here would be a second copy of
-  # what the player already knows.
-  #
-  # It writes nothing when the words have not changed. `Progress` arrives once a second
-  # and the position in the title is a whole second, so an event that lands early
-  # composes the same string and sends no diff.
   defp player_moved(%_{} = event, socket) when is_struct(event) do
     if player_event?(event) do
       {:cont,
@@ -166,23 +140,12 @@ defmodule PiFiWeb.Shell do
       else: assign(socket, :page_title, title)
   end
 
-  # The hook keeps `standby?` and passes the event on, because a LiveView that reads
-  # the same event for its own reason must still get it. See `PiFiWeb.PlayerLive`,
-  # which closes its large view on the same event.
   defp standby(%Events.Standby{entered?: entered?}, socket) do
     {:cont, assign(socket, :standby?, entered?)}
   end
 
   defp standby(_message, socket), do: {:cont, socket}
 
-  # **The browser keeps the answer that it got for an address.** A list draws the
-  # address of each picture without a read, and the job that fetches one finishes a
-  # moment later, so the image holds a 404 that no redraw of the page can change. This
-  # names the address that arrived, and `assets/js/cover.js` asks for it again.
-  #
-  # The event carries one address and not a redraw of the page, because a list of 25
-  # rows would otherwise ask the device for 25 pictures each time that one of them
-  # arrived.
   defp artwork_ready(%Ash.Notifier.Notification{} = notification, socket) do
     case Artwork.ready(notification) do
       {:ok, path} -> {:halt, push_event(socket, "artwork-ready", %{path: path})}
@@ -192,14 +155,6 @@ defmodule PiFiWeb.Shell do
 
   defp artwork_ready(_message, socket), do: {:cont, socket}
 
-  # **Only the page owns the title, and `PiFiWeb.PlayerLive` is not the page.** It is a
-  # sticky child that `PiFiWeb.Layouts` renders inside every page, it takes the same
-  # `:player` events, and it never says what page it is — so it composed the name of the
-  # device and nothing else, and whichever of the two answered last won. CI caught it as
-  # a title that went back to "PiFi" rather than to the page it was on.
-  #
-  # The params of a mount say which kind this is, in the way that `attach_page_moved/2`
-  # already uses.
   defp attach_title(socket, :not_mounted_at_router), do: socket
 
   defp attach_title(socket, _params) do
@@ -208,10 +163,6 @@ defmodule PiFiWeb.Shell do
     |> attach_hook(:page_title, :handle_info, &player_moved/2)
   end
 
-  # **A child LiveView cannot hold a `:handle_params` hook**, and an attach on one
-  # raises. The params of a mount say which kind this is: LiveView gives
-  # `:not_mounted_at_router` to `PiFiWeb.PlayerLive`, which `PiFiWeb.Layouts`
-  # renders inside each page.
   defp attach_page_moved(socket, :not_mounted_at_router), do: socket
 
   defp attach_page_moved(socket, _params),

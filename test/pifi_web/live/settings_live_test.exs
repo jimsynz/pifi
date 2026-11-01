@@ -362,7 +362,7 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/peripherals")
       html = view |> element("#enable-peripheral-lamp") |> render_click()
 
-      assert html =~ "start that: :no_such_device"
+      assert html =~ "Could not start that device. Check the connection and try again."
       assert html =~ "Enabled, but it failed to start"
     end
 
@@ -1380,7 +1380,7 @@ defmodule PiFiWeb.SettingsLiveTest do
       {:ok, view, _html} = live(conn, ~p"/settings/firmware")
 
       assert view |> element("#check-for-upgrade") |> render_click() =~
-               "Couldn&#39;t reach the forge"
+               "Could not check for updates. Try again in a moment."
     end
   end
 

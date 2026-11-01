@@ -1,35 +1,9 @@
 defmodule PiFiWeb.PlaylistLive do
   @moduledoc """
-  The lists that a person made.
+  LiveView for creating, browsing, editing, and playing playlists.
 
-  Two views live here. `:index` draws every playlist, and `:show` draws the tracks of
-  one. `PiFiWeb.QueueLive` is the page that this one follows: a row of tracks, a
-  handle to drag, and a control to take a row out.
-
-  ## Where a playlist comes from
-
-  **The queue is what fills the first one.** A person plays an album or a country and
-  the queue then carries that list, so "Save the queue" writes a playlist of what they
-  are already listening to. Nothing else needs a control, and a person who wants one
-  track adds it from the list that they found it in. See `PiFiWeb.ItemList`.
-
-  ## Playing one
-
-  A press on a playlist plays it: the identifiers go in the queue and the first one
-  starts. A press on a row plays that row, and the rest of the playlist follows it, in
-  the way that a press on a track of an album does.
-
-  **A playlist of nothing plays nothing**, and the page says so rather than starting a
-  player that has nothing to read.
-
-  ## Two reads, and one query for each
-
-  A playlist entry and an item are both in SQLite, so Ash joins the two and one query
-  draws a whole playlist. That is the difference from `PiFiWeb.QueueLive`, which
-  pairs an ETS row with a SQLite row by hand.
-
-  The page asks for the picture of each row, in the way that the queue page does. See
-  `PiFi.Artwork.ensure/1`.
+  The queue can be saved as a playlist. Playlist rows can be reordered or removed,
+  and playing a row continues with the remaining rows.
   """
 
   use PiFiWeb, :live_view
@@ -55,9 +29,6 @@ defmodule PiFiWeb.PlaylistLive do
     {:noreply, load(socket, socket.assigns.live_action, params)}
   end
 
-  # **These three move the playing mark, and no other event does.** `Progress` arrives
-  # once a second while a track plays, and this page reads every row of a playlist.
-  # `PiFiWeb.QueueLive` follows the same rule for the same reason.
   @impl Phoenix.LiveView
   def handle_info(%Events.Started{}, socket), do: {:noreply, reload(socket)}
   def handle_info(%Events.Stopped{}, socket), do: {:noreply, reload(socket)}
@@ -71,22 +42,18 @@ defmodule PiFiWeb.PlaylistLive do
   def handle_event("cancel_name", _params, socket),
     do: {:noreply, assign(socket, :naming?, false)}
 
-  # **The queue is what fills a playlist.** A person plays a list and then keeps it, so
-  # this needs no control on a row and no chooser.
   @impl Phoenix.LiveView
   def handle_event("keep_queue", %{"name" => name}, socket) do
     case Playback.queue!() do
       [] ->
-        {:noreply, put_flash(socket, :error, "The queue is empty, so there's nothing to save.")}
+        {:noreply,
+         put_flash(socket, :error, "The queue is empty. Add some tracks before saving it.")}
 
       rows ->
         keep(socket, name, Enum.map(rows, & &1.item_id))
     end
   end
 
-  # The `:show` view is the one that renames, and it already read the playlist, so this
-  # takes the name alone. **A form field named `id` is not allowed**: LiveView reads
-  # that name for the DOM identifier of the form.
   @impl Phoenix.LiveView
   def handle_event("rename", %{"name" => name}, socket) do
     case Playback.rename_playlist(socket.assigns.playlist, name) do
@@ -108,7 +75,7 @@ defmodule PiFiWeb.PlaylistLive do
          :ok <- Playback.destroy_playlist(playlist) do
       {:noreply,
        socket
-       |> put_flash(:info, "#{playlist.name} is gone. Its tracks stay.")
+       |> put_flash(:info, "Deleted #{playlist.name}. The tracks are still available.")
        |> push_navigate(to: ~p"/playlists")}
     else
       {:error, reason} -> {:noreply, put_flash(socket, :error, refusal(reason))}
@@ -534,13 +501,13 @@ defmodule PiFiWeb.PlaylistLive do
 
   # A name that another playlist already carries is the one refusal that a person
   # meets, so it says so in words. Anything else is a fault of the device.
-  defp refusal(%Ash.Error.Invalid{errors: errors} = error) do
+  defp refusal(%Ash.Error.Invalid{errors: errors}) do
     if Enum.any?(errors, &match?(%Ash.Error.Changes.InvalidAttribute{field: :name}, &1)) do
       "That name is already taken, or it's empty."
     else
-      "Couldn't do that: #{inspect(error)}"
+      "Could not save the playlist. Please check its name and try again."
     end
   end
 
-  defp refusal(reason), do: "Couldn't do that: #{inspect(reason)}"
+  defp refusal(_reason), do: "Could not update the playlist. Please try again."
 end

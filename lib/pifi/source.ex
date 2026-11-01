@@ -1,21 +1,9 @@
 defmodule PiFi.Source do
   @moduledoc """
-  Where the music comes from.
+  Behaviour and shared types for music sources.
 
-  Most sources show a tree. A container contains more entries, and a track plays. The
-  player and each user interface move through that tree, so neither one needs knowledge of
-  any particular service.
-
-  **Some sources receive audio instead.** `PiFi.Source.Spotify` is one: a phone decides
-  what plays, so there is no tree to walk and nothing to resolve. It is still a source,
-  because a person looking for where to switch Spotify on looks where every other music
-  service is, and a settings section of its own was somewhere they had to be told about.
-  Such a source implements every callback and returns `t:unsupported/0` from the two it
-  cannot answer, so a page can say what it is rather than draw nothing.
-
-  `PiFi.Source.InternetRadio`, `PiFi.Source.Podcasts`, `PiFi.Source.Jellyfin`,
-  `PiFi.Source.Plex` and `PiFi.Source.Spotify` are the sources today. Each one is a
-  module that implements this behaviour and changes nothing else.
+  Sources expose catalogue trees, search, playback resolution, and settings. Some
+  sources receive audio from another device instead of providing a catalogue.
   """
 
   require Ash.Query

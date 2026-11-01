@@ -1,29 +1,8 @@
 defmodule PiFiWeb.Telemetry do
   @moduledoc """
-  The metrics that LiveDashboard draws, at `/dev/dashboard`.
+  Telemetry supervision and metrics for the development dashboard at `/dev/dashboard`.
 
-  Phoenix writes the endpoint and the VM entries of this list. The player writes the
-  rest, and those four answer the questions that a person asks about a stereo that
-  feels slow.
-
-  - **`pifi.player.resolve.stop.duration`** is the time that a source takes to
-    turn a row into something playable. It reads a service behind the page, so this
-    is the part of the wait that the network of that service owns.
-  - **`pifi.player.sound.duration`** is the time from the press to the first
-    sound. It holds the resolve, the first bytes of the download, and the moment that
-    `aplay` opens the card.
-  - **`pifi.player.skip.stop.duration`** is the time that a skip reads the disk
-    for, and `moved_ms` is how far it landed from where it started.
-  - **`pifi.player.track.duration`** is how long a track sounded, and the reason
-    says whether a person stopped it or it reached its end.
-
-  Each one carries the source as a tag, so a station and an episode are separate
-  lines. `PiFi.Source.title/0` gives the name, because a module name reads as
-  `Elixir.PiFi.Source.InternetRadio` in the table.
-
-  **The dashboard runs in development alone.** `PiFiWeb.Router` mounts it behind
-  `dev_routes`, and a firmware of this device is a development build, so the board
-  serves it and a production image does not.
+  Metrics cover source resolution, time to first sound, skips, and track playback.
   """
 
   use Supervisor
@@ -87,11 +66,6 @@ defmodule PiFiWeb.Telemetry do
         tag_values: &source_name/1,
         unit: {:native, :millisecond}
       ),
-      # **The silence between one track of an album and the next.**
-      # `PiFi.Output.APlayPort` measures it, because it is the one process that sees
-      # the last samples of a track and the first samples of the next. ALSA holds about
-      # half a second when the last samples arrive, so a number under 500 ms is a gap
-      # that no person hears.
       summary("pifi.player.gap.duration",
         unit: {:native, :millisecond}
       ),
@@ -116,17 +90,12 @@ defmodule PiFiWeb.Telemetry do
     ]
   end
 
-  # A module name reads as `Elixir.PiFi.Source.InternetRadio` in a table, and a source
-  # already says what it is called. A player that names no source gives `nil`, which
-  # happens for a track that stops before a source is chosen.
   defp source_name(%{source: nil} = metadata), do: %{metadata | source: "none"}
 
   defp source_name(%{source: source} = metadata), do: %{metadata | source: source.title()}
 
   defp source_name(metadata), do: metadata
 
-  # `Telemetry.Metrics` reads a measurement from the measurements, and the distance of
-  # a skip is a fact about what happened and not a time, so it rides in the metadata.
   defp skip_distance(_measurements, metadata), do: Map.get(metadata, :moved_ms, 0)
 
   defp periodic_measurements do

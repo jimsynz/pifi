@@ -1,41 +1,9 @@
 defmodule PiFiWeb.QueueLive do
   @moduledoc """
-  What plays now, and what plays next.
+  LiveView for viewing and editing the playback queue.
 
-  `PiFi.Playback.Queue` already had every action that this page needs, and nothing
-  called them. A person could fill the queue by pressing a track, and after that they
-  could neither see the queue nor change it.
-
-  ## One read
-
-  A row and an item are both in SQLite, so Ash joins the two and one query draws the
-  whole page: the title, the artwork and the place of each row. This page used to read
-  the rows and then their items and pair the two up by hand, because the queue was on
-  ETS and Ash joins no two data layers. See `PiFi.Playback.Queue`.
-
-  ## Pressing a row keeps the rest of the queue
-
-  Pressing a row of a list means "play this, then the rest of the list", and
-  `PiFi.Playback.play/2` takes the whole list plus the position that was pressed. This
-  page passes the identifiers already in the queue, so only the playing mark moves.
-  Passing a single identifier would discard everything else.
-
-  ## What a person can change
-
-  They can remove a row, move a row, and empty the queue.
-
-  **A person moves a row by dragging its handle**, and the page draws no control that
-  moves a row one place. A row of a long queue needs many presses of such a control,
-  and a finger on a small screen hits the wrong one of a pair. The `DragToReorder` hook
-  of `assets/js/drag_to_reorder.js` reorders the list in the page and sends one `move`
-  when the person lets the row go.
-
-  **Moving a row does not change what is playing.** It changes what comes next. See
-  `PiFi.Playback.Queue.Order`.
-
-  **The playing row can be removed like any other**, and the player carries on playing
-  it. `PiFi.Playback.Queue.Remove` leaves the playing mark to its caller, and removing
-  the playing row means "do not play this again" rather than "stop".
+  Rows can be played, removed, reordered by dragging, shuffled, repeated, or cleared.
+  Reordering changes upcoming tracks but does not interrupt the current track.
   """
 
   use PiFiWeb, :live_view
@@ -61,14 +29,6 @@ defmodule PiFiWeb.QueueLive do
     {:ok, socket}
   end
 
-  # **These three move the playing mark, and no other event does.** A track that ends
-  # moves it with no person pressing anything, so the page must hear them.
-  #
-  # `Progress`, `Buffering` and `MetadataChanged` arrive while a track plays, and
-  # `load/1` reads every item of the queue in one query. A page that read them all
-  # made that query once a second, for a queue of 34 rows, for as long as a person
-  # left the page open. `PiFi.AutoStandby` and `PiFi.Peripheral` hold the same
-  # rule for the same reason.
   @impl Phoenix.LiveView
   def handle_info(%Events.Started{}, socket), do: {:noreply, load(socket)}
   def handle_info(%Events.Stopped{}, socket), do: {:noreply, load(socket)}
@@ -111,8 +71,6 @@ defmodule PiFiWeb.QueueLive do
     {:noreply, refresh(socket)}
   end
 
-  # **One control that steps through the three**, because a stereo has one button for
-  # this and a person presses it until it says what they want.
   def handle_event("repeat", _params, socket) do
     {:ok, :ok} = Playback.repeat_queue(Mode.after_this(socket.assigns.mode.repeat))
 

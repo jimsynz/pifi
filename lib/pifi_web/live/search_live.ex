@@ -1,36 +1,9 @@
 defmodule PiFiWeb.SearchLive do
   @moduledoc """
-  Find an item by its name.
+  LiveView for searching a source's catalogue.
 
-  `PiFiWeb.BrowseLive` moves through a tree, and this page has no tree at all. It is one
-  collection of the items that `c:PiFi.Source.search/1` names, and Cinder matches the
-  text against them.
-
-  ## The text is in the address
-
-  `/search/podcasts?search=history` is what a person reads, and Cinder writes that
-  parameter itself. A reload and a bookmark therefore both work, in the way that they do
-  on the browse page.
-
-  ## One group of a source
-
-  `PiFiWeb.SearchAllLive` draws a heading for each group that a source names, and a
-  person who presses one reads that group here. `?group=Albums` is what carries it, and
-  the query of that group takes the place of the query of the whole source. A name that
-  the source does not hold reads the whole source, because a person may keep such an
-  address after a source renames a group.
-
-  ## The control that chooses a kind
-
-  A source with more than one kind of item gets a control to choose between them, and
-  `c:PiFi.Source.kinds/0` names each one. Podcasts has shows and episodes, so a
-  person narrows the list to one or the other. Internet radio has
-  stations and nothing else, and it therefore gets no such control.
-
-  ## The matching is ours and not the one that Cinder gives
-
-  `PiFiWeb.ItemList.search_title/3` builds the expression, and it says why. The browse
-  page reads the same one.
+  Search terms, the selected group, and filters are kept in the URL so searches can be
+  reloaded or bookmarked. `PiFiWeb.ItemList` supplies the shared rows and controls.
   """
 
   use PiFiWeb, :live_view

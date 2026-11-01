@@ -1,62 +1,9 @@
 defmodule PiFiWeb.ItemList do
   @moduledoc """
-  What a page needs to draw a list of `PiFi.Playback.Item` and play from it.
+  Shared rendering and event handling for catalogue lists.
 
-  `PiFiWeb.BrowseLive` and `PiFiWeb.SearchLive` both draw such a list, and a row of
-  one is the same row on both. This module draws the rows and the controls, so a change
-  to a row reaches each page.
-
-  ## How a page uses it
-
-      use PiFiWeb, :live_view
-
-      on_mount PiFiWeb.ItemList
-      import PiFiWeb.ItemList, only: [row: 1, count: 1]
-
-  `on_mount/1` subscribes to the sources, assigns `:playing`, and answers the `play`,
-  the `favourite` and the `played` events and every event of the player. A page
-  therefore needs none of that.
-
-  **`PiFiWeb.Shell` owns the subscription to the `:player` topic**, and this hook
-  takes it again for nothing: two subscriptions of one process give two copies of each
-  event, and a page then reads a `PiFi.Event.Player.Progress` twice each second. A
-  hook reads every message of the process that it runs in, whichever part asked for the
-  topic, so the clauses below need no subscription of their own.
-
-  ## A list that changed while nobody looked
-
-  A source reads a service behind the page, so what a container contains changes while a
-  person is elsewhere. `PiFi.Event.Source.Changed` says so, and this hook reads the
-  list again for it.
-
-  **A device in standby reads nothing.** `PiFiWeb.Layouts` draws no list at all in
-  standby, so a read then costs the card and the cores and gives no person anything.
-  One query of a browse page touched 38 MB of page cache on this board, which is why
-  `config/target.exs` keeps the SQLite cache small, and standby is the moment that the
-  device is quiet in. This hook keeps `:stale?` instead, and it reads the list on the
-  way out of standby.
-
-  A read on the way back is one read, whatever the number of events that arrived, and
-  it clears the mark before it asks, so a second event of one wake asks for nothing.
-
-  ## Why hooks and not a `use` macro
-
-  A macro writes its clauses where the `use` stands, and a page writes clauses of
-  `handle_event/3` and `handle_info/2` of its own. The compiler then reports that the
-  clauses of one function are not together, and `mix check` treats that as an error.
-  `Phoenix.LiveView.attach_hook/4` adds a clause that runs before the page, and it makes
-  no such trouble. `PiFiWeb.BrowseLive` writes out the clause of `Cinder.UrlSync` for
-  the same reason.
-
-  ## What a page must hold
-
-  `:source` names the source that the rows belong to, and `:collection_id` names the
-  collection that a mark refreshes. A page that draws no collection sets `nil` there,
-  and this hook then reads nothing.
-
-  `:opened` is the container that a person is inside, and a page that is inside none
-  is `nil`. A mark on that container reads it again, so the head of it draws the
-  star that the person just pressed.
+  `BrowseLive` and `SearchLive` use this module for rows, playback controls, favourites,
+  playlists, and updates from the player and catalogue sources.
   """
 
   use PiFiWeb, :html
@@ -1018,8 +965,8 @@ defmodule PiFiWeb.ItemList do
       {:ok, item} ->
         play_from(socket, item, queue_ids(socket, item.id))
 
-      {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:halt, put_flash(socket, :error, "Could not start playback. Please try again.")}
     end
   end
 
@@ -1048,8 +995,8 @@ defmodule PiFiWeb.ItemList do
       {:ok, item} ->
         queue_from(socket, item, tracks_of(item))
 
-      {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Couldn't add that to the queue: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:halt, put_flash(socket, :error, "Could not add that to the queue. Please try again.")}
     end
   end
 
@@ -1065,9 +1012,13 @@ defmodule PiFiWeb.ItemList do
           {:ok, _rows} ->
             {:halt, put_flash(socket, :info, "#{length(ids)} tracks are in the queue.")}
 
-          {:error, reason} ->
+          {:error, _reason} ->
             {:halt,
-             put_flash(socket, :error, "Couldn't add those to the queue: #{inspect(reason)}")}
+             put_flash(
+               socket,
+               :error,
+               "Could not add those tracks to the queue. Please try again."
+             )}
         end
     end
   end
@@ -1077,8 +1028,8 @@ defmodule PiFiWeb.ItemList do
          {:ok, marked} <- mark(item) do
       {:halt, socket |> opened(marked) |> read_again()}
     else
-      {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:halt, put_flash(socket, :error, "Could not update that item. Please try again.")}
     end
   end
 
@@ -1089,8 +1040,8 @@ defmodule PiFiWeb.ItemList do
          {:ok, _marked} <- mark_played(item) do
       {:halt, read_again(socket)}
     else
-      {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:halt, put_flash(socket, :error, "Could not update that item. Please try again.")}
     end
   end
 
@@ -1117,11 +1068,11 @@ defmodule PiFiWeb.ItemList do
        |> Phoenix.Component.assign(:adding, nil)
        |> put_flash(:info, "#{item.title} is in #{playlist.name}.")}
     else
-      {:error, reason} ->
+      {:error, _reason} ->
         {:halt,
          socket
          |> Phoenix.Component.assign(:adding, nil)
-         |> put_flash(:error, "Couldn't do that: #{inspect(reason)}")}
+         |> put_flash(:error, "Could not add the item to the playlist. Please try again.")}
     end
   end
 
@@ -1154,8 +1105,8 @@ defmodule PiFiWeb.ItemList do
        |> Phoenix.Component.assign(:playing, %{item_id: item.id, status: :buffering})
        |> put_flash(:info, "Playing #{length(ids)} tracks.")}
     else
-      {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:halt, put_flash(socket, :error, "Could not start playback. Please try again.")}
     end
   end
 
@@ -1173,8 +1124,8 @@ defmodule PiFiWeb.ItemList do
          |> Phoenix.Component.assign(:playing, %{item_id: Enum.at(ids, index), status: :buffering})
          |> put_flash(:info, "Playing #{item.title}.")}
 
-      {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Couldn't play that: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:halt, put_flash(socket, :error, "Could not start playback. Please try again.")}
     end
   end
 
@@ -1187,8 +1138,8 @@ defmodule PiFiWeb.ItemList do
       {:ok, _rows} ->
         {:halt, put_flash(socket, :info, "#{item.title} is next in the queue.")}
 
-      {:error, reason} ->
-        {:halt, put_flash(socket, :error, "Couldn't add that to the queue: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:halt, put_flash(socket, :error, "Could not add that to the queue. Please try again.")}
     end
   end
 

@@ -1,49 +1,9 @@
 defmodule PiFiWeb.BrowseLive do
   @moduledoc """
-  Find something to play.
+  LiveView for browsing a source catalogue.
 
-  The address names the source, and the top row of the faceplate draws one control for
-  each source. `PiFi.Source.roots/0` gives the branches of that source, and
-  everything below them is generic: this page needs no knowledge of internet radio and
-  none of podcasts.
-
-  ## Two rules make the whole tree
-
-  A row of `PiFi.Playback.Facet` opens into the items that link to it. An item of the
-  kind `:container` opens into the items whose `parent_id` names it. A source takes no
-  part in either one, which is what one catalogue is for.
-
-  ## What Cinder owns, and what this page owns
-
-  `Cinder` runs the query. It owns the loading state, the sort, the filters and the
-  page controls, so this page owns none of that: no cursor, no page of entries, and no
-  read of a list inside `handle_event`. A slow read draws a loading state, which the
-  page before this one did not.
-
-  This page owns the breadcrumbs and the marker of the track that plays, because
-  neither one belongs to a list.
-
-  ## The address says where a person is
-
-  `/browse/internet-radio/countries/NZ` is the stations of New Zealand, and
-  `/browse/podcasts/subscriptions/<id>` is the episodes of one show. One segment names
-  each level, and `handle_params/3` builds the path again from them, so a reload, a
-  bookmark and the back control of a browser all work.
-
-  A segment is what the level above it needs to find the row: the name of a branch at
-  the top, the value of a facet under one of those, and the identifier of an item under
-  a container. The rules of the tree are what make this possible, because the page can
-  walk the same two steps that a person did.
-
-  The sort, the filters and the page go in the query, and `Cinder.UrlSync` writes them:
-  `/browse/internet-radio/countries/NZ?sort=-title&title=rock`. Each level is a
-  collection of its own, so a sort belongs to the list that a person set it on.
-
-  ## The letter bar
-
-  `letter` is this page and not Cinder, and `?letter=G` carries it. A press narrows the
-  list to the titles that begin with that letter. See `letters/1` for why it narrows the
-  list and does not move to a page of it, and why the bar draws every letter.
+  It builds the source tree, breadcrumbs, letter filter, and collection URL while
+  `Cinder` handles loading, sorting, filtering, and pagination.
   """
 
   use PiFiWeb, :live_view
@@ -179,7 +139,7 @@ defmodule PiFiWeb.BrowseLive do
         {:noreply, put_flash(socket, :info, "Refreshing that list.")}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Couldn't refresh that list.")}
+        {:noreply, put_flash(socket, :error, "Could not refresh this list. Please try again.")}
     end
   end
 

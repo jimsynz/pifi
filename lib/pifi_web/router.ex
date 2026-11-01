@@ -9,22 +9,7 @@ defmodule PiFiWeb.Router do
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {PiFiWeb.Layouts, :root})
     plug(:protect_from_forgery)
-    # The artwork cache serves each station logo from this device, so no page asks
-    # another server for anything. See `PiFi.Artwork`.
-    #
-    # **`connect-src` names the two schemes of a socket, and `'self'` cannot do that
-    # work.** CSP Level 3 says that `'self'` matches `ws:` and `wss:` of the same host,
-    # and WebKit does not hold that rule, so Safari and every browser of iOS refused
-    # the LiveView socket while they drew the page. LiveView then used long poll after
-    # 2.5 seconds, so the interface worked and the socket never opened.
-    #
-    # A scheme and not a host: this device answers on its IP address and on more than
-    # one mDNS name, so no list of hosts can name them all. That is the reason that
-    # `check_origin` is `false` as well. See `config/target.exs`.
-    #
-    # **The policy is one string literal, and it must stay one.** `Sobelow.Config.CSP`
-    # reads the map from the source, so a `<>` between two halves looks to it like a
-    # value it cannot read, and it reports the pipeline as having no policy at all.
+
     plug(:put_secure_browser_headers, %{
       "content-security-policy" =>
         "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
@@ -43,12 +28,8 @@ defmodule PiFiWeb.Router do
     pipe_through(:browser)
 
     live("/", BrowseLive)
-    # The rest of the address is where a person is in the tree, one segment for each
-    # level. See `PiFiWeb.BrowseLive`.
     live("/browse/:source", BrowseLive)
     live("/browse/:source/*path", BrowseLive)
-    # The search of the whole device comes first, and the search of one source keeps its
-    # own address. See `PiFiWeb.SearchAllLive`.
     live("/search", SearchAllLive)
     live("/search/:source", SearchLive)
     live("/queue", QueueLive)

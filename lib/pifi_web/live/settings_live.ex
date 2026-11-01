@@ -1,54 +1,11 @@
 defmodule PiFiWeb.SettingsLive do
   @moduledoc """
-  What the device is, and what a person can change.
+  LiveView for device settings and status reports.
 
-  The page is a menu, and each row of it opens one section. The address names the
-  section, so a person can keep the address of one and the back control of the
-  browser moves out of it.
+  Settings are grouped under `/settings`. Source and peripheral-specific controls are
+  supplied by their respective behaviours, while this module handles device identity,
+  audio, networking, display, standby, storage, and firmware updates.
 
-      /settings                        the menu
-      /settings/device                 the name and the picture of the device
-      /settings/output                 the sound card
-      /settings/sources                the sources, and which ones are in use
-      /settings/sources/internet-radio one source
-      /settings/peripherals            the screens and the controls of the board
-      /settings/crossfade              how long one track plays under the next
-      /settings/timezone               which part of the world the device is in
-      /settings/standby                the period of quiet, and the switch off
-      /settings/network                a report
-      /settings/storage                a report
-      /settings/firmware               the version that runs, and the one that could
-      /settings/home-assistant         whether a house can see this device
-
-  **This page needs no knowledge of any source.** A source names its own settings
-  with `c:PiFi.Source.settings/0`, and its own controls with
-  `c:PiFi.Source.settings_actions/0`. The countries of the station list belong to
-  internet radio, and the key of the Podcast Index belongs to podcasts. A new
-  source therefore reaches this page without a change here.
-
-  The page never sends the secret of an index back to a browser. A source marks
-  such a field `write_only?`, and it then gives no value for it.
-
-  It needs no knowledge of any peripheral either. A peripheral names itself with
-  `c:PiFi.Peripheral.title/0`, and this page draws that name and one control. A
-  peripheral is out of use until a person says that the part is wired, because the same
-  image runs on a board with a screen and on a board with none. See
-  `PiFi.Peripheral`.
-
-  The name of the device and the picture of the idle screen are the two things on this
-  page that reach the hardware and the network together, and `PiFi.Device.Identity`
-  declares both. This page gives the name to that module, and it draws what comes back.
-
-  The network state and the storage state are reports, and a person changes neither
-  one here. The Wi-Fi details belong to the setup wizard. See `PiFi.Setup`.
-
-  **The reports arrive, and this page asks for none of them.** A DAC arrives, Wi-Fi
-  connects, and a download fills the card, so the three reports change without a
-  person. This page read all three every five seconds before, which was eleven queries
-  each time for an answer that almost never moved. `PiFi.Device.Monitor` owns the
-  three sources of truth now and publishes on the `:device` topic. This page reads once
-  when a person opens it, because no event has arrived yet, and after that it draws what
-  it is told.
   """
 
   use PiFiWeb, :live_view
@@ -239,7 +196,8 @@ defmodule PiFiWeb.SettingsLive do
         {:noreply, socket |> assign(:upgrade, report) |> put_flash(:info, check_message(report))}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Couldn't reach the forge. Try again in a moment.")}
+        {:noreply,
+         put_flash(socket, :error, "Could not check for updates. Try again in a moment.")}
     end
   end
 
@@ -325,7 +283,7 @@ defmodule PiFiWeb.SettingsLive do
       {:error, _reason} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Couldn't change whether your phone can find this device.")
+         |> put_flash(:error, "Could not change Bluetooth visibility.")
          |> refresh()}
     end
   end
@@ -396,8 +354,8 @@ defmodule PiFiWeb.SettingsLive do
          {:ok, :ok} <- PiFi.Playback.enable_source(module, enabled == "true") do
       {:noreply, socket |> put_flash(:info, in_use(module)) |> reload(module)}
     else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Could not change that setting. Please try again.")}
     end
   end
 
@@ -415,10 +373,10 @@ defmodule PiFiWeb.SettingsLive do
       {:error, :not_a_peripheral} ->
         {:noreply, push_navigate(socket, to: ~p"/settings/peripherals")}
 
-      {:error, reason} ->
+      {:error, _reason} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Couldn't start that: #{inspect(reason)}")
+         |> put_flash(:error, "Could not start that device. Check the connection and try again.")
          |> refresh()}
     end
   end
@@ -447,8 +405,8 @@ defmodule PiFiWeb.SettingsLive do
          |> assign(:profile, Hardware.chosen())
          |> put_flash(:info, "Restarting to apply that.")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "That didn't work: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Could not apply that setting. Please try again.")}
     end
   end
 
@@ -480,8 +438,9 @@ defmodule PiFiWeb.SettingsLive do
       :ok ->
         {:noreply, socket |> put_flash(:info, sync_flash(key, hours)) |> load_source(module)}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "That didn't work: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not update the sync schedule. Please try again.")}
     end
   end
 
@@ -508,8 +467,9 @@ defmodule PiFiWeb.SettingsLive do
       {:ok, :ok} ->
         {:noreply, socket |> put_flash(:info, standby_flash(minutes)) |> refresh()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Couldn't change the period: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not change the standby period. Please try again.")}
     end
   end
 
@@ -535,8 +495,8 @@ defmodule PiFiWeb.SettingsLive do
       {:ok, :ok} ->
         {:noreply, socket |> put_flash(:info, crossfade_flash(seconds)) |> refresh()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Couldn't change the crossfade: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Could not change the crossfade. Please try again.")}
     end
   end
 
@@ -546,8 +506,9 @@ defmodule PiFiWeb.SettingsLive do
       {:ok, :ok} ->
         {:noreply, socket |> put_flash(:info, screen_flash(seconds)) |> refresh()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Couldn't change the period: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not change the screen timeout. Please try again.")}
     end
   end
 
@@ -557,8 +518,8 @@ defmodule PiFiWeb.SettingsLive do
       {:ok, :ok} ->
         {:noreply, socket |> put_flash(:info, "Now using #{id}.") |> refresh()}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Couldn't do that: #{inspect(reason)}")}
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Could not select that output. Please try again.")}
     end
   end
 
@@ -1982,7 +1943,7 @@ defmodule PiFiWeb.SettingsLive do
   defp upload_message(:too_large), do: "That file is larger than 4096 KB."
   defp upload_message(:not_accepted), do: "That file isn't a JPEG or a PNG."
   defp upload_message(:too_many_files), do: "Choose one picture."
-  defp upload_message(error), do: "That upload failed: #{inspect(error)}"
+  defp upload_message(_error), do: "The upload failed. Choose a JPEG or PNG and try again."
 
   defp title(socket), do: PiFiWeb.Shell.put_page(socket, "Settings")
 
