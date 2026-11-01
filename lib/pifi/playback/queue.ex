@@ -65,6 +65,15 @@ defmodule PiFi.Playback.Queue do
       get? true
     end
 
+    action :count, :integer do
+      description """
+      The number of rows. It reads no row, so a caller that asks again and again pays
+      for one number and not for the queue.
+      """
+
+      run fn _input, _context -> {:ok, Ash.count!(__MODULE__)} end
+    end
+
     action :replace, {:array, :struct} do
       description """
       Put a new list in the queue, and mark one row of it.

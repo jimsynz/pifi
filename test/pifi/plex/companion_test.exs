@@ -540,6 +540,40 @@ defmodule PiFi.Plex.CompanionTest do
     end
   end
 
+  # Every statement of `playback_queue` that this process makes while `fun` runs. The
+  # player is another process and it reads the queue for its own reasons, so a statement
+  # of any other process is not counted.
+  defp queue_statements_of(fun) do
+    test = self()
+    handler = "companion-queue-#{:erlang.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:pifi, :repo, :query],
+      fn _event, _measurements, metadata, _config ->
+        if metadata[:source] == "playback_queue" and self() == test,
+          do: send(test, {:queue_sql, metadata[:query]})
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
+
+    received_queue_statements([])
+  end
+
+  defp received_queue_statements(statements) do
+    receive do
+      {:queue_sql, sql} -> received_queue_statements([sql | statements])
+    after
+      0 -> Enum.reverse(statements)
+    end
+  end
+
   # **A registration that says the wrong thing is worse than none**, because a
   # controller draws the player and the command then reaches an address that answers
   # nothing. See `PiFi.Plex.Companion.Announcement`.
@@ -788,10 +822,9 @@ defmodule PiFi.Plex.CompanionTest do
       assert body =~ ~s(playQueueID="26058")
     end
 
-    # **A device that came back from a restart holds a track and no queue.** The queue of
-    # this device lives in memory, so it goes when the power does, and the player
-    # restores the one track that a person left. A board was in that state on
-    # 2026-09-15, and a controller that reached it waited for a queue that no list could
+    # **A device can hold a track and no queue.** Emptying the queue leaves the track
+    # that plays. A board was in that state on 2026-09-15, when a restart still emptied
+    # the queue, and a controller that reached it waited for a queue that no list could
     # make.
     test "a device that holds a track and no queue makes a queue of that track" do
       Settings.put!("plex_machine_id", "abc123")
@@ -806,6 +839,40 @@ defmodule PiFi.Plex.CompanionTest do
       assert_received {:request, "POST", "/playQueues", params}
       assert params["uri"] =~ "library/metadata/11"
       assert body =~ ~s(playQueueID="26058")
+    end
+
+    test "a queue of more than one row offers both skips" do
+      start_supervised!(PiFi.Plex.Companion.Queue)
+
+      call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
+
+      list = attribute(poll("9").resp_body, "Timeline", "controllable")
+
+      assert list =~ "skipNext"
+      assert list =~ "skipPrevious"
+    end
+
+    test "a queue of one row offers no skip" do
+      start_supervised!(PiFi.Plex.Companion.Queue)
+
+      call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
+      [first | _rest] = Playback.queue!()
+      Playback.remove_from_queue!(first.id)
+
+      refute attribute(poll("10").resp_body, "Timeline", "controllable") =~ "skip"
+    end
+
+    # **A controller polls about once a second while a track plays**, and a poll that read
+    # every row of the queue read the whole table each time. The count is one number.
+    test "a poll reads no row of the queue" do
+      start_supervised!(PiFi.Plex.Companion.Queue)
+
+      call("/player/playback/createPlayQueue?uri=server://abc/library/metadata/9")
+
+      statements = queue_statements_of(fn -> poll("11") end)
+
+      assert statements != []
+      refute Enum.any?(statements, &(&1 =~ "item_id"))
     end
 
     # A person plays a station, or a track that no controller named, and the queue of

@@ -77,6 +77,7 @@ defmodule PiFi.Playback do
       # An empty queue plays nothing, and that is a normal state and not an error, so
       # the bang gives `nil` in the place of a `NotFound`.
       define :queue_playing, action: :playing, not_found_error?: false
+      define :queue_count, action: :count
       define :replace_queue, action: :replace, args: [:item_ids]
       define :append_to_queue, action: :append, args: [:item_ids]
       define :move_queue, action: :move, args: [:direction]

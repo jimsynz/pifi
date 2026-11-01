@@ -351,13 +351,18 @@ defmodule PiFi.Plex.Companion.Router do
   defp seeking(%{live?: true}), do: []
   defp seeking(_state), do: ["seekTo"]
 
-  # The queue decides what next and previous mean, so an empty one holds neither. It
-  # lives in memory, so this costs no read of the card. See `PiFi.Playback.Queue`.
+  # The queue decides what next and previous mean, so a queue of one row offers neither.
+  #
+  # **This runs for every poll, and a poll arrives about once a second while a track
+  # plays**, because each `Progress` ends the wait of `state_of/1`. The queue is in
+  # SQLite, so reading every row here read the whole table once a second to answer one
+  # question. The count asks SQLite for one number instead.
+  #
+  # **A count held in memory would go stale.** A sync that drops a track deletes its
+  # queue row through the foreign key, with no action of `PiFi.Playback.Queue` that a
+  # cache could hear, so the timeline would offer a skip that does nothing.
   defp moving do
-    case Playback.queue!() do
-      rows when length(rows) > 1 -> ["skipNext", "skipPrevious"]
-      _rows -> []
-    end
+    if Playback.queue_count!() > 1, do: ["skipNext", "skipPrevious"], else: []
   end
 
   # A device that plays nothing names no track, and a controller then draws the empty
@@ -413,11 +418,6 @@ defmodule PiFi.Plex.Companion.Router do
 
   # The tracks that this device holds in its own queue, in the order that it plays them,
   # so a controller reads the list that a person made and not the one track that plays.
-  #
-  # **A device that came back from a restart holds a track and no queue.**
-  # `PiFi.Playback.Queue` lives in memory, so it goes when the power does, and
-  # `PiFi.Player` restores the one track that a person left. The queue of that device
-  # is that track, and a queue of one is the truth for it.
   defp made_for(ref) do
     with {:ok, uri} <- Server.play_queue_uri(with_playing(plex_refs(), ref)),
          {:ok, queue} <- Server.create_play_queue(uri) do
