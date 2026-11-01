@@ -56,6 +56,10 @@ defmodule PiFi.Player.Pipeline do
   # at. 16 KB is about one second of a 128 kbit/s episode. See `adapter/2`.
   @mad_input_bytes 16 * 1024
 
+  # How many compressed bytes may wait in front of `PiFi.Player.PortDecoder`. See
+  # `port_decoder/3`.
+  @port_input_bytes 4096
+
   @impl true
   def handle_init(_ctx, options) do
     playable = options.playable
@@ -363,21 +367,15 @@ defmodule PiFi.Player.Pipeline do
   # cannot go back to the start, so it takes the first module that it tries and
   # stops on a FLAC stream.
   defp decoder(link, %{format: :vorbis}) do
-    child(link, :decoder, %PortDecoder{command: "oggdec", arguments: ["--quiet", "-o", "-", "-"]})
+    port_decoder(link, "oggdec", ["--quiet", "-o", "-", "-"])
   end
 
   defp decoder(link, %{container: :ogg, format: :flac}) do
-    child(link, :decoder, %PortDecoder{
-      command: "flac",
-      arguments: ["--decode", "--ogg", "--stdout", "--silent", "-"]
-    })
+    port_decoder(link, "flac", ["--decode", "--ogg", "--stdout", "--silent", "-"])
   end
 
   defp decoder(link, %{format: :flac}) do
-    child(link, :decoder, %PortDecoder{
-      command: "flac",
-      arguments: ["--decode", "--stdout", "--silent", "-"]
-    })
+    port_decoder(link, "flac", ["--decode", "--stdout", "--silent", "-"])
   end
 
   defp decoder(_link, playable) do
@@ -387,5 +385,16 @@ defmodule PiFi.Player.Pipeline do
     This pipeline plays MP3, AAC, Ogg Vorbis, Ogg FLAC, and FLAC on its own.
     Opus and Speex need another program, and no New Zealand station sends either.
     """
+  end
+
+  # **The queue in front of a port decoder is lead, and it's 150 KB by default.** Its
+  # input pad is manual, so Membrane keeps that much read ahead of the program, and
+  # 150 KB is about 2.3 s of a 520 kbit/s FLAC and 8 s of a typical Vorbis file. A
+  # measurement on the host on 2026-11-01 held 4.4 s of FLAC samples in the decoder
+  # with the default and 1.5 s with 4 KB. See `PiFi.Player.PortDecoder`.
+  defp port_decoder(link, command, arguments) do
+    link
+    |> via_in(:input, target_queue_size: @port_input_bytes)
+    |> child(:decoder, %PortDecoder{command: command, arguments: arguments})
   end
 end

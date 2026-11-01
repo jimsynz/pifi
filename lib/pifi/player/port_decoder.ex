@@ -31,9 +31,42 @@ defmodule PiFi.Player.PortDecoder do
 
   ## What limits the rate
 
-  The program gives samples only as fast as it gets bytes, and the bytes come
-  through the input pad of this element. The chain is therefore limited by the
-  network, and no queue here can grow without a limit.
+  **Demand gates nothing that arrives in `handle_info/3`.** The port driver reads
+  what the program writes into the mailbox of this element whatever the element is
+  doing, so the program never blocks on its output. This element used to send each
+  `{:data, bytes}` on as a buffer, which ignored the demand of its output, and its
+  input took Membrane's default auto demand of 600 KB. The sink is suspended in
+  `Port.command/2` most of the time, so those buffers queued in its mailbox ahead of
+  `:silence`. A measurement on the host on 2026-11-01, with a `dd` loop reading at
+  CD rate in place of `aplay`, found 1.9 to 8.4 s of FLAC and 27.6 s of Vorbis in
+  that mailbox, and a stop took as long.
+
+  Both pads are therefore manual.
+
+  - **The output sends only what the sink asks for, in buffers of `@buffer_ms`.**
+    The samples wait in `held` until then. The size matters as much as the demand:
+    the sink counts its queue in buffers, and one write of `flac` is 16 to 20 KB,
+    which is about 100 ms. The same measurement then found at most 175 ms in the
+    mailbox of the sink, and a stop took 0.4 s, which is what MP3 takes.
+  - **The input asks for `@input_bytes` at a time while `held` is under
+    `@held_ms`.** The program answers only for the bytes that it gets, so this is
+    the one place that bounds its output. `PiFi.Player.Pipeline` keeps the queue in
+    front of this pad small as well.
+
+  `busy_limits_port` on the port of the program, with the pads left on `:auto`, would
+  not do this. The program never blocks on its output, so it reads its input as fast
+  as it decodes, the pipe never fills, and the queue of the port never reaches a
+  limit. The auto output would still send every answer to the sink.
+
+  **What the program has read and not yet answered is not counted.** The program
+  answers well behind its input: a trace showed `oggdec` give several seconds of
+  samples for a few writes that all went in while `held` was under the bound. A count
+  of the bytes written since the last answer doesn't measure that, because the
+  program keeps answering for earlier input. A cap on that count also stopped 24-bit
+  FLAC and Vorbis before their first answer, because each needs more than 16 KB before
+  it writes a header. `held` therefore reached 1.6 s of FLAC and 6 s of Vorbis in the
+  measurement. That costs memory and the lead of a resume. It doesn't cost the time of
+  a stop, which depends on the mailbox of the sink alone.
 
   ## The end of a track, and the half close that Erlang does not hold
 
@@ -56,7 +89,8 @@ defmodule PiFi.Player.PortDecoder do
 
   **This waits for the output to go quiet instead.** The end of the input starts a
   timer of a quarter of a second, each answer of the program starts it again, and the
-  timer then closes the port and sends the end of the stream. A program that keeps
+  timer then closes the port and sends the end of the stream after the samples that
+  `held` still keeps. A program that keeps
   nothing more gives nothing more, so this loses no sample that a person could hear.
   The wait costs no time that a person waits either: the sink is playing the audio
   that this element already gave it, and the end of the stream travels behind that
@@ -87,9 +121,20 @@ defmodule PiFi.Player.PortDecoder do
   # the audio of the sink in any case.
   @flush_ms 250
 
-  def_input_pad(:input, accepted_format: _any, flow_control: :auto)
+  # The length of the audio in one output buffer. The sink counts its queue in buffers,
+  # and `@sink_queue_buffers` of `PiFi.Player.Pipeline` assumes the 23 to 26 ms frame
+  # that MAD and FDK give. See "What limits the rate" above.
+  @buffer_ms 25
 
-  def_output_pad(:output, accepted_format: %RawAudio{}, flow_control: :auto)
+  # How much decoded audio this element keeps before it stops feeding the program.
+  @held_ms 250
+
+  # How many compressed bytes one demand of the input asks for.
+  @input_bytes 4096
+
+  def_input_pad(:input, accepted_format: _any, flow_control: :manual, demand_unit: :bytes)
+
+  def_output_pad(:output, accepted_format: %RawAudio{}, flow_control: :manual)
 
   defmodule State do
     @moduledoc false
@@ -101,7 +146,8 @@ defmodule PiFi.Player.PortDecoder do
             held: binary(),
             format: RawAudio.t() | nil,
             flush_timer: reference() | nil,
-            ending?: boolean()
+            ending?: boolean(),
+            ended?: boolean()
           }
 
     defstruct [
@@ -111,7 +157,8 @@ defmodule PiFi.Player.PortDecoder do
       :format,
       :flush_timer,
       held: <<>>,
-      ending?: false
+      ending?: false,
+      ended?: false
     ]
   end
 
@@ -122,7 +169,8 @@ defmodule PiFi.Player.PortDecoder do
 
   @impl true
   def handle_playing(_ctx, %State{} = state) do
-    {[], %State{state | port: open(state)}}
+    state = %State{state | port: open(state)}
+    {feeding(state), state}
   end
 
   # The format of the input says nothing about the samples, and the default
@@ -135,11 +183,19 @@ defmodule PiFi.Player.PortDecoder do
   @impl true
   def handle_buffer(:input, buffer, _ctx, %State{port: port} = state) when is_port(port) do
     Port.command(port, buffer.payload)
-    {[], state}
+    {feeding(state), state}
   end
 
   @impl true
   def handle_buffer(:input, _buffer, _ctx, state), do: {[], state}
+
+  @impl true
+  def handle_demand(:output, size, :buffers, _ctx, %State{} = state) do
+    {payloads, state} = take(state, size)
+    {ending, state} = finishing(state)
+
+    {buffers(payloads) ++ ending ++ feeding(state), state}
+  end
 
   # The samples of the program arrive here. The header comes first, and the audio
   # after it.
@@ -147,13 +203,15 @@ defmodule PiFi.Player.PortDecoder do
   def handle_info({port, {:data, bytes}}, _ctx, %State{port: port} = state) do
     {actions, state} = read(state.held <> bytes, state)
 
-    {actions, waiting(state)}
+    {actions ++ [redemand: :output] ++ feeding(state), waiting(state)}
   end
 
   @impl true
   def handle_info({port, {:exit_status, status}}, _ctx, %State{port: port} = state) do
     Membrane.Logger.error("#{state.command} stopped with status #{status}")
-    {[end_of_stream: :output], %State{state | port: nil}}
+    if state.flush_timer, do: Process.cancel_timer(state.flush_timer)
+
+    draining(%State{state | port: nil, flush_timer: nil})
   end
 
   # The program gave nothing for `@flush_ms`, so it has nothing more and the track
@@ -161,7 +219,7 @@ defmodule PiFi.Player.PortDecoder do
   # program to exit.
   @impl true
   def handle_info(:flush, _ctx, %State{} = state) do
-    {[end_of_stream: :output], close(state)}
+    draining(close(state))
   end
 
   @impl true
@@ -173,7 +231,7 @@ defmodule PiFi.Player.PortDecoder do
   # A port that is already closed leaves nothing to wait for.
   @impl true
   def handle_end_of_stream(:input, _ctx, %State{port: nil} = state) do
-    {[end_of_stream: :output], state}
+    draining(%State{state | ending?: true})
   end
 
   @impl true
@@ -194,20 +252,85 @@ defmodule PiFi.Player.PortDecoder do
             "#{format.sample_format}"
         )
 
-        {actions, state} = read(audio, %State{state | format: format, held: <<>>})
-
-        {[stream_format: {:output, format}] ++ actions, state}
+        {[stream_format: {:output, format}], %State{state | format: format, held: audio}}
 
       :more ->
         {[], %State{state | held: bytes}}
     end
   end
 
-  defp read(<<>>, %State{} = state), do: {[], state}
+  defp read(audio, %State{} = state), do: {[], %State{state | held: audio}}
 
-  defp read(audio, %State{} = state) do
-    {[buffer: {:output, %Membrane.Buffer{payload: audio}}], %State{state | held: <<>>}}
+  defp buffers([]), do: []
+
+  defp buffers(payloads) do
+    [buffer: {:output, Enum.map(payloads, &%Membrane.Buffer{payload: &1})}]
   end
+
+  # Whole buffers of `@buffer_ms` while the program runs. Once it has stopped, the
+  # short piece at the end goes as well.
+  defp take(%State{format: nil} = state, _count), do: {[], state}
+
+  defp take(%State{} = state, count) do
+    {payloads, rest} = split(state.held, buffer_bytes(state.format), count, state.port == nil)
+    {payloads, %State{state | held: rest}}
+  end
+
+  defp split(bytes, size, count, last?, taken \\ [])
+
+  defp split(bytes, _size, 0, _last?, taken), do: {Enum.reverse(taken), bytes}
+
+  defp split(<<>>, _size, _count, _last?, taken), do: {Enum.reverse(taken), <<>>}
+
+  defp split(bytes, size, count, last?, taken) when byte_size(bytes) >= size do
+    <<payload::binary-size(^size), rest::binary>> = bytes
+    split(rest, size, count - 1, last?, [payload | taken])
+  end
+
+  defp split(bytes, _size, _count, true, taken), do: {Enum.reverse([bytes | taken]), <<>>}
+
+  defp split(bytes, _size, _count, false, taken), do: {Enum.reverse(taken), bytes}
+
+  # The program has stopped, so what it left is all that is coming. `redemand` runs
+  # `handle_demand/5`, which sends it and then the end of the stream.
+  defp draining(%State{ended?: true} = state), do: {[], state}
+
+  defp draining(%State{} = state) do
+    case finishing(state) do
+      {[], state} -> {[redemand: :output], state}
+      ending -> ending
+    end
+  end
+
+  # The end of the stream goes out after the last sample, and only once. Bytes held
+  # before the header was whole are not audio, so they don't hold it back.
+  defp finishing(%State{port: nil, ended?: false} = state)
+       when state.held == <<>> or state.format == nil do
+    {[end_of_stream: :output], %State{state | ended?: true}}
+  end
+
+  defp finishing(%State{} = state), do: {[], state}
+
+  # Asked after anything that could change what the program needs: a write, an
+  # answer, and a buffer that left. Asking only after an answer would stall a program
+  # that needs more input before it can answer at all, such as `flac` reading a large
+  # picture in the metadata.
+  defp feeding(%State{ending?: true}), do: []
+  defp feeding(%State{port: nil}), do: []
+
+  defp feeding(%State{} = state) do
+    if full?(state), do: [], else: [demand: {:input, @input_bytes}]
+  end
+
+  defp full?(%State{format: nil}), do: false
+
+  defp full?(%State{} = state) do
+    byte_size(state.held) >=
+      RawAudio.time_to_bytes(Membrane.Time.milliseconds(@held_ms), state.format)
+  end
+
+  defp buffer_bytes(format),
+    do: RawAudio.time_to_bytes(Membrane.Time.milliseconds(@buffer_ms), format)
 
   # A WAV file carries chunks. This reads the `fmt ` chunk for the shape of a sample,
   # and it then finds the `data` marker. It ignores the length that `data` names,

@@ -34,10 +34,17 @@ defmodule PiFi.Player.PortDecoderTest do
     end)
   end
 
+  defp demand(state, count), do: PortDecoder.handle_demand(:output, count, :buffers, nil, state)
+
+  defp buffer_sizes(actions) do
+    for {:buffer, {:output, buffers}} <- actions, buffer <- buffers, do: byte_size(buffer.payload)
+  end
+
   defp audio(actions) do
-    for {:buffer, {:output, %Membrane.Buffer{payload: payload}}} <- actions,
+    for {:buffer, {:output, buffers}} <- actions,
+        buffer <- buffers,
         into: <<>>,
-        do: payload
+        do: buffer.payload
   end
 
   describe "the end of the input" do
@@ -51,12 +58,17 @@ defmodule PiFi.Player.PortDecoderTest do
       assert {[], state} = PortDecoder.handle_end_of_stream(:input, nil, %{state | port: :fake})
       assert state.ending?
 
-      assert {[end_of_stream: :output], state} = PortDecoder.handle_info(:flush, nil, state)
+      assert {[redemand: :output], state} = PortDecoder.handle_info(:flush, nil, state)
       assert state.port == nil
+
+      assert {actions, state} = demand(state, 8)
+      assert audio(actions) == "the samples"
+      assert List.last(actions) == {:end_of_stream, :output}
+      assert state.held == <<>>
     end
 
     # The program answers while the element waits, so the wait starts again and the
-    # samples of that answer reach the output.
+    # samples of that answer wait for the sink with the rest.
     test "an answer of the program puts the wait off" do
       {_actions, state} = feed([@flac_header <> "the samples"])
 
@@ -64,10 +76,10 @@ defmodule PiFi.Player.PortDecoderTest do
 
       first = state.flush_timer
 
-      assert {actions, state} =
+      assert {_actions, state} =
                PortDecoder.handle_info({:fake, {:data, "more samples"}}, nil, state)
 
-      assert audio(actions) == "more samples"
+      assert state.held == "the samplesmore samples"
       assert state.flush_timer != first
     end
 
@@ -81,18 +93,88 @@ defmodule PiFi.Player.PortDecoderTest do
       refute state.ending?
     end
 
-    # An element that holds no port has nothing to wait for.
-    test "a port that is already closed ends the stream at once" do
+    # An element that holds no port has nothing to wait for, apart from the sink.
+    test "a port that is already closed sends what it holds, and then ends the stream" do
       {_actions, state} = feed([@flac_header <> "the samples"])
+
+      assert {[redemand: :output], state} = PortDecoder.handle_end_of_stream(:input, nil, state)
+
+      assert {actions, _state} = demand(state, 1)
+      assert List.last(actions) == {:end_of_stream, :output}
+    end
+
+    test "a port that is already closed and holds nothing ends the stream at once" do
+      {_actions, state} = feed([@flac_header])
 
       assert {[end_of_stream: :output], _state} =
                PortDecoder.handle_end_of_stream(:input, nil, state)
+    end
+
+    test "the end of the stream goes out once" do
+      {_actions, state} = feed([@flac_header])
+      {[end_of_stream: :output], state} = PortDecoder.handle_end_of_stream(:input, nil, state)
+
+      assert {[], _state} = PortDecoder.handle_info({nil, {:exit_status, 1}}, nil, state)
+    end
+  end
+
+  # **The sink counts its queue in buffers, and it can't read `:silence` while it waits
+  # on `aplay`.** This element used to send each answer of the program as it arrived,
+  # whatever the sink asked for, and an answer of `flac` is about 100 ms. A measurement
+  # on the host found 1.9 s of FLAC and 27.6 s of Vorbis in front of a stop.
+  describe "demand" do
+    # One second of 44100 Hz stereo `s16le`, and 25 ms of it.
+    @second :binary.copy(<<0>>, 176_400)
+    @buffer_bytes 4412
+
+    defp running(chunks) do
+      {_actions, state} = feed(chunks)
+      %{state | port: :fake}
+    end
+
+    test "nothing leaves until the sink asks" do
+      {actions, state} = feed([@flac_header <> @second])
+
+      assert audio(actions) == ""
+      assert byte_size(state.held) == 176_400
+    end
+
+    test "the sink gets as many buffers as it asks for, each 25 ms long" do
+      state = running([@flac_header <> @second])
+
+      assert {actions, state} = demand(state, 3)
+      assert buffer_sizes(actions) == [@buffer_bytes, @buffer_bytes, @buffer_bytes]
+      assert byte_size(state.held) == 176_400 - 3 * @buffer_bytes
+    end
+
+    test "a piece shorter than a buffer waits while the program runs" do
+      state = running([@flac_header <> "the samples"])
+
+      assert {actions, %{held: "the samples"}} = demand(state, 5)
+      assert audio(actions) == ""
+    end
+
+    test "the program gets more input only while the decoder holds little" do
+      state = running([@flac_header <> @second])
+
+      assert {actions, state} = demand(state, 1)
+      refute Keyword.has_key?(actions, :demand)
+
+      assert {actions, _state} = demand(state, 36)
+      assert {:demand, {:input, 4096}} in actions
+    end
+
+    test "the input asks for nothing after it ends" do
+      state = %{running([@flac_header]) | ending?: true}
+
+      assert {actions, _state} = demand(state, 1)
+      refute Keyword.has_key?(actions, :demand)
     end
   end
 
   describe "the header that each program writes" do
     test "reads the one from oggdec" do
-      {actions, _state} = feed([@oggdec_header <> "the samples"])
+      {actions, state} = feed([@oggdec_header <> "the samples"])
 
       assert format(actions) == %Membrane.RawAudio{
                channels: 2,
@@ -100,21 +182,21 @@ defmodule PiFi.Player.PortDecoderTest do
                sample_format: :s16le
              }
 
-      assert audio(actions) == "the samples"
+      assert state.held == "the samples"
     end
 
     test "reads the one from flac, which names a length of zero" do
-      {actions, _state} = feed([@flac_header <> "the samples"])
+      {actions, state} = feed([@flac_header <> "the samples"])
 
       assert format(actions).sample_rate == 44_100
-      assert audio(actions) == "the samples"
+      assert state.held == "the samples"
     end
 
     test "names the format once, and not for each buffer" do
-      {actions, _state} = feed([@oggdec_header <> "first", "second", "third"])
+      {actions, state} = feed([@oggdec_header <> "first", "second", "third"])
 
       assert Enum.count(actions, &match?({:stream_format, _}, &1)) == 1
-      assert audio(actions) == "firstsecondthird"
+      assert state.held == "firstsecondthird"
     end
   end
 
@@ -123,36 +205,37 @@ defmodule PiFi.Player.PortDecoderTest do
       whole = @oggdec_header <> "the samples"
       chunks = whole |> :binary.bin_to_list() |> Enum.map(&<<&1>>)
 
-      {actions, _state} = feed(chunks)
+      {actions, state} = feed(chunks)
 
       assert format(actions).sample_rate == 44_100
-      assert audio(actions) == "the samples"
+      assert state.held == "the samples"
     end
 
     test "a chunk that ends inside the RIFF marker" do
       whole = @oggdec_header <> "the samples"
       <<first::binary-size(2), rest::binary>> = whole
 
-      {actions, _state} = feed([first, rest])
+      {actions, state} = feed([first, rest])
 
       assert format(actions).channels == 2
-      assert audio(actions) == "the samples"
+      assert state.held == "the samples"
     end
 
     test "a chunk that ends inside the fmt chunk" do
       whole = @oggdec_header <> "the samples"
       <<first::binary-size(24), rest::binary>> = whole
 
-      {actions, _state} = feed([first, rest])
+      {actions, state} = feed([first, rest])
 
       assert format(actions).sample_rate == 44_100
-      assert audio(actions) == "the samples"
+      assert state.held == "the samples"
     end
 
     test "nothing leaves before the header is whole" do
       {actions, state} = feed([binary_part(@oggdec_header, 0, 30)])
 
-      assert actions == []
+      assert format(actions) == nil
+      assert audio(actions) == ""
       assert byte_size(state.held) == 30
       assert state.format == nil
     end
@@ -166,10 +249,10 @@ defmodule PiFi.Player.PortDecoderTest do
       header =
         binary_part(@oggdec_header, 0, 36) <> extra <> binary_part(@oggdec_header, 36, 8)
 
-      {actions, _state} = feed([header <> "the samples"])
+      {actions, state} = feed([header <> "the samples"])
 
       assert format(actions).sample_rate == 44_100
-      assert audio(actions) == "the samples"
+      assert state.held == "the samples"
     end
   end
 
