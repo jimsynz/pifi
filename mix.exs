@@ -163,7 +163,7 @@ defmodule PiFi.MixProject do
       # The browse page gives Cinder a query, and Cinder holds the loading state, the
       # sort, the page controls and the URL state. It is pure Elixir, and so is
       # `ash_phoenix`, which it needs.
-      {:cinder, "~> 0.16"},
+      {:cinder, "~> 0.18"},
       # `PiFi.Peripheral.PiTft` owns the SPI bus of the screen and the data line
       # that goes with it. `PiFi.Peripheral.Battery` owns the I2C bus of the fuel
       # gauge, and `max1704x` and `wafer` both name `circuits_i2c` as optional, so this
