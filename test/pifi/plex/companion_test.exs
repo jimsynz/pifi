@@ -885,6 +885,45 @@ defmodule PiFi.Plex.CompanionTest do
 
       refute poll("6").resp_body =~ "playQueueID"
     end
+
+    # **No play queue of the server holds a station, an episode or a Jellyfin track**, so
+    # a queue made for one never named it, and every poll asked the server again.
+    test "a track of another source names no queue and asks the server nothing" do
+      Settings.put!("plex_machine_id", "abc123")
+      start_supervised!(PiFi.Plex.Companion.Queue)
+
+      station = %{playing_a_plex_track() | source: Source.InternetRadio, live?: true}
+
+      body = Router.timeline("12", station)
+
+      refute body =~ "playQueueID"
+      refute_received {:request, _method, _path, _params}
+    end
+
+    # **A controller polls about once a second**, so a server that refuses would get a
+    # request each second for as long as the controller stays.
+    test "a Plex track whose queue can't be made isn't asked for again on the next poll" do
+      Settings.put!("plex_machine_id", "abc123")
+      start_supervised!(PiFi.Plex.Companion.Queue)
+
+      test = self()
+
+      Req.Test.stub(Server, fn conn ->
+        send(test, {:request, conn.method, conn.request_path, %{}})
+        Plug.Conn.send_resp(conn, 500, "")
+      end)
+
+      refute Router.timeline("13", playing_a_plex_track()) =~ "playQueueID"
+      assert_received {:request, "POST", "/playQueues", _params}
+
+      refute Router.timeline("14", playing_a_plex_track()) =~ "playQueueID"
+      refute_received {:request, "POST", "/playQueues", _params}
+
+      # The failure belongs to that track, so another one is tried at once.
+      another = put_in(playing_a_plex_track().item.source_ref, "11")
+      Router.timeline("15", another)
+      assert_received {:request, "POST", "/playQueues", _params}
+    end
   end
 
   # A controller sends a play queue and not a track, and these read what it sends.

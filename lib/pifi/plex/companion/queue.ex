@@ -22,21 +22,37 @@ defmodule PiFi.Plex.Companion.Queue do
   named, and the queue that this holds says nothing about that. `of/1` therefore
   answers for a track that the queue holds and nothing for any other, so a timeline
   names a queue only while the music is of that queue.
+
+  ## It remembers a queue that couldn't be made
+
+  The timeline asks the server for a queue when a Plex track has none, and a controller
+  polls about once a second. A server that is down, or that refuses the request, would
+  then get a request every second for as long as the controller stays. `failed/1`
+  records the track, and `try_again?/1` says no for that track until a minute has
+  passed.
+
+  **It waits a minute rather than until the track changes**, because a failure can be
+  brief. A paused track can sit there for an hour, and the controller of a person who
+  started it during a restart of the server would show a spinner for all of it.
   """
 
   use Agent
 
   alias PiFi.Plex.Server
 
+  @retry_after :timer.minutes(1)
+
   @doc false
-  def start_link(_options), do: Agent.start_link(fn -> nil end, name: __MODULE__)
+  def start_link(_options) do
+    Agent.start_link(fn -> %{queue: nil, failed: nil} end, name: __MODULE__)
+  end
 
   @doc """
   Keep the queue that a controller named or asked for.
   """
   @spec keep(Server.queue()) :: :ok
   def keep(%{id: id} = queue) when is_integer(id) do
-    if running?(), do: Agent.update(__MODULE__, fn _held -> queue end)
+    if running?(), do: Agent.update(__MODULE__, &%{&1 | queue: queue, failed: nil})
 
     :ok
   end
@@ -44,13 +60,32 @@ defmodule PiFi.Plex.Companion.Queue do
   def keep(_queue), do: :ok
 
   @doc """
-  Forget the queue, because the music is no longer of it.
+  Remember that no queue could be made for this track.
   """
-  @spec forget() :: :ok
-  def forget do
-    if running?(), do: Agent.update(__MODULE__, fn _held -> nil end)
+  @spec failed(String.t()) :: :ok
+  def failed(ref) do
+    at = System.monotonic_time(:millisecond)
+
+    if running?(), do: Agent.update(__MODULE__, &%{&1 | failed: {to_string(ref), at}})
 
     :ok
+  end
+
+  @doc """
+  Whether to ask the server for a queue for this track, given how the last try went.
+
+  A track that failed less than a minute ago gets no new try. Any other track does.
+  """
+  @spec try_again?(String.t()) :: boolean()
+  def try_again?(ref) do
+    case held() do
+      %{failed: {failed_ref, at}} ->
+        failed_ref != to_string(ref) or
+          System.monotonic_time(:millisecond) - at >= @retry_after
+
+      _other ->
+        true
+    end
   end
 
   @doc """
@@ -65,10 +100,10 @@ defmodule PiFi.Plex.Companion.Queue do
 
   def of(ref) do
     case held() do
-      %{id: id, rows: rows, version: version} ->
+      %{queue: %{id: id, rows: rows, version: version}} ->
         attributes(id, version, Map.get(rows, to_string(ref)))
 
-      nil ->
+      _other ->
         []
     end
   end

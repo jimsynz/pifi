@@ -30,13 +30,21 @@ defmodule PiFi.Plex.Companion.Router do
     no body at all. A player that answered every path would tell a controller that it
     holds a control which does nothing.
 
-  ## What a controller cannot read here yet
+  ## The play queue, and the track of another source
 
   A real player names `playQueueID`, `playQueueItemID`, `playQueueVersion` and
-  `containerKey` on its timeline, and this names none of them. The queue of this
-  firmware is `PiFi.Playback.Queue`, which is a list on the device and not a play
-  queue of the server, so there is no number of that kind to give. A controller can
-  therefore draw the track that plays and not the list that it came from.
+  `containerKey` on its timeline. The queue of this firmware is `PiFi.Playback.Queue`,
+  a list on the device and not a play queue of the server, so for a Plex track the
+  timeline names the play queue that a controller gave, or one that this player makes
+  when a controller first asks. See `PiFi.Plex.Companion.Queue`.
+
+  **A track of another source names no play queue, no server and no metadata.** A
+  station, an episode or a Jellyfin track is not a row of the Plex server, so no play
+  queue holds it. Asking the server to make one anyway sent a `POST /playQueues` on
+  every poll, about once a second, because the queue that came back never held the
+  track. A controller gets the state, the place, the level and the controls for such a
+  track, and nothing that names the track. What Plexamp draws with that wasn't
+  measured.
 
   ## The navigation commands are absent, and they stay absent
 
@@ -374,7 +382,7 @@ defmodule PiFi.Plex.Companion.Router do
       {"duration", to_string(item.duration_ms || 0)},
       {"key", "/library/metadata/#{item.source_ref}"},
       {"ratingKey", item.source_ref}
-    ] ++ queue_named(item.source_ref) ++ server(state)
+    ] ++ queue_named(state) ++ server(state)
   end
 
   # **The controller reads the track from the server and not from this device**, so the
@@ -409,22 +417,41 @@ defmodule PiFi.Plex.Companion.Router do
   # **The queue is made when a controller asks and not before.** A device that plays to
   # a room with no controller in it needs no queue of the server, and a request of that
   # server for every track that a person played would be a cost for nothing.
-  defp queue_named(ref) do
-    case Queue.of(ref) do
-      [] -> Queue.of(made_for(ref))
+  #
+  # **Only a Plex track gets one**, for the reason in the moduledoc. **A failed try is
+  # remembered**, because this runs on every poll, and a server that is down would
+  # otherwise get a request each second. See `PiFi.Plex.Companion.Queue`.
+  defp queue_named(%{source: PiFi.Source.Plex, item: %{source_ref: ref}}) do
+    with [] <- Queue.of(ref),
+         true <- Queue.try_again?(ref) do
+      made_for(ref)
+    else
+      false -> []
       named -> named
     end
   end
 
+  defp queue_named(_state), do: []
+
   # The tracks that this device holds in its own queue, in the order that it plays them,
   # so a controller reads the list that a person made and not the one track that plays.
+  #
+  # A queue that the server made without the track counts as a failure too, because the
+  # timeline can't name it and the next poll would ask again.
   defp made_for(ref) do
     with {:ok, uri} <- Server.play_queue_uri(with_playing(plex_refs(), ref)),
          {:ok, queue} <- Server.create_play_queue(uri) do
       Queue.keep(queue)
     end
 
-    ref
+    case Queue.of(ref) do
+      [] ->
+        Queue.failed(ref)
+        []
+
+      named ->
+        named
+    end
   end
 
   # **A queue that holds no row for the track that plays is no use at all**, because the
