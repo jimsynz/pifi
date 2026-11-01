@@ -75,9 +75,9 @@ defmodule PiFi.PlayerControlsTest do
           title: "Episode #{number}",
           kind: :track,
           duration_ms: 600_000,
-          # An episode keeps the place that a person stopped at. See
-          # `PiFi.Playback.Item.Changes.KeepPlaceOnly`.
-          keeps_place?: true
+          # An episode keeps the place that a person stopped at, and a song doesn't.
+          # See `PiFi.Playback.Item.Changes.KeepPlaceOnly`.
+          keeps_place?: option(:keeps_place?, true)
         })
       end
     end
@@ -340,6 +340,135 @@ defmodule PiFi.PlayerControlsTest do
       refute_receive %Events.Standby{entered?: false}, 500
       assert %{standby?: true} = Player.state()
     end
+  end
+
+  # **A song keeps no place in its row**, so the place that the player holds is the
+  # only one a play after a pause can start from. A Plex track started again from the
+  # top before this. The skip puts the held place far from 0, and the pipeline of the
+  # test reports the byte it moved to as the time it moved.
+  describe "a play after a pause" do
+    test "a song goes on from the paused place" do
+      Episodes.holds(keeps_place?: false)
+      one = playing(1)
+      paused_at_30_seconds()
+
+      assert :ok = Player.pause(false)
+
+      assert_receive %Events.Started{position_ms: position}, 2000
+      assert position >= 30_000
+      assert %{position_bytes: 30_000, position_ms: ^position} = :sys.get_state(Player).playable
+      assert Player.state().position_ms >= 30_000
+
+      # The place came from the player, and not from the row.
+      assert %{position_bytes: nil} = Playback.get_item!(one.id)
+    end
+
+    test "a song goes on from the place it had when the device went into standby" do
+      Episodes.holds(keeps_place?: false)
+      playing(1)
+      at_30_seconds()
+
+      assert :ok = Player.standby(true)
+      assert_receive %Events.Standby{entered?: true}, 2000
+      assert Player.state().position_ms >= 30_000
+
+      assert :ok = Player.standby(false)
+
+      assert_receive %Events.Started{position_ms: position}, 2000
+      assert position >= 30_000
+      assert %{position_bytes: 30_000} = :sys.get_state(Player).playable
+    end
+
+    # The place in the row and the place in the player are the same place, so the
+    # episode goes on from where the pause stopped and not from where this listen began.
+    test "an episode goes on from the paused place, and the row agrees" do
+      one = playing(1)
+      paused_at_30_seconds()
+
+      assert %{position_bytes: 30_000, position_ms: stored} = Playback.get_item!(one.id)
+      assert stored >= 30_000
+
+      assert :ok = Player.pause(false)
+
+      # The pause reads the clock once for the row and once for the player, so the two
+      # can straddle a millisecond.
+      assert_receive %Events.Started{position_ms: position}, 2000
+      assert_in_delta position, stored, 5
+      assert %{position_bytes: 30_000} = :sys.get_state(Player).playable
+    end
+
+    test "a live stream opens again where the source says" do
+      Episodes.holds(live?: true, keeps_place?: false)
+      playing(1)
+      read_to_byte(30_000)
+
+      paused_and_played()
+
+      assert %{position_bytes: 0, position_ms: 0} = :sys.get_state(Player).playable
+    end
+
+    # `Membrane.HLS.Source` reads a playlist from its first segment, so a track that the
+    # server converts starts from the top, and the count says so.
+    test "a converted track starts again from the top" do
+      Episodes.holds(transport: :hls, keeps_place?: false)
+      playing(1)
+      read_to_byte(30_000)
+
+      paused_and_played()
+
+      assert %{position_bytes: 0, position_ms: 0} = :sys.get_state(Player).playable
+    end
+
+    # A codec with no frame reader can't start part way through a file:
+    # `PiFi.Player.FileSource` gives Ogg Vorbis no head of the stream.
+    test "a format with no frame reader starts again from the top" do
+      Episodes.holds(format: :vorbis, keeps_place?: false)
+      playing(1)
+      read_to_byte(30_000)
+
+      paused_and_played()
+
+      assert %{position_bytes: 0, position_ms: 0} = :sys.get_state(Player).playable
+    end
+
+    # A move clears the place of the track that went, so the next one starts where its
+    # source says and not at the place of the one before it.
+    test "a move after a pause starts the next track where its source says" do
+      Episodes.holds(keeps_place?: false)
+      playing(1)
+      paused_at_30_seconds()
+
+      assert :ok = Player.next()
+
+      assert_receive %Events.Started{track: %{title: "Episode 2"}, position_ms: 0}, 2000
+      assert %{position_bytes: 0} = :sys.get_state(Player).playable
+    end
+  end
+
+  defp at_30_seconds do
+    assert :ok = Player.skip(30_000)
+    assert_receive %Events.Progress{position_ms: position} when position >= 30_000, 2000
+  end
+
+  defp paused_at_30_seconds do
+    at_30_seconds()
+    assert :ok = Player.pause(true)
+    assert_receive %Events.Paused{position_ms: position} when position >= 30_000, 2000
+  end
+
+  # `PiFi.Player.FileSource` reports the byte it read, and a transport that reads no
+  # file reports none. This sends one anyway, so a held byte is there to be ignored.
+  defp read_to_byte(bytes) do
+    send(Player, {:pipeline_position_bytes, :sys.get_state(Player).pipeline, bytes})
+    assert %{position_bytes: ^bytes} = :sys.get_state(Player)
+  end
+
+  defp paused_and_played do
+    assert :ok = Player.pause(true)
+    assert_receive %Events.Paused{}, 2000
+
+    assert :ok = Player.pause(false)
+    assert_receive %Events.Started{position_ms: 0}, 2000
   end
 
   describe "next and previous" do

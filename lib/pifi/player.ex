@@ -41,9 +41,11 @@ defmodule PiFi.Player do
 
   ## The controls
 
-  A pause stops the pipeline and it keeps the track selected, so a play starts the
-  pipeline again at the place that the item reports. A pause therefore needs no mechanism
-  of its own.
+  A pause stops the pipeline and it keeps the track selected and the place in it, so a
+  play starts the pipeline again at that place. Standby does the same. A song keeps no
+  place in its row, so the place that the player holds is the only one it has. A live
+  stream, and a track that the server converts, open again at the start of what the
+  server sends.
 
   A skip keeps the pipeline. It moves the byte that `PiFi.Player.FileSource` reads,
   because a pipeline owns the decoder and the buffer of a stream, and a start of one
@@ -224,8 +226,8 @@ defmodule PiFi.Player do
   A pause is not a stop. A stop leaves the device with nothing selected, and a pause
   leaves the track in front of the person.
 
-  A play starts the track at the place that the source reports, so a podcast episode
-  continues and a live station opens again at the current point of the stream. A play
+  A play goes on from where the pause stopped, for a song as well as an episode, and a
+  live station opens again at the current point of the stream. A play
   also leaves standby, because a person who asks for music asks the device to be
   awake.
   """
@@ -564,7 +566,7 @@ defmodule PiFi.Player do
   end
 
   defp continued(:resume, %State{} = state) do
-    case start(state.source, state.item, state) do
+    case start(state.source, state.item, state, :held_place) do
       {:ok, state} -> {:noreply, state}
       {:error, _reason, state} -> {:noreply, state}
     end
@@ -687,14 +689,20 @@ defmodule PiFi.Player do
     end
   end
 
+  # `offset_ms` keeps the place, for the reason the pause clause gives.
   defp answered({:standby, true}, _from, %State{} = state) do
     store_position(state)
     silence(state)
     Settings.put(@standby_key, "true")
     Event.publish(:player, %Events.Standby{entered?: true})
 
-    {:reply, :ok, handing_over(%State{state | standby?: true, stream_title: nil}),
-     {:continue, {:terminate, state.pipeline, state.monitor}}}
+    {:reply, :ok,
+     handing_over(%State{
+       state
+       | standby?: true,
+         stream_title: nil,
+         offset_ms: position_ms(state)
+     }), {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
   defp answered({:standby, false}, _from, %State{source: nil} = state) do
@@ -997,13 +1005,14 @@ defmodule PiFi.Player do
   # the sound card busy and dies with `:epipe`, the notices of the one that plays reach
   # a player that does not know it, and a person who presses stop stops nothing. This
   # is the one place that answers for it, so no caller can forget.
-  defp start(source, item, %State{} = state) do
+  defp start(source, item, %State{} = state, place \\ :source_place) do
     state = state |> cancel_restart() |> stop_pipeline()
 
     # **The buffering event is not here.** A person who presses a control hears the
     # answer of it before this runs, and `buffering/1` says so then. `restart/1` says
     # it for a start that no person asked for.
-    with {:ok, playable} <- resolved(source, item),
+    with {:ok, resolved} <- resolved(source, item),
+         playable = placed(resolved, state, place),
          {:ok, sink} <- sink(state) do
       case start_pipeline(playable, sink, state) do
         {:ok, pipeline} ->
@@ -1048,6 +1057,37 @@ defmodule PiFi.Player do
     :telemetry.span([:pifi, :player, :resolve], %{source: source}, fn ->
       {source.resolve(item), %{source: source}}
     end)
+  end
+
+  # **A resume goes on from the place that the player holds, and not from the one the
+  # source reports.** A song keeps no place in its row, so Plex and Jellyfin resolve it
+  # at 0 and a play after a pause started it again from the top. An episode keeps one,
+  # but the item in this state was read when the track began, so its place is the one
+  # from before this listen. The place held here is the one a pause just wrote, so the
+  # row and the player agree.
+  #
+  # The place goes only onto the file that it was measured in, and only where
+  # `PiFi.Player.FileSource` can start part way through. A live stream has no place to
+  # go back to. **A Plex track that the server converts starts again from the top**:
+  # `Membrane.HLS.Source` reads the playlist from its first segment, so a held time
+  # would make the count lie about audio that begins at 0.
+  defp placed(playable, %State{playable: %{key: key}, position_bytes: bytes} = state, :held_place)
+       when is_integer(bytes) do
+    if playable[:key] == key and starts_part_way?(playable) do
+      held_place(playable, state)
+    else
+      playable
+    end
+  end
+
+  defp placed(playable, %State{}, _place), do: playable
+
+  # `position_bytes` is the byte that the reader reached, which runs ahead of the sound,
+  # and `PiFi.Player.FileSource` steps back from it to a frame boundary as it opens.
+  defp held_place(playable, %State{} = state) do
+    playable
+    |> Map.put(:position_bytes, state.position_bytes || 0)
+    |> Map.put(:position_ms, position_ms(state))
   end
 
   # `start/2` and not `start_link/2`. A link would tie the life of this process to
@@ -1151,14 +1191,15 @@ defmodule PiFi.Player do
   # read, and a format that a reader of frames holds. `:download` is the transport
   # that gives the file, and `PiFi.Player.FileSource` is the element that moves. All
   # four give one answer to a person: this track takes no skip.
-  defp skippable?(%State{
-         source: source,
-         playable: %{live?: false, transport: :download, format: format}
-       }) do
-    match?({:ok, _frames}, Skip.frames(format)) and :skip in source.capabilities()
+  defp skippable?(%State{source: source, playable: playable}) do
+    starts_part_way?(playable) and :skip in source.capabilities()
   end
 
-  defp skippable?(%State{}), do: false
+  defp starts_part_way?(%{live?: false, transport: :download, format: format}) do
+    match?({:ok, _frames}, Skip.frames(format))
+  end
+
+  defp starts_part_way?(_playable), do: false
 
   # **A skip of a codec whose decoder holds the state of the stream builds the
   # pipeline again.** The reader cannot move under such a decoder: it reads one
@@ -1174,11 +1215,7 @@ defmodule PiFi.Player do
   # `PiFi.Player.FileSource` does the skip before a byte leaves it, and it reports
   # the time that it moved in the notification that a skip always sends.
   defp restarted(%State{} = state, ms) do
-    playable =
-      state.playable
-      |> Map.put(:position_bytes, state.position_bytes || 0)
-      |> Map.put(:skip_ms, ms)
-      |> Map.put(:position_ms, position_ms(state))
+    playable = state.playable |> held_place(state) |> Map.put(:skip_ms, ms)
 
     with {:ok, sink} <- sink(state),
          state = stop_pipeline(state),
