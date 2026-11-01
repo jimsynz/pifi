@@ -65,9 +65,8 @@ defmodule PiFi.Output.APlaySink do
 
   - A person presses next, and the pipeline of the track that they left is terminated
     in the middle of a buffer.
-  - `PiFi.Player.PortDecoder` closes the port of `flac` a quarter of a second after
-    its last answer, and that ends the program and takes the bytes that it had not
-    written yet.
+  - A program of `PiFi.Player.PortDecoder` that fails, such as `flac` on a damaged
+    file, stops wherever its output stopped, and that need not be the end of a frame.
   - A file that a download left short ends where the bytes end.
 
   This element therefore writes whole frames and holds the rest for the next buffer.
