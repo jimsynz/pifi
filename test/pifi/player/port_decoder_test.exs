@@ -125,7 +125,7 @@ defmodule PiFi.Player.PortDecoderTest do
 
     defp running(chunks) do
       {_actions, state} = feed(chunks)
-      %{state | port: :fake}
+      %{state | port: :fake, busy: nil}
     end
 
     test "nothing leaves until the sink asks" do
@@ -160,11 +160,145 @@ defmodule PiFi.Player.PortDecoderTest do
       assert {:demand, {:input, 4096}} in actions
     end
 
+    test "the header cancels what the metadata asked for" do
+      assert {actions, _state} =
+               PortDecoder.handle_info({nil, {:data, @flac_header}}, nil, state())
+
+      assert {:demand, {:input, 0}} in actions
+    end
+
     test "the input asks for nothing after it ends" do
       state = %{running([@flac_header]) | ending?: true}
 
       assert {actions, _state} = demand(state, 1)
       refute Keyword.has_key?(actions, :demand)
+    end
+  end
+
+  # **The program answers well behind its input, and nothing says how far.** The decoder
+  # used to ask for more whenever it held under 250 ms, so the pipe filled while the
+  # program worked, and the held audio reached 1.8 s of FLAC and 8 s of Vorbis.
+  describe "what the program has not answered yet" do
+    # 250 ms of 44100 Hz stereo `s16le` is 44100 bytes.
+    defp quiet(state) do
+      ref = make_ref()
+      PortDecoder.handle_info({:timeout, ref, :quiet}, nil, %{state | busy: ref})
+    end
+
+    defp asked(actions) do
+      Enum.find_value(actions, fn
+        {:demand, {:input, bytes}} -> bytes
+        _other -> nil
+      end)
+    end
+
+    defp wrote(state, bytes) do
+      {:ok, input} = :file.open(~c"/dev/null", [:write, :raw, :binary])
+
+      {[], state} =
+        PortDecoder.handle_buffer(:input, %Membrane.Buffer{payload: bytes}, nil, %{
+          state
+          | input: input
+        })
+
+      :ok = :file.close(input)
+      %{state | input: nil}
+    end
+
+    defp header_given do
+      {_actions, state} = feed([@flac_header])
+      %{state | port: :fake}
+    end
+
+    test "an answer means the program is busy, so nothing more goes in" do
+      state = header_given()
+
+      assert is_reference(state.busy)
+      assert {actions, _state} = demand(state, 1)
+      assert asked(actions) == nil
+    end
+
+    test "a write means the program is busy as well" do
+      {_actions, state} = quiet(header_given())
+
+      state = wrote(state, "compressed")
+
+      assert is_reference(state.busy)
+      refute state.asked?
+    end
+
+    test "once the program goes quiet, the input asks again" do
+      assert {actions, _state} = quiet(header_given())
+      assert asked(actions) == 4096
+    end
+
+    test "a stale timer changes nothing" do
+      state = header_given()
+
+      assert {[], ^state} =
+               PortDecoder.handle_info({:timeout, make_ref(), :quiet}, nil, state)
+    end
+
+    test "nothing more goes in while a request waits for its input" do
+      {_actions, state} = quiet(header_given())
+
+      assert state.asked?
+      assert {actions, _state} = quiet(state)
+      assert asked(actions) == nil
+    end
+
+    test "the input asks for the audio that is missing, at the ratio answered so far" do
+      state = %{header_given() | written: 1_000, answered: 10_000}
+
+      assert {actions, _state} = quiet(state)
+      assert asked(actions) == div(44_100 * 1_000, 10_000) + 1
+    end
+
+    test "the decoder that holds enough asks for nothing" do
+      state = %{header_given() | held: :binary.copy(<<0>>, 44_100)}
+
+      assert {actions, _state} = quiet(state)
+      assert asked(actions) == nil
+    end
+
+    test "a request asks for one buffer at least" do
+      state = %{header_given() | held: :binary.copy(<<0>>, 44_000), written: 100, answered: 100}
+
+      assert {actions, _state} = quiet(state)
+      assert asked(actions) == @buffer_bytes + 1
+    end
+
+    # **A program can need a lot of input before it answers.** `flac` writes nothing
+    # until it has read past a picture in the metadata, and 3 or 4 MB is normal there.
+    # An Ogg program answers a page at a time, and a page can carry a second of audio.
+    test "a request that gets no answer doubles the next one" do
+      {actions, state} = quiet(%{state() | port: :fake})
+      assert asked(actions) == 4096
+
+      {actions, state} = state |> wrote("part of a picture") |> quiet()
+      assert asked(actions) == 8192
+
+      {actions, state} = state |> wrote("more of it") |> quiet()
+      assert asked(actions) == 16_384
+
+      {_actions, state} = PortDecoder.handle_info({:fake, {:data, @flac_header}}, nil, state)
+      assert state.stalls == 0
+    end
+
+    test "only the bytes after the header count towards the ratio" do
+      state = wrote(%{state() | port: :fake}, "metadata")
+      assert state.written == 0
+
+      {_actions, state} =
+        PortDecoder.handle_info({:fake, {:data, @flac_header <> "early"}}, nil, state)
+
+      assert state.answered == 0
+
+      state = wrote(state, "frames")
+      {_actions, state} = PortDecoder.handle_info({:fake, {:data, "the samples"}}, nil, state)
+
+      assert state.written == 6
+      assert state.answered == 11
     end
   end
 

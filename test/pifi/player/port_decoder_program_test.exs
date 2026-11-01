@@ -54,11 +54,11 @@ defmodule PiFi.Player.PortDecoderProgramTest do
     %{header: header, tail: tail, input: input}
   end
 
-  defp start(input, arguments) do
+  defp start(input, arguments, command \\ "cat") do
     spec =
       child(:source, %Membrane.File.Source{location: input})
       |> via_in(:input, target_queue_size: 4096)
-      |> child(:decoder, %PortDecoder{command: "cat", arguments: arguments})
+      |> child(:decoder, %PortDecoder{command: command, arguments: arguments})
       |> child(:sink, CountingSink)
 
     Pipeline.start_link_supervised!(spec: spec)
@@ -105,6 +105,18 @@ defmodule PiFi.Player.PortDecoderProgramTest do
     assert audio == @input <> @tail
     assert_end_of_stream(pipeline, :sink)
     refute_pipeline_notified(pipeline, :sink, {:audio, _audio}, 300)
+  end
+
+  # **A program can need far more input than one request before it answers**, as
+  # `flac` does to read past a picture in the metadata. `dd` here holds back each
+  # 64 KB until the whole block has arrived, so the requests have to grow until one
+  # covers it.
+  test "a program that answers in large blocks still gets all of its input", context do
+    script = ~S(cat "$0"; exec dd bs=65536 iflag=fullblock status=none)
+    pipeline = start(context.input, ["-c", script, context.header], "sh")
+
+    assert_pipeline_notified(pipeline, :sink, {:audio, audio}, 5_000)
+    assert audio == @input
   end
 
   # `cat header tail` reads no input and exits, so each write after that fails.

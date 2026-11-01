@@ -49,25 +49,96 @@ defmodule PiFi.Player.PortDecoder do
     the sink counts its queue in buffers, and one write of `flac` is 16 to 20 KB,
     which is about 100 ms. The same measurement then found at most 175 ms in the
     mailbox of the sink, and a stop took 0.4 s, which is what MP3 takes.
-  - **The input asks for `@input_bytes` at a time while `held` is under
-    `@held_ms`.** The program answers only for the bytes that it gets, so this is
-    the one place that bounds its output. `PiFi.Player.Pipeline` keeps the queue in
-    front of this pad small as well.
+  - **The input asks for more only while `held` is under `@held_ms`, and only once
+    the program has gone quiet.** The program answers only for the bytes that it
+    gets, so this is the one place that bounds its output. The next section explains
+    the quiet part. `PiFi.Player.Pipeline` keeps the queue in front of this pad small
+    as well.
 
   `busy_limits_port` on the port of the program, with the pads left on `:auto`, would
   not do this. The program never blocks on its output, so it reads its input as fast
   as it decodes, the pipe never fills, and the queue of the port never reaches a
   limit. The auto output would still send every answer to the sink.
 
-  **What the program has read and not yet answered is not counted.** The program
-  answers well behind its input: a trace showed `oggdec` give several seconds of
-  samples for a few writes that all went in while `held` was under the bound. A count
-  of the bytes written since the last answer doesn't measure that, because the
-  program keeps answering for earlier input. A cap on that count also stopped 24-bit
-  FLAC and Vorbis before their first answer, because each needs more than 16 KB before
-  it writes a header. `held` therefore reached 1.6 s of FLAC and 6 s of Vorbis in the
-  measurement. That costs memory and the lead of a resume. It doesn't cost the time of
-  a stop, which depends on the mailbox of the sink alone.
+  ## What the program hasn't answered yet
+
+  **The program answers well behind its input, and nothing outside it says how far.**
+  Input that goes in while `held` is short is still in the FIFO or inside the program
+  when `held` reaches the bound, and its audio arrives later in one lump. This element
+  used to ask for 4 KB after every write while `held` was under the bound, so each
+  dip under it let in as much as the program would take.
+  A measurement on the host on 2026-11-01, with `Membrane.File.Source`, this element,
+  `PiFi.Output.APlaySink` and a fake `aplay` that reads at the rate of the audio, found
+  `held` at up to 1.7 s of FLAC and 7.6 s of Vorbis.
+
+  How far behind depends on the program and the file. Feeding the start of a file and
+  holding the pipe open showed:
+
+  - `flac` answers two or three frames behind. It writes its header after 12 KB of a
+    16-bit file, and its first audio after 32 KB of a 24-bit 96 kHz one. It writes
+    nothing at all until it has read past a picture in the metadata, and 3 or 4 MB is
+    normal there.
+  - `oggdec` and `flac --ogg` answer a page at a time. `oggenc` writes pages of about
+    4 KB, which is 0.4 s, and ffmpeg writes a second of audio in each page.
+  - `flac --ogg` also keeps 64 KB of samples in its output buffer.
+
+  So one request is in flight at a time:
+
+  - **A request goes out only when the program is quiet**, which means no write and
+    no answer for `@quiet_ms`. Both programs decode far faster than the audio plays,
+    so a quiet program is waiting for input, and what it holds is only what it can't
+    answer yet.
+  - **A request asks for the audio that `held` lacks**, and one buffer at least. The
+    compressed bytes for that come from the ratio of what the program has answered to
+    what it has been given since its header. The bytes before the header are the
+    metadata, and a picture there would make the ratio worthless.
+  - **A request that gets no answer doubles the next one.** That's what gets `flac`
+    past a picture: eleven requests from 4 KB cover 4 MB. After the header it carries a
+    program through a page in a few steps. The overshoot is never more than the
+    program needed.
+  - **The header cancels what's left of the input's demand.** A request that doubled
+    its way past the metadata is asking for audio now.
+
+  The same measurement afterwards:
+
+  | File                      | `held` peak before | after  | source ahead of card before | after     |
+  | ------------------------- | ------------------ | ------ | --------------------------- | --------- |
+  | FLAC 16-bit 44.1 kHz      | 1.70 s             | 0.47 s | 1.8 to 2.5 s                | 1.4 to 1.6 s |
+  | FLAC 24-bit 96 kHz        | 0.63 s             | 0.49 s | 0.9 to 1.0 s                | 0.8 to 0.9 s |
+  | FLAC with a 4 MB picture  | 1.72 s             | 0.53 s | 1.4 to 2.2 s                | 1.6 to 1.7 s |
+  | Ogg FLAC from `flac`      | 1.73 s             | 0.85 s | 2.5 to 2.9 s                | 1.6 to 1.9 s |
+  | Ogg FLAC from ffmpeg      | 1.88 s             | 1.55 s | 2.6 to 3.5 s                | 2.4 to 3.7 s |
+  | Vorbis from `oggenc`      | 7.61 s             | 1.15 s | 4.3 to 6.2 s                | 2.5 to 2.7 s |
+  | Vorbis from ffmpeg        | 6.85 s             | 2.14 s | 3.3 to 5.4 s                | 2.3 to 3.3 s |
+
+  About 1.2 s of the lead in that harness is past this element: the queue of the sink,
+  the busy limits of `PiFi.Output.APlayPort` and the pipe into the fake card. A file
+  with pages of a second still lands a second of audio at a time, because the program
+  can't answer half a page.
+
+  **The cost is speed.** A decode into a sink that never waits now runs at 10 to 20
+  times the speed of the audio rather than hundreds of times, which is still far more than a sound card
+  takes. The first audio arrived 30 to 90 ms after the start, and 250 ms after it for
+  the file with a 4 MB picture, which is the eleven quiet periods. A skip of FLAC
+  builds a new decoder, so it pays the 30 to 90 ms.
+
+  **A slow program looks quiet.** A program that goes `@quiet_ms` without an answer
+  while it still has input gets the next request early, and that request doubles.
+  Neither program came near that on the host. On the board it would take a decode of
+  one FLAC frame or one Vorbis page that lasts 20 ms.
+
+  **Rejected:**
+
+  - A cap on the bytes written since the last answer. The program keeps answering for
+    earlier input, so the count starts again while new input piles up behind it. As a
+    fixed number it also stopped 24-bit FLAC and Vorbis before their header, and
+    `flac` inside a picture.
+  - The ratio alone, with no quiet timer. A ratio taken from the same totals that it
+    checks always says that nothing is outstanding. And a program that holds half a
+    page waits for more input while this element waits for its audio, so the two stop.
+  - Reading how far the program has read from `/proc/<pid>/io`. That needs a kernel
+    option that this Nerves system may not have, and it can't see the program's own
+    buffer either.
 
   ## The end of a track, and the half close that Erlang doesn't have
 
@@ -178,8 +249,13 @@ defmodule PiFi.Player.PortDecoder do
   # How much decoded audio this element keeps before it stops feeding the program.
   @held_ms 250
 
-  # How many compressed bytes one demand of the input asks for.
+  # How many compressed bytes the first request asks for, before the program has
+  # answered enough to give a ratio. A request that gets no answer doubles it.
   @input_bytes 4096
+
+  # How long the program must go without a write or an answer before this element
+  # takes it to be waiting for input. See "What the program hasn't answered yet".
+  @quiet_ms 20
 
   def_input_pad(:input, accepted_format: _any, flow_control: :manual, demand_unit: :bytes)
 
@@ -195,6 +271,11 @@ defmodule PiFi.Player.PortDecoder do
             input: :file.io_device() | nil,
             held: binary(),
             format: RawAudio.t() | nil,
+            busy: reference() | nil,
+            stalls: non_neg_integer(),
+            asked?: boolean(),
+            written: non_neg_integer(),
+            answered: non_neg_integer(),
             ending?: boolean(),
             ended?: boolean()
           }
@@ -205,7 +286,12 @@ defmodule PiFi.Player.PortDecoder do
       :port,
       :input,
       :format,
+      :busy,
       held: <<>>,
+      stalls: 0,
+      asked?: false,
+      written: 0,
+      answered: 0,
       ending?: false,
       ended?: false
     ]
@@ -218,8 +304,7 @@ defmodule PiFi.Player.PortDecoder do
 
   @impl true
   def handle_playing(_ctx, %State{} = state) do
-    state = open(state)
-    {feeding(state), state}
+    state |> open() |> feeding()
   end
 
   # The format of the input says nothing about the samples, and the default
@@ -234,7 +319,8 @@ defmodule PiFi.Player.PortDecoder do
     # `{:error, :epipe}` means that the program has exited, and its `exit_status`
     # ends the stream.
     _written = :file.write(input, buffer.payload)
-    {feeding(state), state}
+    written = counted(state, state.written, buffer.payload)
+    {[], busy(%State{state | written: written, asked?: false})}
   end
 
   @impl true
@@ -245,16 +331,24 @@ defmodule PiFi.Player.PortDecoder do
     {payloads, state} = take(state, size)
     {ending, state} = finishing(state)
 
-    {buffers(payloads) ++ ending ++ feeding(state), state}
+    {feeding, state} = feeding(state)
+
+    {buffers(payloads) ++ ending ++ feeding, state}
   end
 
   # The samples of the program arrive here. The header comes first, and the audio
   # after it.
   @impl true
   def handle_info({port, {:data, bytes}}, _ctx, %State{port: port} = state) do
+    answered = counted(state, state.answered, bytes)
     {actions, state} = read(state.held <> bytes, state)
+    {actions ++ [redemand: :output], busy(%State{state | answered: answered, stalls: 0})}
+  end
 
-    {actions ++ [redemand: :output] ++ feeding(state), state}
+  # The program has neither read nor answered for `@quiet_ms`, so it waits for input.
+  @impl true
+  def handle_info({:timeout, busy, :quiet}, _ctx, %State{busy: busy} = state) do
+    feeding(%State{state | busy: nil})
   end
 
   @impl true
@@ -296,7 +390,8 @@ defmodule PiFi.Player.PortDecoder do
             "#{format.sample_format}"
         )
 
-        {[stream_format: {:output, format}], %State{state | format: format, held: audio}}
+        {[stream_format: {:output, format}, demand: {:input, 0}],
+         %State{state | format: format, held: audio, asked?: false}}
 
       :more ->
         {[], %State{state | held: bytes}}
@@ -356,21 +451,63 @@ defmodule PiFi.Player.PortDecoder do
   defp finishing(%State{} = state), do: {[], state}
 
   # Asked after anything that could change what the program needs: a write, an
-  # answer, and a buffer that left. Asking only after an answer would stall a program
-  # that needs more input before it can answer at all, such as `flac` reading a large
-  # picture in the metadata.
-  defp feeding(%State{ending?: true}), do: []
-  defp feeding(%State{port: nil}), do: []
+  # answer, the program going quiet, and a buffer that left.
+  defp feeding(%State{ending?: true} = state), do: {[], state}
+  defp feeding(%State{port: nil} = state), do: {[], state}
+  defp feeding(%State{asked?: true} = state), do: {[], state}
+  defp feeding(%State{busy: busy} = state) when busy != nil, do: {[], state}
 
   defp feeding(%State{} = state) do
-    if full?(state), do: [], else: [demand: {:input, @input_bytes}]
+    case wanted(state) do
+      0 ->
+        {[], state}
+
+      bytes ->
+        demand = bytes * Integer.pow(2, state.stalls)
+        {[demand: {:input, demand}], %State{state | stalls: state.stalls + 1, asked?: true}}
+    end
   end
 
-  defp full?(%State{format: nil}), do: false
+  defp wanted(%State{format: nil}), do: @input_bytes
 
-  defp full?(%State{} = state) do
-    byte_size(state.held) >=
-      RawAudio.time_to_bytes(Membrane.Time.milliseconds(@held_ms), state.format)
+  defp wanted(%State{} = state) do
+    case missing(state) do
+      0 -> 0
+      audio -> input_for(audio, state)
+    end
+  end
+
+  # How much audio this element lacks of `@held_ms`, and at least one buffer, so that
+  # the program is never asked for a few bytes.
+  defp missing(%State{} = state) do
+    held_bytes = RawAudio.time_to_bytes(Membrane.Time.milliseconds(@held_ms), state.format)
+
+    case held_bytes - byte_size(state.held) do
+      missing when missing > 0 -> max(missing, buffer_bytes(state.format))
+      _enough -> 0
+    end
+  end
+
+  # The compressed bytes that give `audio` bytes of samples, at the ratio that the
+  # program has answered so far.
+  defp input_for(_audio, %State{answered: 0}), do: @input_bytes
+  defp input_for(_audio, %State{written: 0}), do: @input_bytes
+  defp input_for(audio, %State{} = state), do: div(audio * state.written, state.answered) + 1
+
+  # Bytes count from the header on. The bytes before it carry the metadata, and a
+  # FLAC picture of 4 MB there would make the ratio worthless.
+  defp counted(%State{format: nil}, count, _bytes), do: count
+  defp counted(%State{}, count, bytes), do: count + byte_size(bytes)
+
+  # A write or an answer means the program may still be at work, so the quiet timer
+  # starts again.
+  defp busy(%State{busy: nil} = state) do
+    %State{state | busy: :erlang.start_timer(@quiet_ms, self(), :quiet)}
+  end
+
+  defp busy(%State{busy: busy} = state) do
+    _left = :erlang.cancel_timer(busy)
+    busy(%State{state | busy: nil})
   end
 
   defp buffer_bytes(format),
