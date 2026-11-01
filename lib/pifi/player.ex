@@ -42,7 +42,8 @@ defmodule PiFi.Player do
   ## The controls
 
   A pause stops the pipeline and it keeps the track selected and the place in it, so a
-  play starts the pipeline again at that place. Standby does the same. A song keeps no
+  play starts the pipeline again at that place. Standby does the same, and so do a
+  change of output and the start that follows a stream that failed. A song keeps no
   place in its row, so the place that the player holds is the only one it has. A live
   stream, and a track that the server converts, open again at the start of what the
   server sends.
@@ -59,7 +60,7 @@ defmodule PiFi.Player do
 
   A live stream ends when the network fails, and a person expects the music to
   come back. The player therefore starts the stream again after a short wait, and
-  it stops after a few tries.
+  it stops after a few tries. A track that failed goes on from where it stopped.
 
   ## What this measures
 
@@ -389,7 +390,7 @@ defmodule PiFi.Player do
   Choose an output device.
 
   The choice stays after a restart. The player starts the stream again, so a
-  person hears the change at once.
+  person hears the change at once, and a track goes on from where it was.
   """
   @spec select_output(String.t()) :: :ok | {:error, term()}
   def select_output(id),
@@ -988,7 +989,7 @@ defmodule PiFi.Player do
 
   defp heard(:restart, %State{source: source, item: item} = state)
        when source != nil and item != nil do
-    case start(source, item, state) do
+    case start(source, item, state, :held_place) do
       {:ok, state} -> {:noreply, state}
       {:error, _reason, state} -> {:noreply, state}
     end
@@ -1064,7 +1065,8 @@ defmodule PiFi.Player do
   # at 0 and a play after a pause started it again from the top. An episode keeps one,
   # but the item in this state was read when the track began, so its place is the one
   # from before this listen. The place held here is the one a pause just wrote, so the
-  # row and the player agree.
+  # row and the player agree. A change of output and the start after a failure rebuild
+  # the pipeline of the same track, so they come here too, after `held/1`.
   #
   # The place goes only onto the file that it was measured in, and only where
   # `PiFi.Player.FileSource` can start part way through. A live stream has no place to
@@ -1347,7 +1349,7 @@ defmodule PiFi.Player do
   defp restart_for_output(%State{} = state) do
     store_position(state)
 
-    case start(state.source, state.item, state) do
+    case start(state.source, state.item, held(state), :held_place) do
       {:ok, state} -> state
       {:error, _reason, state} -> state
     end
@@ -1481,9 +1483,34 @@ defmodule PiFi.Player do
   # and the restarts that follow crash the same way — a board spent all five in ten
   # seconds and cleared the track. So the output is looked at before anything is tried
   # again, and a device that has gone pauses rather than counting against the stream.
+  #
+  # The place is written and then held before either answer. A pipeline that died
+  # reaches this with `started_at` still set, and a clock that ran on through the wait
+  # put the next start, and the count of a paused track, ahead of where the sound
+  # stopped.
   defp restart(%State{} = state) do
+    store_position(state)
+    state = state |> unheard() |> held()
+
     if output_gone?(state), do: paused_for_output(state), else: try_again(state)
   end
+
+  # **The time stops where the sound stopped.** `position_ms/1` counts from `started_at`
+  # against the clock, so a state that clears `started_at` without this falls back to
+  # where the pipeline began, and one that keeps it counts on through a wait.
+  defp held(%State{} = state) do
+    %State{state | offset_ms: position_ms(state), started_at: nil}
+  end
+
+  # **A pipeline that failed before it made a sound read bytes that nobody heard.**
+  # `PiFi.Player.FileSource` reports the byte it read, and it reads ahead of the sound,
+  # so each start that failed in a row moved the held byte on while the time stood
+  # still. The byte goes back to the one the pipeline opened at.
+  defp unheard(%State{started_at: nil, playable: %{position_bytes: bytes}} = state) do
+    %State{state | position_bytes: bytes}
+  end
+
+  defp unheard(%State{} = state), do: state
 
   defp output_gone?(%State{}) do
     case chosen_device() do
@@ -1493,7 +1520,6 @@ defmodule PiFi.Player do
   end
 
   defp paused_for_output(%State{} = state) do
-    store_position(state)
     Event.publish(:player, %Events.Paused{position_ms: position_ms(state)})
 
     %State{
@@ -1501,20 +1527,17 @@ defmodule PiFi.Player do
       | paused?: true,
         output_lost?: true,
         restarts: 0,
-        stream_title: nil,
-        offset_ms: position_ms(state)
+        stream_title: nil
     }
   end
 
   defp try_again(%State{restarts: restarts} = state) when restarts >= @max_restarts do
-    store_position(state)
     Logger.error("The stream failed #{restarts} times. Giving up.")
     Event.publish(:player, %Events.Failed{reason: :too_many_restarts})
     %State{stop_pipeline(state) | restarts: 0, source: nil, item: nil}
   end
 
   defp try_again(%State{} = state) do
-    store_position(state)
     state = stop_pipeline(state)
     Event.publish(:player, %Events.Buffering{percent: 0})
 

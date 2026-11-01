@@ -38,6 +38,9 @@ defmodule PiFi.Test.PlayingPipeline do
 
   The player then holds a pipeline that died, and it starts the stream again after a
   short wait. `fails(false)` gives a pipeline that plays.
+
+  It reports a byte 64 KB past the one it opened at before it dies, because
+  `PiFi.Player.FileSource` reads ahead of the sound and a start that failed did too.
   """
   @spec fails(boolean()) :: :ok
   def fails(fails?), do: Application.put_env(:pifi, :playing_pipeline_fails, fails?)
@@ -63,6 +66,9 @@ defmodule PiFi.Test.PlayingPipeline do
       # then reads a start that failed. A lost stream is not that: the pipeline plays,
       # and it dies after. This one therefore dies from its own message.
       Process.send_after(self(), :die, 50)
+
+      read_ahead = (options.playable[:position_bytes] || 0) + 64 * 1024
+      send(options.parent, {:pipeline_position_bytes, self(), read_ahead})
 
       {[], %{parent: options.parent, byte: 0}}
     else

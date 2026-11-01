@@ -59,9 +59,9 @@ defmodule PiFi.PlayerControlsTest do
          container: option(:container, :none),
          format: option(:format, :mp3),
          live?: option(:live?, false),
-         position_ms: 0,
+         position_ms: option(:position_ms, 0),
          key: item.source_ref,
-         position_bytes: 0
+         position_bytes: option(:position_bytes, 0)
        }}
     end
 
@@ -111,7 +111,7 @@ defmodule PiFi.PlayerControlsTest do
 
       Playback.clear_queue!()
 
-      for key <- ["last_item", "standby"] do
+      for key <- ["last_item", "output_device", "standby"] do
         case PiFi.Settings.fetch(key) do
           {:ok, setting} -> PiFi.Settings.delete!(setting)
           {:error, _reason} -> :ok
@@ -442,6 +442,124 @@ defmodule PiFi.PlayerControlsTest do
 
       assert_receive %Events.Started{track: %{title: "Episode 2"}, position_ms: 0}, 2000
       assert %{position_bytes: 0} = :sys.get_state(Player).playable
+    end
+  end
+
+  # A change of output and the start after a failure build the pipeline of the same
+  # track again, so a song goes on from the place that the player holds, as a play
+  # after a pause does. Each of these started a song from the top.
+  describe "a pipeline built again for the same track" do
+    test "a change of output goes on from the held place" do
+      Episodes.holds(keeps_place?: false)
+      playing(1)
+      at_30_seconds()
+
+      assert :ok = Player.select_output(SilentOutput.device!().id)
+
+      assert_receive %Events.Started{position_ms: position}, 2000
+      assert position >= 30_000
+      assert %{position_bytes: 30_000, position_ms: ^position} = :sys.get_state(Player).playable
+      assert Player.state().position_ms >= 30_000
+    end
+
+    # **The count stops while the player waits to try again.** The pipeline that died
+    # left `started_at` behind, so the count ran on through the wait and a page read a
+    # track that still played.
+    test "the start after a failure goes on from the held place" do
+      Episodes.holds(keeps_place?: false)
+      playing(1)
+      at_30_seconds()
+
+      died()
+      restarts(1)
+
+      assert %{playing?: false, position_ms: held} = Player.state()
+      assert held >= 30_000
+      Process.sleep(200)
+      assert Player.state().position_ms == held
+
+      assert_receive %Events.Started{position_ms: ^held}, 4000
+      assert %{position_bytes: 30_000, position_ms: ^held} = :sys.get_state(Player).playable
+    end
+
+    test "a live stream starts again where the source says" do
+      Episodes.holds(live?: true, keeps_place?: false)
+      playing(1)
+      read_to_byte(30_000)
+
+      died()
+
+      assert_receive %Events.Started{position_ms: 0}, 4000
+      assert %{position_bytes: 0, position_ms: 0} = :sys.get_state(Player).playable
+    end
+
+    # Each start that fails reads ahead before it dies, and none of it was heard. See
+    # `PiFi.Test.PlayingPipeline.fails/1`.
+    test "starts that fail in a row don't move the place" do
+      Episodes.holds(keeps_place?: false)
+      playing(1)
+      at_30_seconds()
+
+      PlayingPipeline.fails(true)
+      died()
+      restarts(1)
+      held = Player.state().position_ms
+
+      restarts(2)
+      PlayingPipeline.fails(false)
+
+      assert_receive %Events.Started{position_ms: ^held}, 4000
+      assert %{position_bytes: 30_000, position_ms: ^held} = :sys.get_state(Player).playable
+    end
+
+    test "a track that failed before it made a sound starts where its source says" do
+      Episodes.holds(keeps_place?: false, position_ms: 30_000, position_bytes: 30_000)
+      PlayingPipeline.fails(true)
+      assert {:ok, :ok} = Playback.play([hd(Episodes.episodes()).id])
+
+      restarts(2)
+      PlayingPipeline.fails(false)
+
+      assert_receive %Events.Started{position_ms: 30_000}, 4000
+      assert %{position_bytes: 30_000, position_ms: 30_000} = :sys.get_state(Player).playable
+    end
+
+    # A headset that goes takes the sink with it, so the pipeline dies before
+    # `PiFi.Player.outputs_changed/0` says anything. The count of the paused track ran on
+    # from there, and the headset that came back started the song ahead of where it
+    # stopped.
+    test "a track whose output died with its pipeline holds its place until the output is back" do
+      Episodes.holds(keeps_place?: false)
+      assert :ok = Player.select_output(SilentOutput.device!().id)
+      playing(1)
+      at_30_seconds()
+
+      SilentOutput.vanish()
+      died()
+
+      assert_receive %Events.Paused{position_ms: held}, 2000
+      assert held >= 30_000
+      Process.sleep(200)
+      assert %{paused?: true, position_ms: ^held} = Player.state()
+
+      SilentOutput.appear()
+      Player.outputs_changed()
+
+      assert_receive %Events.Started{position_ms: ^held}, 2000
+      assert %{position_bytes: 30_000} = :sys.get_state(Player).playable
+    end
+  end
+
+  # The way a stream that the network dropped ends: the pipeline stops by itself.
+  defp died do
+    send(:sys.get_state(Player).pipeline, :die)
+  end
+
+  defp restarts(count, attempts \\ 200) do
+    cond do
+      :sys.get_state(Player).restarts == count -> :ok
+      attempts == 0 -> flunk("The player never reached #{count} restarts.")
+      true -> Process.sleep(25) && restarts(count, attempts - 1)
     end
   end
 
