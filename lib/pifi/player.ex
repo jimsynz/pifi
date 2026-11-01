@@ -637,16 +637,17 @@ defmodule PiFi.Player do
   # `position_ms/1` then counts from the offset alone. A page that opens while the
   # device is paused therefore reads the place that a person stopped at.
   defp answered({:pause, true}, _from, %State{} = state) do
-    store_position(state)
+    position = position_ms(state)
+    store_position(state, position)
     silence(state)
-    Event.publish(:player, %Events.Paused{position_ms: position_ms(state)})
+    Event.publish(:player, %Events.Paused{position_ms: position})
 
     {:reply, :ok,
      handing_over(%State{
        state
        | paused?: true,
          stream_title: nil,
-         offset_ms: position_ms(state)
+         offset_ms: position
      }), {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
@@ -692,7 +693,8 @@ defmodule PiFi.Player do
 
   # `offset_ms` keeps the place, for the reason the pause clause gives.
   defp answered({:standby, true}, _from, %State{} = state) do
-    store_position(state)
+    position = position_ms(state)
+    store_position(state, position)
     silence(state)
     Settings.put(@standby_key, "true")
     Event.publish(:player, %Events.Standby{entered?: true})
@@ -702,7 +704,7 @@ defmodule PiFi.Player do
        state
        | standby?: true,
          stream_title: nil,
-         offset_ms: position_ms(state)
+         offset_ms: position
      }), {:continue, {:terminate, state.pipeline, state.monitor}}}
   end
 
@@ -828,9 +830,10 @@ defmodule PiFi.Player do
   # The same steps the pause clause takes, and for the same reason: `offset_ms` keeps
   # the place, because the terminate clears `started_at`.
   defp lost(%State{} = state) do
-    store_position(state)
+    position = position_ms(state)
+    store_position(state, position)
     silence(state)
-    Event.publish(:player, %Events.Paused{position_ms: position_ms(state)})
+    Event.publish(:player, %Events.Paused{position_ms: position})
 
     # **The failure budget belongs to the stream and not to the headset.** A sink whose
     # device vanished crashes, and the restarts that follow spend every attempt before
@@ -843,7 +846,7 @@ defmodule PiFi.Player do
          output_lost?: true,
          restarts: 0,
          stream_title: nil,
-         offset_ms: position_ms(state)
+         offset_ms: position
      }, {:terminate, state.pipeline, state.monitor}}
   end
 
@@ -1703,14 +1706,16 @@ defmodule PiFi.Player do
 
   defp release_file(%State{}), do: :ok
 
-  defp store_position(%State{started_at: nil}), do: :ok
-  defp store_position(%State{item: nil}), do: :ok
+  defp store_position(state), do: store_position(state, position_ms(state))
 
-  defp store_position(%State{item: item} = state) do
-    Playback.store_position(item, %{
-      position_ms: position_ms(state),
-      position_bytes: state.position_bytes
-    })
+  # **A clause that silences the pipeline reads the place once, before the silence.**
+  # `silence/1` waits for the pipeline, and a second read of the clock after it gave the
+  # row one place and the player another: 9 ms apart on a slow build server.
+  defp store_position(%State{started_at: nil}, _position), do: :ok
+  defp store_position(%State{item: nil}, _position), do: :ok
+
+  defp store_position(%State{item: item} = state, position) do
+    Playback.store_position(item, %{position_ms: position, position_bytes: state.position_bytes})
 
     :ok
   end

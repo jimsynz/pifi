@@ -390,10 +390,9 @@ defmodule PiFi.PlayerControlsTest do
 
       assert :ok = Player.pause(false)
 
-      # The pause reads the clock once for the row and once for the player, so the two
-      # can straddle a millisecond.
-      assert_receive %Events.Started{position_ms: position}, 2000
-      assert_in_delta position, stored, 5
+      # The pause reads the clock once, before it waits for the pipeline to go quiet, so
+      # the row and the player hold the same place to the millisecond.
+      assert_receive %Events.Started{position_ms: ^stored}, 2000
       assert %{position_bytes: 30_000} = :sys.get_state(Player).playable
     end
 
