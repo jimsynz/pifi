@@ -14,9 +14,9 @@ defmodule PiFi.Output.APlayPort do
   of a track went with the program that was going to play it.
 
   This process owns the port instead, and it outlives every pipeline. A sink asks for
-  the program that it needs, writes the samples to what it gets, and stops writing at
-  the end of a track. The card stays open, the queue plays out, and the next pipeline
-  writes to the same port.
+  the program that it needs, hands its samples to `write/2`, and stops at the end of a
+  track. The card stays open, the queue plays out, and the next pipeline writes to the
+  same port.
 
   ## The arguments are the name of the sound
 
@@ -36,9 +36,38 @@ defmodule PiFi.Output.APlayPort do
   Membrane can add and remove children while a pipeline runs, and that would put the
   skip, the resume, the prefetch and the restart of every playable into one graph. The
   port needs none of that. **A process that does not own a port may write to it**, and
-  the busy limits below still suspend whoever writes, so the pacing of the pipeline is
-  unchanged and every other part of the player stays as it is. A measurement on
-  2026-09-07 confirmed both.
+  the busy limits below still suspend whoever writes. A measurement on 2026-09-07
+  confirmed both.
+
+  ## One writer for each port, and nobody waits on it
+
+  **The write blocks, and that is the pacing.** `aplay` reads at the rate of the clock
+  of the DAC, the busy limits below suspend whoever writes once the queue of the port is
+  full, and that is what holds the whole pipeline to the speed of the card.
+
+  The sink used to make that write itself, so it spent most of its life suspended in
+  `Port.command/2`. It couldn't read `:silence` until every buffer ahead of it in its
+  mailbox had played at the speed of the card: 0.3 to 0.4 s for MP3 on the host, 1.6 to
+  2 s for FLAC, and up to five seconds for a high-bitrate FLAC on the device.
+
+  So each port gets one writer process, linked to this one, and that process makes
+  every write and nothing else. This process opens the port, kills `aplay`, keeps the
+  crossfade, and never makes a blocking `Port.command/2`, so `close/0` is answered at
+  once. `write/2` and `blend/2` return a request at once, and the answer arrives as a
+  message when the writer has written the bytes. The sink asks Membrane for its next
+  buffer when the answer arrives, so the pipeline still moves at the speed of the card
+  and the sink's mailbox stays free. The lead over the sound is the busy limits plus the
+  one buffer that each sink has in flight, as it was.
+
+  **Nothing else writes to the port**, not even the bytes that `abandon/2` flushes or
+  the leftovers at the end of a fade. One writer reading one mailbox is what keeps the
+  bytes in the order they were sent. A task for each write would lose that.
+
+  The answers wait in `pending`, one entry for each write the writer holds, in order.
+  `close/0`, a change of format and a program that dies all end the writer with the
+  port, so whatever it held is dropped with the program, and every waiting sink gets
+  `:closed`. An answer from a writer that has since been replaced names a pid that this
+  no longer holds, so it changes nothing.
 
   ## The crossfade
 
@@ -48,25 +77,20 @@ defmodule PiFi.Output.APlayPort do
 
   `PiFi.Player` calls `fade/1` with the length, tells the sink of the track that is
   ending that it is `:outgoing`, and starts the pipeline of the next track with its
-  sink told `:incoming`. Each sink then calls `blend/2` in the place of writing to the
-  port itself, and this pairs the two buffers, calls `PiFi.Output.Mixer.mix/4` on the
-  frames that both sides have, and writes the answer.
+  sink told `:incoming`. Each sink then calls `blend/2` in the place of `write/2`, and
+  this pairs the two buffers, calls `PiFi.Output.Mixer.mix/4` on the frames that both
+  sides have, and hands the sum to the writer.
 
-  **A caller waits until its bytes are used**, which is what keeps the two pipelines in
-  step: a decoder that runs ahead of the other one blocks in `blend/2` until the slower
-  side catches up, and the pair then blocks on the busy limits of the port in the way
-  that a single stream always did.
+  **A side is answered when its bytes are written**, which is what keeps the two
+  pipelines in step: a decoder that runs ahead of the other one gets no answer, and so
+  asks for no more, until the slower side catches up. The pair then waits on the busy
+  limits of the port in the way that a single stream always did.
 
   A fade ends in one of two ways. It runs to its length, and then the outgoing sink
   becomes a null sink and the incoming one goes back to writing to the port directly.
   Or something makes it impossible, and this abandons it: the sound is then what it
   would have been with no crossfade at all, which is one track stopping and the next
   starting. `abandon/2` is every one of those reasons in one place.
-
-  **A stop can wait longer during a fade.** `Port.command/2` blocks the caller when the
-  queue of the port is full, and during a fade that caller is this process, so
-  `close/0` waits behind it. The busy limits below bound that at about four tenths of a
-  second of audio.
 
   ## What still ends the sound at once
 
@@ -99,6 +123,16 @@ defmodule PiFi.Output.APlayPort do
   Which side of a crossfade a sink is on. `:outgoing` is the track that is ending.
   """
   @type role :: :outgoing | :incoming
+
+  @typedoc """
+  A write or a blend in flight. Pass each message the caller receives to `answer/2`.
+  """
+  @type request :: :gen_server.request_id()
+
+  @typedoc """
+  What a write or a blend comes to. See `blend/2`.
+  """
+  @type answer :: :ok | :finished | :cancelled | :closed
 
   @doc "Start the holder of the port."
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -166,19 +200,45 @@ defmodule PiFi.Output.APlayPort do
   def fading(role, format), do: GenServer.call(__MODULE__, {:fading, role, format})
 
   @doc """
-  Give one buffer to the fade, and wait until it is used.
+  Hand samples to the writer of `port`, and return without waiting.
 
-  It returns `:finished` when the fade ran to its length. The incoming sink then writes
-  to the port directly again, and the outgoing one is at no volume at all, so it becomes
-  a null sink. `:cancelled` means the fade was abandoned before it got there, and then
-  **both sides go back to writing to the port as they were**: a fade that gave up must
-  not silence a track that is still playing. `:closed` means the program went.
-
-  **The wait is the point.** Two pipelines decode at the speed of their own source, and
-  the one that runs ahead has to stop until the other one has the frames to pair with.
+  The answer is `:ok` once the writer has written them, which is the moment a sink may
+  ask for its next buffer. It's `:closed` when `port` is no longer the one this keeps,
+  because a stop, a change of format or a dead program ended it.
   """
-  @spec blend(role(), binary()) :: :ok | :finished | :cancelled | :closed
-  def blend(role, payload), do: GenServer.call(__MODULE__, {:blend, role, payload}, :infinity)
+  @spec write(port(), binary()) :: request()
+  def write(port, payload), do: :gen_server.send_request(__MODULE__, {:write, port, payload})
+
+  @doc """
+  Give one buffer to the fade, and return without waiting.
+
+  The answer is `:ok` when the buffer is used and written. `:finished` means the fade
+  ran to its length. The incoming sink then goes back to `write/2`, and the outgoing one
+  is at no volume at all, so it becomes a null sink. `:cancelled` means the fade was
+  abandoned before it got there, and then **both sides go back to `write/2` as they
+  were**: a fade that gave up must not silence a track that is still playing. `:closed`
+  means the program went.
+
+  **The late answer is the point.** Two pipelines decode at the speed of their own
+  source, and the one that runs ahead has to stop until the other one has the frames to
+  pair with.
+  """
+  @spec blend(role(), binary()) :: request()
+  def blend(role, payload), do: :gen_server.send_request(__MODULE__, {:blend, role, payload})
+
+  @doc """
+  The answer to `request`, if `message` holds it.
+
+  A holder that died has nothing to write to, so that reads as `:closed`.
+  """
+  @spec answer(term(), request()) :: {:ok, answer()} | :no_reply
+  def answer(message, request) do
+    case :gen_server.check_response(message, request) do
+      {:reply, answer} -> {:ok, answer}
+      :no_reply -> :no_reply
+      {:error, {_reason, _server}} -> {:ok, :closed}
+    end
+  end
 
   @doc """
   Note that the stream of one side of the fade ended.
@@ -198,10 +258,13 @@ defmodule PiFi.Output.APlayPort do
   the start of the next one. **This process is the one that sees both**, because a
   pipeline holds the sink of one track alone and the program outlives every pipeline.
 
-  It is a cast, so the sink writes samples and never waits for this.
+  It is a cast, so the sink never waits for this. **The time is the moment the writer
+  has written what the sink handed it before this**, and not the moment of the cast: the
+  last buffer of a FLAC track can be a third of a second of sound, and the gap would
+  count that as silence.
   """
   @spec wrote_last() :: :ok
-  def wrote_last, do: GenServer.cast(__MODULE__, {:wrote_last, System.monotonic_time()})
+  def wrote_last, do: GenServer.cast(__MODULE__, :wrote_last)
 
   @doc """
   Note that a sink wrote the first samples of a track.
@@ -215,7 +278,7 @@ defmodule PiFi.Output.APlayPort do
   what a person asked for.
   """
   @spec wrote_first() :: :ok
-  def wrote_first, do: GenServer.cast(__MODULE__, {:wrote_first, System.monotonic_time()})
+  def wrote_first, do: GenServer.cast(__MODULE__, :wrote_first)
 
   @doc false
   @impl GenServer
@@ -227,6 +290,8 @@ defmodule PiFi.Output.APlayPort do
      %{
        port: nil,
        key: nil,
+       writer: nil,
+       pending: :queue.new(),
        last_at: nil,
        fade: nil,
        last_fade: nil,
@@ -256,6 +321,12 @@ defmodule PiFi.Output.APlayPort do
 
   def handle_call(:held, _from, state), do: {:reply, state.key, state}
 
+  def handle_call({:write, port, payload}, from, %{port: port} = state) when is_port(port) do
+    {:noreply, written(state, payload, [{from, :ok}])}
+  end
+
+  def handle_call({:write, _port, _payload}, _from, state), do: {:reply, :closed, state}
+
   def handle_call({:fade, _milliseconds}, _from, %{port: nil} = state) do
     {:reply, {:error, :no_port}, state}
   end
@@ -264,7 +335,7 @@ defmodule PiFi.Output.APlayPort do
     deadline = make_ref()
 
     # Nothing else notices a fade that both sides stopped calling, and a sink that waits
-    # in `blend/2` for a side that never registers would wait for ever.
+    # on `blend/2` for a side that never registers would wait for ever.
     Process.send_after(self(), {:fade_deadline, deadline}, milliseconds * 2 + 1_000)
 
     fade = %{
@@ -274,8 +345,8 @@ defmodule PiFi.Output.APlayPort do
       frame_size: nil,
       total: nil,
       done: 0,
-      outgoing: %{from: nil, bytes: <<>>, ended?: false},
-      incoming: %{from: nil, bytes: <<>>}
+      outgoing: %{waiting: [], bytes: <<>>, ended?: false},
+      incoming: %{waiting: [], bytes: <<>>}
     }
 
     {:reply, :ok, %{abandon(state, "another one started") | fade: fade, last_fade: nil}}
@@ -324,13 +395,21 @@ defmodule PiFi.Output.APlayPort do
     {:reply, :finished, state}
   end
 
-  def handle_call({:blend, _role, payload}, _from, %{fade: nil} = state) do
-    {:reply, reply_for(command(state.port, payload), state.last_fade), state}
+  def handle_call({:blend, _role, _payload}, _from, %{fade: nil, port: nil} = state) do
+    {:reply, :closed, state}
   end
 
+  def handle_call({:blend, _role, payload}, from, %{fade: nil} = state) do
+    {:noreply, written(state, payload, [{from, after_fade(state.last_fade)}])}
+  end
+
+  # **A side can have two buffers in flight**: the end of its stream hands over the
+  # padded part of a frame without waiting for the answer to the buffer before it.
   def handle_call({:blend, role, payload}, from, %{fade: fade} = state) do
     side = Map.fetch!(fade, role)
-    fade = Map.put(fade, role, %{side | from: from, bytes: side.bytes <> payload})
+
+    fade =
+      Map.put(fade, role, %{side | waiting: side.waiting ++ [from], bytes: side.bytes <> payload})
 
     {:noreply, pair(%{state | fade: fade})}
   end
@@ -341,26 +420,29 @@ defmodule PiFi.Output.APlayPort do
     {:reply, :ok, abandon(state, "the next track ended inside it")}
   end
 
+  # The bytes that the outgoing side still holds are the last of its track, so they stay
+  # and the silence starts after them.
   def handle_call({:fade_ended, :outgoing}, _from, %{fade: fade} = state) do
-    reply_to(fade.outgoing, :finished)
-
-    fade = %{fade | outgoing: %{from: nil, bytes: <<>>, ended?: true}}
+    state = settled(state, answers(fade.outgoing, :finished))
+    fade = %{fade | outgoing: %{fade.outgoing | waiting: [], ended?: true}}
 
     {:reply, :ok, pair(%{state | fade: fade})}
   end
 
   @doc false
   @impl GenServer
-  def handle_cast({:wrote_last, at}, state), do: {:noreply, %{state | last_at: at}}
+  def handle_cast(:wrote_last, state), do: {:noreply, settled(state, [:last])}
 
   # A first write with no last one before it is a person who pressed play, and that
   # wait is what `[:pifi, :player, :sound]` already holds.
-  def handle_cast({:wrote_first, _at}, %{last_at: nil} = state), do: {:noreply, state}
+  def handle_cast(:wrote_first, %{last_at: nil} = state), do: {:noreply, state}
 
-  def handle_cast({:wrote_first, at}, %{last_at: last_at} = state) do
+  # Both ends of the gap are read on this clock, because the last one is the moment the
+  # writer answers and not the moment a sink asked.
+  def handle_cast(:wrote_first, %{last_at: last_at} = state) do
     :telemetry.execute(
       [:pifi, :player, :gap],
-      %{duration: at - last_at},
+      %{duration: System.monotonic_time() - last_at},
       %{device: state.key}
     )
 
@@ -377,10 +459,26 @@ defmodule PiFi.Output.APlayPort do
 
   @doc false
   @impl GenServer
+  def handle_info({:written, writer, :ok}, %{writer: writer} = state) do
+    {{:value, effects}, pending} = :queue.out(state.pending)
+
+    {:noreply, applied(%{state | pending: pending}, effects, :ok)}
+  end
+
+  def handle_info({:written, writer, :closed}, %{writer: writer} = state) do
+    {:noreply, ended(abandon(state, "the program stopped"))}
+  end
+
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.warning("aplay stopped with status #{status}.")
 
-    {:noreply, %{abandon(state, "the program stopped") | port: nil, key: nil}}
+    {:noreply, gone(abandon(state, "the program stopped"))}
+  end
+
+  def handle_info({:EXIT, writer, reason}, %{writer: writer} = state) do
+    Logger.warning("The writer of aplay stopped: #{inspect(reason)}")
+
+    {:noreply, ended(abandon(state, "the writer stopped"))}
   end
 
   def handle_info({:fade_deadline, deadline}, %{fade: %{deadline: deadline}} = state) do
@@ -411,17 +509,82 @@ defmodule PiFi.Output.APlayPort do
             args: arguments
           ])
 
-        {:reply, {:ok, port}, %{state | port: port, key: {program, arguments}}}
+        holder = self()
+        writer = spawn_link(fn -> write_each(holder, port) end)
+
+        {:reply, {:ok, port}, %{state | port: port, key: {program, arguments}, writer: writer}}
     end
+  end
+
+  # **The writer is the one process that may block on the port**, so it holds nothing
+  # but the port and does nothing but write. See the moduledoc.
+  defp write_each(holder, port) do
+    receive do
+      {:write, payload} ->
+        send(holder, {:written, self(), command(port, payload)})
+        write_each(holder, port)
+    end
+  end
+
+  # Bytes go to the writer, and `effects` take place once it has written them. No bytes
+  # means nothing new to wait for, so the effects wait for whatever the writer already
+  # holds.
+  defp written(state, <<>>, effects), do: settled(state, effects)
+
+  defp written(%{writer: writer, pending: pending} = state, payload, effects) do
+    send(writer, {:write, payload})
+
+    %{state | pending: :queue.in(effects, pending)}
+  end
+
+  defp settled(state, []), do: state
+
+  defp settled(%{pending: pending} = state, effects) do
+    case :queue.out_r(pending) do
+      {:empty, _pending} -> applied(state, effects, :ok)
+      {{:value, last}, rest} -> %{state | pending: :queue.in(last ++ effects, rest)}
+    end
+  end
+
+  # An effect is an answer for a caller, or `:last`, which notes the end of a track for
+  # `wrote_first/0`. A port that went answers every caller with `:closed`, and a track
+  # whose last bytes never reached the card ended in a stop and not a gap.
+  defp applied(state, effects, result) do
+    Enum.reduce(effects, state, fn
+      {from, answer}, state ->
+        GenServer.reply(from, if(result == :closed, do: :closed, else: answer))
+        state
+
+      :last, state when result == :ok ->
+        %{state | last_at: System.monotonic_time()}
+
+      :last, state ->
+        state
+    end)
   end
 
   defp ended(%{port: nil} = state), do: %{state | last_at: nil}
 
   defp ended(%{port: port} = state) do
+    state = gone(state)
+
     stop_program(port)
     close_port(port)
 
-    %{state | port: nil, key: nil, last_at: nil}
+    %{state | last_at: nil}
+  end
+
+  # **What the writer holds goes with the program.** Killing it drops the bytes in its
+  # mailbox, and the program that would have played them is gone in any case.
+  defp gone(%{writer: writer, pending: pending} = state) do
+    if writer do
+      Process.unlink(writer)
+      Process.exit(writer, :kill)
+    end
+
+    applied(state, pending |> :queue.to_list() |> List.flatten(), :closed)
+
+    %{state | port: nil, key: nil, writer: nil, pending: :queue.new()}
   end
 
   # **Everything that makes a fade impossible ends here**, so there is one description
@@ -436,12 +599,9 @@ defmodule PiFi.Output.APlayPort do
   defp abandon(%{fade: fade} = state, reason) do
     Logger.info("The crossfade stopped, because #{reason}.")
 
-    _result = command(state.port, fade.incoming.bytes)
+    answers = answers(fade.outgoing, :cancelled) ++ answers(fade.incoming, :cancelled)
 
-    reply_to(fade.outgoing, :cancelled)
-    reply_to(fade.incoming, :cancelled)
-
-    %{state | fade: nil, last_fade: :cancelled}
+    %{written(state, fade.incoming.bytes, answers) | fade: nil, last_fade: :cancelled}
   end
 
   # The gain of the outgoing track walks from 1.0 at the first frame of the fade to 0.0
@@ -472,25 +632,21 @@ defmodule PiFi.Output.APlayPort do
     frames = div(count, fade.frame_size)
     mixed = Mixer.mix(outgoing, incoming, fade.format, gains(fade, frames))
 
-    case command(state.port, mixed) do
-      :closed ->
-        abandon(state, "the program stopped")
+    fade = %{
+      fade
+      | done: fade.done + frames,
+        outgoing: %{fade.outgoing | bytes: outgoing_rest},
+        incoming: %{fade.incoming | bytes: incoming_rest}
+    }
 
-      :ok ->
-        fade = %{
-          fade
-          | done: fade.done + frames,
-            outgoing: %{fade.outgoing | bytes: outgoing_rest},
-            incoming: %{fade.incoming | bytes: incoming_rest}
-        }
-
-        advanced(state, fade)
-    end
+    advanced(written(state, mixed, []), fade)
   end
 
   # A track that ended gives silence for the rest of the ramp, and 0 is silence for
   # every format that `PiFi.Output.Mixer` sums.
-  defp chunk(%{ended?: true}, count), do: {:binary.copy(<<0>>, count), <<>>}
+  defp chunk(%{ended?: true, bytes: bytes}, count) when byte_size(bytes) < count do
+    {bytes <> :binary.copy(<<0>>, count - byte_size(bytes)), <<>>}
+  end
 
   defp chunk(%{bytes: bytes}, count) do
     <<taken::binary-size(^count), rest::binary>> = bytes
@@ -501,38 +657,27 @@ defmodule PiFi.Output.APlayPort do
   defp advanced(state, %{done: done, total: total} = fade) when done >= total do
     # Whatever the incoming side has left is past the end of the ramp, so it plays as
     # itself.
-    _result = command(state.port, fade.incoming.bytes)
+    answers = answers(fade.outgoing, :finished) ++ answers(fade.incoming, :finished)
 
-    reply_to(fade.outgoing, :finished)
-    reply_to(fade.incoming, :finished)
-
-    %{state | fade: nil, last_fade: :finished}
+    %{written(state, fade.incoming.bytes, answers) | fade: nil, last_fade: :finished}
   end
 
   defp advanced(state, fade) do
-    fade =
-      fade
-      |> settle(:outgoing)
-      |> settle(:incoming)
+    {fade, answers} =
+      Enum.reduce([:outgoing, :incoming], {fade, []}, fn role, {fade, answers} ->
+        {side, used} = used(Map.fetch!(fade, role))
+        {Map.put(fade, role, side), answers ++ used}
+      end)
 
-    %{state | fade: fade}
+    %{settled(state, answers) | fade: fade}
   end
 
-  # A side whose buffer is used up may decode the next one. A side that still holds
-  # bytes waits, which is what keeps the two pipelines together.
-  defp settle(fade, role) do
-    case Map.fetch!(fade, role) do
-      %{bytes: <<>>, from: from} = side when from != nil ->
-        GenServer.reply(from, :ok)
-        Map.put(fade, role, %{side | from: nil})
+  # A side whose buffers are used up may decode the next one, once the sum is written. A
+  # side that still holds bytes waits, which is what keeps the two pipelines together.
+  defp used(%{bytes: <<>>} = side), do: {%{side | waiting: []}, answers(side, :ok)}
+  defp used(side), do: {side, []}
 
-      _other ->
-        fade
-    end
-  end
-
-  defp reply_to(%{from: nil}, _answer), do: :ok
-  defp reply_to(%{from: from}, answer), do: GenServer.reply(from, answer)
+  defp answers(%{waiting: waiting}, answer), do: Enum.map(waiting, &{&1, answer})
 
   defp gains(%{done: done, total: total}, frames) do
     {gain(done, total), gain(done + frames - 1, total)}
@@ -541,12 +686,8 @@ defmodule PiFi.Output.APlayPort do
   defp gain(index, total) when index >= total, do: 0.0
   defp gain(index, total), do: 1.0 - index / total
 
-  defp reply_for(:closed, _last_fade), do: :closed
-  defp reply_for(:ok, :cancelled), do: :cancelled
-  defp reply_for(:ok, _last_fade), do: :finished
-
-  defp command(nil, _payload), do: :closed
-  defp command(_port, <<>>), do: :ok
+  defp after_fade(:cancelled), do: :cancelled
+  defp after_fade(_last_fade), do: :finished
 
   defp command(port, payload) do
     Port.command(port, payload)

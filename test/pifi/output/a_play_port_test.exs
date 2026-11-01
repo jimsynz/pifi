@@ -154,6 +154,61 @@ defmodule PiFi.Output.APlayPortTest do
     end
   end
 
+  # **The write blocks, and nobody waits on it.** The writer of the port is the one
+  # process that sits in `Port.command/2` while the card catches up, so a sink and this
+  # holder stay free to read a stop.
+  describe "the writer" do
+    test "a write is answered once the writer has written it", %{scratch: scratch} do
+      path = Path.join(scratch, "writer_#{System.unique_integer([:positive])}")
+      {:ok, port} = APlayPort.hold("sh", ["-c", "cat -u > #{path}"])
+
+      assert written(port, "some samples") == :ok
+      assert eventually(fn -> File.read(path) == {:ok, "some samples"} end)
+    end
+
+    # `sleep` reads nothing, so the pipe fills, the queue of the port passes the busy
+    # limits, and the second write suspends the writer for as long as the program runs.
+    # **It has to be `exec`.** A shell that forks `sleep` dies of the kill and leaves
+    # `sleep` holding the pipe open, and the port then waits for ever to flush.
+    test "a stop doesn't wait for a writer that the card holds up" do
+      {:ok, port} = APlayPort.hold("sh", ["-c", "exec sleep 30"])
+      samples = :binary.copy(<<0>>, 512 * 1024)
+
+      assert written(port, samples) == :ok
+
+      held_up = APlayPort.write(port, samples)
+      # `wait_response/2`, because `receive_response/2` abandons a request that times out.
+      assert :gen_server.wait_response(held_up, 200) == :timeout
+
+      {microseconds, :ok} = :timer.tc(&APlayPort.close/0)
+
+      assert microseconds < 500_000
+      assert :gen_server.receive_response(held_up, 1_000) == {:reply, :closed}
+
+      # A port that still holds bytes for a program that's been killed closes once the
+      # write to it fails, a moment later. The kill is what makes the room quiet.
+      assert eventually(fn -> Port.info(port) == nil end)
+    end
+
+    # A sink of a pipeline that's going can still hand over a buffer for the program
+    # that a stop or a change of format ended. It must not reach the new one.
+    test "a write for a port that's gone is answered closed", %{scratch: scratch} do
+      path = Path.join(scratch, "replaced_#{System.unique_integer([:positive])}")
+      {:ok, old} = APlayPort.hold("sh", ["-c", "cat -u > #{path}", "--rate=44100"])
+      {:ok, _new} = APlayPort.hold("sh", ["-c", "cat -u > #{path}", "--rate=24000"])
+
+      assert written(old, "samples for the old program") == :closed
+      refute_eventually(fn -> File.read(path) == {:ok, "samples for the old program"} end)
+    end
+
+    test "a write after a stop is answered closed" do
+      {:ok, port} = APlayPort.hold("cat", [])
+      :ok = APlayPort.close()
+
+      assert written(port, "samples that nobody hears") == :closed
+    end
+  end
+
   # **The silence between one track of an album and the next is the number that #159 is
   # about**, and nothing measured it. ALSA holds about half a second when the last
   # samples of a track arrive, so a gap that is shorter than that queue is one that no
@@ -227,8 +282,8 @@ defmodule PiFi.Output.APlayPortTest do
       :ok = APlayPort.fading(:outgoing, format())
       :ok = APlayPort.fading(:incoming, format())
 
-      outgoing = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
-      incoming = Task.async(fn -> APlayPort.blend(:incoming, samples(0, 8)) end)
+      outgoing = Task.async(fn -> blended(:outgoing, samples(1000, 8)) end)
+      incoming = Task.async(fn -> blended(:incoming, samples(0, 8)) end)
 
       assert Task.await(outgoing) == :finished
       assert Task.await(incoming) == :finished
@@ -243,8 +298,8 @@ defmodule PiFi.Output.APlayPortTest do
       :ok = APlayPort.fading(:outgoing, format())
       :ok = APlayPort.fading(:incoming, format())
 
-      outgoing = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
-      incoming = Task.async(fn -> APlayPort.blend(:incoming, samples(-1000, 8)) end)
+      outgoing = Task.async(fn -> blended(:outgoing, samples(1000, 8)) end)
+      incoming = Task.async(fn -> blended(:incoming, samples(-1000, 8)) end)
 
       Task.await(outgoing)
       Task.await(incoming)
@@ -258,6 +313,36 @@ defmodule PiFi.Output.APlayPortTest do
       assert values == Enum.sort(values, :desc)
     end
 
+    # **One writer takes every byte, so they reach the card in the order they were
+    # sent.** The track that is ending writes on its own, the fade sums the two, the
+    # incoming track's bytes past the end of the ramp follow as themselves, and then the
+    # incoming track writes on its own. None of the requests waits for the one before.
+    test "the bytes before, during and after a fade reach the card in order", %{path: path} do
+      {:ok, port} = APlayPort.hold("sh", ["-c", "cat -u > #{path}"])
+
+      before = APlayPort.write(port, samples(7, 2))
+
+      :ok = APlayPort.fade(8)
+      :ok = APlayPort.fading(:outgoing, format())
+      :ok = APlayPort.fading(:incoming, format())
+
+      outgoing = APlayPort.blend(:outgoing, samples(1000, 8))
+      incoming = APlayPort.blend(:incoming, samples(-1000, 8) <> samples(5, 2))
+
+      assert answer(before) == :ok
+      assert answer(outgoing) == :finished
+      assert answer(incoming) == :finished
+      assert written(port, samples(9, 2)) == :ok
+
+      assert eventually(fn -> byte_size(read(path)) == 56 end)
+
+      <<first::binary-size(8), mixed::binary-size(32), last::binary>> = read(path)
+
+      assert first == samples(7, 2)
+      assert mixed != samples(1000, 8)
+      assert last == samples(5, 2) <> samples(9, 2)
+    end
+
     # **This is the pacing.** Two pipelines decode at the speed of their own source, and
     # the one that runs ahead has to stop until the other has frames to pair with.
     test "a side that runs ahead waits for the other one" do
@@ -265,11 +350,11 @@ defmodule PiFi.Output.APlayPortTest do
       :ok = APlayPort.fading(:outgoing, format())
       :ok = APlayPort.fading(:incoming, format())
 
-      ahead = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+      ahead = Task.async(fn -> blended(:outgoing, samples(1000, 8)) end)
 
       refute Task.yield(ahead, 200)
 
-      behind = Task.async(fn -> APlayPort.blend(:incoming, samples(0, 8)) end)
+      behind = Task.async(fn -> blended(:incoming, samples(0, 8)) end)
 
       assert Task.await(ahead) == :ok
       assert Task.await(behind) == :ok
@@ -284,7 +369,7 @@ defmodule PiFi.Output.APlayPortTest do
 
       :ok = APlayPort.fade_ended(:outgoing)
 
-      assert APlayPort.blend(:incoming, samples(1000, 8)) == :finished
+      assert blended(:incoming, samples(1000, 8)) == :finished
     end
 
     test "an incoming track that ends inside the fade abandons it" do
@@ -294,7 +379,7 @@ defmodule PiFi.Output.APlayPortTest do
 
       :ok = APlayPort.fade_ended(:incoming)
 
-      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :cancelled
+      assert blended(:outgoing, samples(1000, 8)) == :cancelled
     end
 
     # A person who presses next asked for the track after this one, and finishing a
@@ -304,7 +389,7 @@ defmodule PiFi.Output.APlayPortTest do
       :ok = APlayPort.fading(:outgoing, format())
       :ok = APlayPort.fading(:incoming, format())
 
-      waiting = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+      waiting = Task.async(fn -> blended(:outgoing, samples(1000, 8)) end)
 
       refute Task.yield(waiting, 100)
 
@@ -320,7 +405,7 @@ defmodule PiFi.Output.APlayPortTest do
       assert {:error, :unsupported_format} =
                APlayPort.fading(:outgoing, format(sample_format: :u8))
 
-      assert APlayPort.blend(:incoming, samples(0, 8)) == :cancelled
+      assert blended(:incoming, samples(0, 8)) == :cancelled
     end
 
     test "two tracks of different shapes abandon it" do
@@ -330,7 +415,7 @@ defmodule PiFi.Output.APlayPortTest do
       assert {:error, :format_changed} =
                APlayPort.fading(:incoming, format(sample_rate: 2_000, sample_format: :s24le))
 
-      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :cancelled
+      assert blended(:outgoing, samples(1000, 8)) == :cancelled
     end
 
     # A new program means a new card, and the fade has nothing left to write to.
@@ -341,7 +426,7 @@ defmodule PiFi.Output.APlayPortTest do
 
       {:ok, _other} = APlayPort.hold("cat", [])
 
-      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :cancelled
+      assert blended(:outgoing, samples(1000, 8)) == :cancelled
     end
 
     test "a stop abandons it" do
@@ -351,7 +436,7 @@ defmodule PiFi.Output.APlayPortTest do
 
       assert :ok = APlayPort.close()
 
-      assert APlayPort.blend(:outgoing, samples(1000, 8)) == :closed
+      assert blended(:outgoing, samples(1000, 8)) == :closed
     end
 
     # Nothing else notices a fade that both sides stopped calling, and a sink that
@@ -360,7 +445,7 @@ defmodule PiFi.Output.APlayPortTest do
       :ok = APlayPort.fade(60)
       :ok = APlayPort.fading(:outgoing, format())
 
-      waiting = Task.async(fn -> APlayPort.blend(:outgoing, samples(1000, 8)) end)
+      waiting = Task.async(fn -> blended(:outgoing, samples(1000, 8)) end)
 
       assert Task.await(waiting, 5_000) == :cancelled
     end
@@ -375,7 +460,7 @@ defmodule PiFi.Output.APlayPortTest do
 
       :ok = APlayPort.cancel_fade()
 
-      assert APlayPort.blend(:outgoing, samples(1000, 4)) == :cancelled
+      assert blended(:outgoing, samples(1000, 4)) == :cancelled
       assert eventually(fn -> byte_size(read(path)) == 16 end)
     end
 
@@ -394,6 +479,15 @@ defmodule PiFi.Output.APlayPortTest do
     }
   end
 
+  # `blend/2` and `write/2` return a request, and these wait for the answer to it.
+  defp blended(role, payload), do: answer(APlayPort.blend(role, payload))
+  defp written(port, payload), do: answer(APlayPort.write(port, payload))
+
+  defp answer(request) do
+    {:reply, answer} = :gen_server.receive_response(request, 5_000)
+    answer
+  end
+
   # `frames` frames of stereo 16-bit audio, every sample the same value.
   defp samples(value, frames) do
     :binary.copy(<<value::little-signed-16, value::little-signed-16>>, frames)
@@ -410,6 +504,11 @@ defmodule PiFi.Output.APlayPortTest do
   # `cat` and it says nothing. 2 seconds was enough on an idle machine and not under the
   # load that `mix check` puts on one, where a subprocess waits to be scheduled before
   # it writes a byte. Only a test that is going to fail pays the longer wait.
+  defp refute_eventually(check) do
+    Process.sleep(200)
+    refute check.()
+  end
+
   defp eventually(check, attempts \\ 500)
 
   defp eventually(_check, 0), do: false

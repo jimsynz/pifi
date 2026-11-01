@@ -31,12 +31,10 @@ defmodule PiFi.Player.Pipeline do
   alias PiFi.Player.HttpSource
   alias PiFi.Player.PortDecoder
 
-  # How many decoded buffers may wait at the sink. Membrane gives 400 by default,
-  # and a buffer of MP3 samples is about 50 ms, so the default lets 20 seconds of
-  # samples pile up in front of `aplay`. The sink writes to a port and the write
-  # blocks, so the sink cannot read its own mailbox while it waits, and a request
-  # to stop waits behind all of those samples. A person then presses stop and
-  # hears several more seconds of music.
+  # How many decoded buffers may wait at the sink. The sink's input uses manual demand,
+  # and Membrane keeps 100 buffers in front of such a pad by default. A buffer of MP3
+  # samples is about 50 ms, so that's five seconds of samples ahead of `aplay`, and a
+  # resume would land that far past the place that a person heard.
   #
   # Eight buffers is under half a second. ALSA keeps another half second, and the
   # decoder runs much faster than the sound, so the sound stays smooth.
@@ -70,7 +68,7 @@ defmodule PiFi.Player.Pipeline do
       |> demuxer(playable.container)
       |> adapter(playable)
       |> decoder(playable)
-      |> via_in(:input, auto_demand_size: @sink_queue_buffers)
+      |> via_in(:input, target_queue_size: @sink_queue_buffers)
       |> child(:sink, options.sink)
 
     {[spec: spec], %{parent: options.parent}}
