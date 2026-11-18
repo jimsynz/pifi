@@ -92,7 +92,7 @@ defmodule PiFi.MixProject do
 
   defp deps do
     [
-      {:nbpr, "~> 0.3"},
+      {:nbpr, "~> 0.6"},
       {:nbpr_flac, "~> 1.5", organization: "nbpr", targets: @all_targets},
       {:nbpr_vorbis_tools, "~> 1.4", organization: "nbpr", targets: @all_targets},
       {:nbpr_libvips, "~> 8.18", organization: "nbpr", targets: @all_targets},
