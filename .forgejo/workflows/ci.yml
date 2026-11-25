@@ -14,7 +14,5 @@ jobs:
     with:
       targets: "pifi_rpi0_2"
       assets_deploy_enabled: true
-      hex_organization: "nbpr"
-      hex_organization_key: "15da04a2330d881e1301a73c5d39f591"
       nbpr_source_build: true
     secrets: inherit
