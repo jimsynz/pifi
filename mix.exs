@@ -107,7 +107,7 @@ defmodule PiFi.MixProject do
       {:ash_sqlite, "~> 0.2"},
       {:ash_storage,
        github: "ash-project/ash_storage",
-       ref: "97ed1b1ba60d74d3c1799f256a1051040f83f1a6",
+       ref: "cc79b159f86a651637062d63cd201c101d34e295",
        override: true},
       {:ash_state_machine, "~> 0.3"},
       {:bandit, "~> 1.5"},
